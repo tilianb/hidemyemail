@@ -1,0 +1,24 @@
+{
+  "planPath": "docs/superpowers/plans/2026-05-24-hidemyemail-alias-service.md",
+  "tasks": [
+    { "id": 0, "subject": "Task 0: Project scaffold", "status": "pending", "blockedBy": [], "description": "Buildable Worker project with D1 + Vitest. Files: worker/{package.json,wrangler.jsonc,vitest.config.ts,tsconfig.json,src/index.ts,src/types.ts}. Verify: cd worker && npx vitest run && npx wrangler deploy --dry-run" },
+    { "id": 1, "subject": "Task 1: D1 schema + migration/test infra", "status": "pending", "blockedBy": [0], "description": "migrations/0001_init.sql, test/apply-migrations.ts, test/helpers.ts (resetDb), test/schema.test.ts. Verify: npx vitest run test/schema.test.ts" },
+    { "id": 2, "subject": "Task 2: D1 query layer", "status": "pending", "blockedBy": [1], "description": "src/db/queries.ts + test/queries.test.ts. auto-create idempotent, reverse upsert stable, countEventsSince, ownerDestinations." },
+    { "id": 3, "subject": "Task 3: Glob matcher + block rules", "status": "pending", "blockedBy": [0], "description": "src/lib/glob.ts, src/lib/blocks.ts + test/blocks.test.ts." },
+    { "id": 4, "subject": "Task 4: MIME header surgery", "status": "pending", "blockedBy": [0], "description": "src/lib/bytes.ts, src/lib/mime.ts + test/mime.test.ts. Byte-safe header edit, base64." },
+    { "id": 5, "subject": "Task 5: SES client", "status": "pending", "blockedBy": [0], "description": "src/lib/ses.ts + test/ses.test.ts. SES v2 SendRawEmail via aws4fetch (service=ses), transient/permanent errors." },
+    { "id": 6, "subject": "Task 6: Reverse-alias logic + config", "status": "pending", "blockedBy": [2], "description": "src/config.ts, src/lib/reverse.ts + test/reverse.test.ts. 120-bit token, get-or-create stable." },
+    { "id": 7, "subject": "Task 7: Auth (PBKDF2 + session HMAC)", "status": "pending", "blockedBy": [0], "description": "src/lib/auth.ts + test/auth.test.ts. verifyPassword, signSession/verifySession, hashPassword." },
+    { "id": 8, "subject": "Task 8: Inbound flow", "status": "pending", "blockedBy": [2, 3, 4, 5, 6], "description": "src/email/inbound.ts + test/inbound.test.ts. Flow 5.1: guards + From rewrite + SES re-inject." },
+    { "id": 9, "subject": "Task 9: Reply flow", "status": "pending", "blockedBy": [2, 4, 5, 6], "description": "src/email/reply.ts + test/reply.test.ts. Flow 5.2: owner verify, send as alias, leak scrub." },
+    { "id": 10, "subject": "Task 10: Email router + handler wiring", "status": "pending", "blockedBy": [8, 9], "description": "src/email/router.ts + test/router.test.ts, wire index.ts email()." },
+    { "id": 11, "subject": "Task 11: Hono app + session middleware + auth routes", "status": "pending", "blockedBy": [7], "description": "src/api/app.ts, src/api/routes/auth.ts + test/api-auth.test.ts." },
+    { "id": 12, "subject": "Task 12: Domains + aliases API routes", "status": "pending", "blockedBy": [11, 2], "description": "src/api/routes/{domains,aliases}.ts + test/api-aliases.test.ts, mount after guard." },
+    { "id": 13, "subject": "Task 13: Blocks + stats API routes", "status": "pending", "blockedBy": [12], "description": "src/api/routes/{blocks,stats}.ts + test/api-stats.test.ts, remove placeholder /api/stats." },
+    { "id": 14, "subject": "Task 14: SES SNS webhook + fetch wiring", "status": "pending", "blockedBy": [13, 10], "description": "src/api/routes/ses-webhook.ts + test/ses-webhook.test.ts, wire index.ts fetch()." },
+    { "id": 15, "subject": "Task 15: Dashboard scaffold + API client + auth", "status": "pending", "blockedBy": [14], "description": "dashboard/ Vite React app, api client, auth context, login, stub pages. Verify: npm run build." },
+    { "id": 16, "subject": "Task 16: Dashboard pages", "status": "pending", "blockedBy": [15], "description": "dashboard/src/pages/{Aliases,Blocks,Stats}.tsx. Verify: npm run build." },
+    { "id": 17, "subject": "Task 17: Deploy, DNS, secrets, README", "status": "pending", "blockedBy": [14, 16], "description": "docs/DEPLOY.md, worker/scripts/hash-password.mjs, README.md." }
+  ],
+  "lastUpdated": "2026-05-24T13:25:00Z"
+}
