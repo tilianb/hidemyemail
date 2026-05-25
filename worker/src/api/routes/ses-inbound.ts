@@ -10,6 +10,12 @@ export function sesInboundRoutes() {
     const body = await c.req.json<any>().catch(() => null);
     if (!body) return c.json({ error: "bad body" }, 400);
 
+    // Secure webhook verification via secret token query parameter
+    const secret = c.req.query("secret");
+    if (c.env.SNS_SECRET && secret !== c.env.SNS_SECRET) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+
     // Guard: only accept the configured inbound SNS topic
     if (c.env.SNS_INBOUND_TOPIC_ARN && body.TopicArn !== c.env.SNS_INBOUND_TOPIC_ARN) {
       return c.json({ error: "forbidden topic" }, 403);
@@ -17,7 +23,12 @@ export function sesInboundRoutes() {
 
     // SNS subscription handshake — log URL for manual confirmation
     if (body.Type === "SubscriptionConfirmation") {
-      console.log("SNS inbound SubscribeURL:", body.SubscribeURL);
+      const subscribeUrl = body.SubscribeURL;
+      if (typeof subscribeUrl !== "string" || !/^https:\/\/sns\.[a-z0-9-]+\.amazonaws\.com\//i.test(subscribeUrl)) {
+        return c.json({ error: "invalid subscribe url" }, 400);
+      }
+      console.log("SNS inbound SubscribeURL:", subscribeUrl);
+      await fetch(subscribeUrl).catch(console.error);
       return c.json({ ok: true });
     }
 
