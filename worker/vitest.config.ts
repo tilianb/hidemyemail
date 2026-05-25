@@ -2,16 +2,18 @@ import path from "node:path";
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-workers";
 import { defineConfig } from "vitest/config";
 
-export default defineConfig(async () => {
-  // Read all migrations so a setup file can apply them per test environment.
-  const migrations = await readD1Migrations(path.join(__dirname, "migrations"));
-  return {
-    plugins: [
-      cloudflareTest({
+export default defineConfig({
+  plugins: [
+    // Async lives INSIDE cloudflareTest so the plugin registers synchronously and
+    // the Workers pool actually activates (wrapping defineConfig in async breaks this).
+    cloudflareTest(async () => {
+      const migrations = await readD1Migrations(path.join(__dirname, "migrations"));
+      return {
         wrangler: { configPath: "./wrangler.jsonc" },
+        // test-only binding so a setup file can apply migrations
         miniflare: { bindings: { TEST_MIGRATIONS: migrations } },
-      }),
-    ],
-    test: { setupFiles: ["./test/apply-migrations.ts"], passWithNoTests: true },
-  };
+      };
+    }),
+  ],
+  test: { setupFiles: ["./test/apply-migrations.ts"], passWithNoTests: true },
 });
