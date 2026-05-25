@@ -18,8 +18,46 @@ const NAV = [
 ];
 
 export function App() {
-  const { authed, setAuthed } = useAuth();
+  const { authed, setAuthed, loading } = useAuth();
   const [tab, setTab] = useState<Tab>("domains");
+
+  if (loading) {
+    return (
+      <div style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        minHeight: "100dvh",
+        background: "#0a0a0f",
+        color: "#f3f4f6",
+        fontFamily: "Outfit, Inter, system-ui, sans-serif"
+      }}>
+        <div style={{
+          fontSize: "24px",
+          fontWeight: 700,
+          marginBottom: "20px",
+          letterSpacing: "-0.03em"
+        }}>
+          hide<span style={{ padding: "2px 6px", margin: "0 2px", background: "rgba(239, 68, 68, 0.15)", color: "#f87171", borderRadius: "4px" }}>my</span>email
+        </div>
+        <div style={{
+          width: "24px",
+          height: "24px",
+          border: "2px solid rgba(248, 113, 113, 0.1)",
+          borderTop: "2px solid #f87171",
+          borderRadius: "50%",
+          animation: "spin 1s linear infinite"
+        }} />
+        <style dangerouslySetInnerHTML={{__html: `
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `}} />
+      </div>
+    );
+  }
 
   if (!authed) return <Login />;
 
