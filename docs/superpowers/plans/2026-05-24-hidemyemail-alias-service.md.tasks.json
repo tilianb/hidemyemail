@@ -18,7 +18,7 @@
     { "id": 14, "subject": "Task 14: SES SNS webhook + fetch wiring", "status": "completed", "blockedBy": [13, 10], "description": "src/api/routes/ses-webhook.ts + test/ses-webhook.test.ts, wire index.ts fetch()." },
     { "id": 15, "subject": "Task 15: Dashboard scaffold + API client + auth", "status": "completed", "blockedBy": [14], "description": "dashboard/ Vite React app, api client, auth context, login, stub pages. Verify: npm run build." },
     { "id": 16, "subject": "Task 16: Dashboard pages", "status": "completed", "blockedBy": [15], "description": "dashboard/src/pages/{Aliases,Blocks,Stats}.tsx. Verify: npm run build." },
-    { "id": 17, "subject": "Task 17: Deploy, DNS, secrets, README", "status": "in_progress", "blockedBy": [14, 16], "description": "docs/DEPLOY.md, worker/scripts/hash-password.mjs, README.md." }
+    { "id": 17, "subject": "Task 17: Deploy, DNS, secrets, README", "status": "completed", "blockedBy": [14, 16], "description": "docs/DEPLOY.md, worker/scripts/hash-password.mjs, README.md." }
   ],
   "lastUpdated": "2026-05-24T13:25:00Z"
 }
