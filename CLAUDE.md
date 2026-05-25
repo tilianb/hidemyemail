@@ -40,6 +40,16 @@ or the Workers pool never activates).
 ## Open items to verify before prod (spec §10)
 CF throw→tempfail retry behavior · 25 MB inbound vs base64-inflated SES 40 MB ceiling · SES sending quota vs catch-all volume · multi-zone catch-all all reach one Worker · SNS signature verification (only TopicArn gate implemented so far).
 
+⚠️ **Reverse-alias relay gate — REVIEW BEFORE PROD.** Reverse addresses are now addy-style
+`alias+local=domain@D` (self-describing, no random token → **guessable**). The only thing
+stopping an open relay is `handleReply`'s gate: envelope sender ∈ owner destinations **AND**
+SES SPF/DMARC verdict = PASS (threaded from receipt → `routeEmail` → `handleReply`, fails
+closed). Before prod, confirm: (a) your real mailbox domain actually emits SPF/DMARC PASS so
+legit replies aren't silently dropped; (b) `mail.source` (envelope, what SPF validates) is
+what `ownerDestinations` checks against — not a header From; (c) decide whether losing the
+120-bit token is an acceptable trade vs the readable format. To revert to unguessable tokens,
+see commit 48d14ba. Reply auth tests: `worker/test/reply.test.ts`, `worker/test/ses-inbound.test.ts`.
+
 ## Env / ops
 - Domain `hidemyemail.dev` (app at `app.hidemyemail.dev`). SES production account already approved.
 - Commits must be **signed** via 1Password SSH agent. When the agent is already unlocked, signing works directly from a non-interactive tool shell — no GUI prompt (verified 2026-05-25). Only when the agent is locked does it fall back to the desktop GUI prompt; in that case run signing in an interactive shell (`!`-prefixed or your terminal). Always pass the agent socket:
