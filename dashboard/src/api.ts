@@ -1,7 +1,18 @@
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { ...init, credentials: "include", headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } });
   if (res.status === 401) throw new Error("unauthorized");
-  if (!res.ok) throw new Error(`${res.status}`);
+  if (!res.ok) {
+    let msg = `${res.status}`;
+    try {
+      const errBody = await res.json();
+      if (errBody && typeof errBody === "object" && "error" in errBody && typeof errBody.error === "string") {
+        msg = errBody.error;
+      }
+    } catch {
+      // Ignore JSON parse errors for non-JSON error responses
+    }
+    throw new Error(msg);
+  }
   return res.json() as Promise<T>;
 }
 export const api = {
