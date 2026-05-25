@@ -26,6 +26,10 @@ export async function hashPassword(password: string): Promise<{ saltHex: string;
   return { saltHex: toHex(salt.buffer), hashHex: await pbkdf2(password, salt) };
 }
 
+export async function derivePassphraseHash(passphrase: string, globalSaltHex: string): Promise<string> {
+  return await pbkdf2(passphrase, fromHex(globalSaltHex));
+}
+
 export async function verifyPassword(password: string, saltHex: string, hashHex: string): Promise<boolean> {
   const computed = await pbkdf2(password, fromHex(saltHex));
   return timingSafeEqual(computed, hashHex);
@@ -36,18 +40,31 @@ async function hmac(secret: string, data: string): Promise<string> {
   return toHex(await crypto.subtle.sign("HMAC", key, enc.encode(data)));
 }
 
-export async function signSession(secret: string, ttlSeconds: number): Promise<string> {
+export async function signSession(secret: string, userId: number, ttlSeconds: number): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
-  const payload = `v1.${exp}`;
+  const payload = `v2.${userId}.${exp}`;
   return `${payload}.${await hmac(secret, payload)}`;
 }
 
-export async function verifySession(secret: string, token: string): Promise<boolean> {
+export async function verifySession(secret: string, token: string): Promise<number | null> {
   const parts = token.split(".");
-  if (parts.length !== 3) return false;
-  const [v, expStr, sig] = parts;
-  const payload = `${v}.${expStr}`;
-  const expected = await hmac(secret, payload);
-  if (!timingSafeEqual(sig!, expected)) return false;
-  return Number(expStr) > Math.floor(Date.now() / 1000);
+  if (parts.length === 3) {
+    const [v, expStr, sig] = parts;
+    if (v !== "v1") return null;
+    const payload = `${v}.${expStr}`;
+    const expected = await hmac(secret, payload);
+    if (!timingSafeEqual(sig!, expected)) return null;
+    if (Number(expStr) > Math.floor(Date.now() / 1000)) return 1;
+    return null;
+  }
+  if (parts.length === 4) {
+    const [v, userIdStr, expStr, sig] = parts;
+    if (v !== "v2") return null;
+    const payload = `${v}.${userIdStr}.${expStr}`;
+    const expected = await hmac(secret, payload);
+    if (!timingSafeEqual(sig!, expected)) return null;
+    if (Number(expStr) > Math.floor(Date.now() / 1000)) return Number(userIdStr);
+    return null;
+  }
+  return null;
 }

@@ -70,7 +70,8 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  login: (password: string) => req<{ ok: true }>("/api/login", { method: "POST", body: JSON.stringify({ password }) }),
+  login: (password: string) => req<{ ok: true, userId: number }>("/api/login", { method: "POST", body: JSON.stringify({ password }) }),
+  register: (password: string) => req<{ ok: true, userId: number }>("/api/register", { method: "POST", body: JSON.stringify({ password }) }),
   logout: () => req<{ ok: true }>("/api/logout", { method: "POST" }),
   stats: () => req<StatsData>("/api/stats"),
   domains: () => req<Domain[]>("/api/domains"),
