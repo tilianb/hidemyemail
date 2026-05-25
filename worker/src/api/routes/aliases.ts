@@ -43,6 +43,8 @@ export function aliasRoutes() {
   r.delete("/aliases/:id", async (c) => {
     const id = Number(c.req.param("id"));
     await c.env.DB.prepare("DELETE FROM reverse_map WHERE alias_id=?").bind(id).run();
+    await c.env.DB.prepare("DELETE FROM blocks WHERE alias_id=?").bind(id).run();
+    await c.env.DB.prepare("DELETE FROM events WHERE alias_id=?").bind(id).run();
     await c.env.DB.prepare("DELETE FROM aliases WHERE id=?").bind(id).run();
     return c.json({ ok: true });
   });
