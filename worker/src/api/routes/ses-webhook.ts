@@ -8,15 +8,33 @@ export function sesWebhookRoutes() {
   r.post("/ses/notification", async (c) => {
     const body = await c.req.json<any>().catch(() => null);
     if (!body) return c.json({ error: "bad body" }, 400);
+
+    // Secure webhook verification via secret token query parameter
+    const secret = c.req.query("secret");
+    if (c.env.SNS_SECRET && secret !== c.env.SNS_SECRET) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+
     if (c.env.SNS_ALLOWED_TOPIC_ARN && body.TopicArn !== c.env.SNS_ALLOWED_TOPIC_ARN) {
       return c.json({ error: "forbidden topic" }, 403);
     }
+
     if (body.Type === "SubscriptionConfirmation") {
-      console.log("SNS SubscribeURL:", body.SubscribeURL);
+      const subscribeUrl = body.SubscribeURL;
+      if (typeof subscribeUrl !== "string" || !/^https:\/\/sns\.[a-z0-9-]+\.amazonaws\.com\//i.test(subscribeUrl)) {
+        return c.json({ error: "invalid subscribe url" }, 400);
+      }
+      console.log("SNS SubscribeURL:", subscribeUrl);
       return c.json({ ok: true });
     }
+
     if (body.Type === "Notification") {
-      const msg = JSON.parse(body.Message);
+      let msg: any;
+      try {
+        msg = JSON.parse(body.Message);
+      } catch {
+        return c.json({ error: "invalid Message JSON" }, 400);
+      }
       const kind = msg.notificationType ?? msg.eventType ?? "unknown";
       await c.env.DB.prepare("INSERT INTO events (alias_id, type, detail, ts) VALUES (NULL, 'error', ?, ?)")
         .bind(`ses:${kind}`, Date.now()).run();

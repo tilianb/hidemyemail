@@ -1,11 +1,26 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useMemo, type ReactNode } from "react";
 import { api } from "./api";
 
-const Ctx = createContext<{ authed: boolean; setAuthed: (v: boolean) => void }>({ authed: false, setAuthed: () => {} });
+const Ctx = createContext<{ authed: boolean; setAuthed: (v: boolean) => void; loading: boolean }>({
+  authed: false,
+  setAuthed: () => {},
+  loading: true,
+});
+
 export const useAuth = () => useContext(Ctx);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [authed, setAuthed] = useState(false);
-  useEffect(() => { api.stats().then(() => setAuthed(true)).catch(() => setAuthed(false)); }, []);
-  return <Ctx.Provider value={{ authed, setAuthed }}>{children}</Ctx.Provider>;
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.stats()
+      .then(() => setAuthed(true))
+      .catch(() => setAuthed(false))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const value = useMemo(() => ({ authed, setAuthed, loading }), [authed, loading]);
+
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

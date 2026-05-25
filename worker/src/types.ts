@@ -9,6 +9,7 @@ export interface Env {
   SNS_ALLOWED_TOPIC_ARN?: string;
   SNS_INBOUND_TOPIC_ARN?: string;   // SNS topic for SES inbound receipt notifications
   S3_INBOUND_BUCKET: string;        // S3 bucket where SES stores raw inbound emails
+  SNS_SECRET?: string;              // Optional token for verifying incoming SNS webhooks
   TEST_MIGRATIONS?: unknown;
 }
 
