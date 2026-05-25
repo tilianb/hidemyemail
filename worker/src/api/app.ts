@@ -7,6 +7,7 @@ import { domainRoutes } from "./routes/domains";
 import { aliasRoutes } from "./routes/aliases";
 import { blockRoutes } from "./routes/blocks";
 import { statsRoutes } from "./routes/stats";
+import { sesWebhookRoutes } from "./routes/ses-webhook";
 
 export type AppEnv = { Bindings: Env };
 
@@ -15,6 +16,7 @@ export function createApp() {
 
   // public routes (no session)
   app.route("/api", authRoutes());
+  app.route("/api", sesWebhookRoutes());
 
   // session guard for everything else under /api
   app.use("/api/*", async (c, next) => {
