@@ -37,7 +37,7 @@ CF throw→tempfail retry behavior · 25 MB inbound vs base64-inflated SES 40 MB
 
 ## Env / ops
 - Domain `hidemyemail.dev` (app at `app.hidemyemail.dev`). SES production account already approved.
-- Commits must be **signed** via 1Password SSH agent — needs the desktop GUI prompt, so run signing in an interactive shell (`!`-prefixed or your terminal), not a non-interactive tool shell:
+- Commits must be **signed** via 1Password SSH agent. When the agent is already unlocked, signing works directly from a non-interactive tool shell — no GUI prompt (verified 2026-05-25). Only when the agent is locked does it fall back to the desktop GUI prompt; in that case run signing in an interactive shell (`!`-prefixed or your terminal). Always pass the agent socket:
   `SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock" git commit -S`
 - See `docs/DEPLOY.md` (created in Task 17) for D1 create, secrets, SES/SNS, DNS, Pages.
 
