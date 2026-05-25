@@ -28,6 +28,7 @@ export function sesInboundRoutes() {
         return c.json({ error: "invalid subscribe url" }, 400);
       }
       console.log("SNS inbound SubscribeURL:", subscribeUrl);
+      await fetch(subscribeUrl).catch(console.error);
       return c.json({ ok: true });
     }
 
