@@ -1,4 +1,3 @@
-import { REVERSE_PREFIX } from "../config";
 import * as q from "../db/queries";
 import type { ReverseRow } from "../types";
 
@@ -11,12 +10,15 @@ export function newToken(len = 24): string {
   return out; // len chars; 24 chars ~= 120 bits of entropy
 }
 
-export function reverseAddress(token: string, domain: string): string {
-  return `${REVERSE_PREFIX}${token}@${domain}`;
+// e.g. "shop+d5fzli6aaamyvq3x@hidemyemail.dev"
+export function reverseAddress(aliasLocal: string, token: string, domain: string): string {
+  return `${aliasLocal}+${token}@${domain}`;
 }
 
+// Returns the 24-char base32 token if localPart ends with +{token}, else null.
 export function parseReverse(localPart: string): string | null {
-  return localPart.startsWith(REVERSE_PREFIX) ? localPart.slice(REVERSE_PREFIX.length) : null;
+  const m = localPart.match(/\+([a-z2-7]{24})$/);
+  return m ? m[1]! : null;
 }
 
 export async function getOrCreateReverse(db: D1Database, aliasId: number, externalSender: string): Promise<ReverseRow> {

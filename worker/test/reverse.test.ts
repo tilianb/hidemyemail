@@ -14,9 +14,11 @@ test("token is 24-char base32", () => {
 });
 
 test("reverseAddress and parseReverse round-trip", () => {
-  expect(reverseAddress("abcd", "hidemyemail.dev")).toBe("r.abcd@hidemyemail.dev");
-  expect(parseReverse("r.abcd")).toBe("abcd");
+  const token = "abcdefghijklmnopqrstuvwx"; // 24-char base32
+  expect(reverseAddress("shop", token, "hidemyemail.dev")).toBe(`shop+${token}@hidemyemail.dev`);
+  expect(parseReverse(`shop+${token}`)).toBe(token);
   expect(parseReverse("shop")).toBeNull();
+  expect(parseReverse("r.abcd")).toBeNull(); // old format no longer recognised
 });
 
 test("getOrCreateReverse is stable per (alias,sender)", async () => {

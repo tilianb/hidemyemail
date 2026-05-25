@@ -25,7 +25,7 @@ function testEnv(opts: { s3Throws?: boolean } = {}) {
     SES_ACCESS_KEY_ID: "AKIATEST",
     SES_SECRET_ACCESS_KEY: "testsecret",
     SES_REGION: "ap-southeast-2",
-    REVERSE_PREFIX: "r.",
+
     __s3Fetch: opts.s3Throws
       ? async () => { throw new Error("S3 unavailable"); }
       : async () => new TextEncoder().encode(RAW_EMAIL),
@@ -86,7 +86,7 @@ test("valid Received → S3 fetched, handleInbound called, SES sends, 200", asyn
   expect(res.status).toBe(200);
   expect(e._sesSent.length).toBe(1);
   // MIME surgery: From rewritten to reverse alias
-  expect(atob(e._sesSent[0].rawBase64)).toContain("r.");
+  expect(atob(e._sesSent[0].rawBase64)).toContain("shop+");
 });
 
 test("S3 fetch failure → 500 so SNS retries", async () => {

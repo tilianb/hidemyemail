@@ -1,7 +1,6 @@
 export interface Env {
   DB: D1Database;
   SES_REGION: string;
-  REVERSE_PREFIX: string;
   SES_ACCESS_KEY_ID: string;
   SES_SECRET_ACCESS_KEY: string;
   SESSION_SECRET: string;
