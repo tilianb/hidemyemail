@@ -7,12 +7,17 @@ Replaces a self-hosted addy.io (AnonAddy) Docker stack (decommission after cutov
 Cloudflare Email Routing (inbound) + one Worker (`email()` + `fetch()`) + Amazon SES (outbound via `aws4fetch`) + D1 + React/Vite dashboard on Pages. Hono API. Runs on CF free tier + SES pennies (SES via HTTPS, NOT the CF `send_email` binding → no Workers Paid).
 
 ## Status
-Design + implementation plan complete; **code not yet written**. Execute via:
-`/superpowers-extended-cc:executing-plans docs/superpowers/plans/2026-05-24-hidemyemail-alias-service.md`
+**Built + merged to `main`** (2026-05-25). All 18 plan tasks complete; worker 30 tests pass,
+dashboard builds, `wrangler deploy --dry-run` validates. **Not yet deployed** — see pre-prod
+checklist in `docs/DEPLOY.md §8` (live SES signing, CF throw→tempfail, SNS signature verify).
+
+Test stack modernized vs plan: `@cloudflare/vitest-pool-workers` ^0.16, vitest ^4.1, wrangler ^4.94
+(`cloudflareTest` plugin API — async must live *inside* `cloudflareTest()`, not around `defineConfig`,
+or the Workers pool never activates).
 
 - Spec: `docs/superpowers/specs/2026-05-24-hidemyemail-alias-service-design.md`
-- Plan (17 TDD tasks, full code): `docs/superpowers/plans/2026-05-24-hidemyemail-alias-service.md`
-- Resume state: `…-alias-service.md.tasks.json`
+- Plan (18 TDD tasks, full code): `docs/superpowers/plans/2026-05-24-hidemyemail-alias-service.md`
+- Resume state: `…-alias-service.md.tasks.json` (all complete)
 
 ## Locked design decisions
 - **Personal, single owner.** Auth = password (PBKDF2) + signed session cookie (HMAC). No users table.
