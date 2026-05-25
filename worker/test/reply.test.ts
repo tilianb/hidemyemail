@@ -12,10 +12,10 @@ function mkMessage(from: string, to: string, raw: string) {
     setReject: vi.fn(), forward: vi.fn(), reply: vi.fn() } as unknown as ForwardableEmailMessage;
 }
 function testEnv(sentinel: { sent: any[] }) {
-  return { ...env, SES_ACCESS_KEY_ID: "AKIA", SES_SECRET_ACCESS_KEY: "s", SES_REGION: "us-east-1", REVERSE_PREFIX: "r.",
+  return { ...env, SES_ACCESS_KEY_ID: "AKIA", SES_SECRET_ACCESS_KEY: "s", SES_REGION: "us-east-1",
     __sesSend: async (_c: any, m: any) => { sentinel.sent.push(m); return "mid"; } } as any;
 }
-const REPLY_RAW = "From: Me <real@me.com>\r\nTo: r.TOKEN@hidemyemail.dev\r\nSubject: Re: Hi\r\nMessage-ID: <x@gmail.com>\r\n\r\nmy reply\r\n";
+const REPLY_RAW = "From: Me <real@me.com>\r\nTo: shop+TOKEN@hidemyemail.dev\r\nSubject: Re: Hi\r\nMessage-ID: <x@gmail.com>\r\n\r\nmy reply\r\n";
 
 beforeEach(async () => { await resetDb(DB()); await q.createDomain(DB(), "hidemyemail.dev", "real@me.com"); });
 
@@ -24,7 +24,7 @@ test("owner reply → SES send as alias, leaks stripped", async () => {
   const a = await q.autoCreateAlias(DB(), 1, "shop", "shop@hidemyemail.dev");
   const rev = await getOrCreateReverse(DB(), a.id, "boss@store.com");
   const raw = REPLY_RAW.replace("TOKEN", rev.token);
-  await handleReply(mkMessage("real@me.com", `r.${rev.token}@hidemyemail.dev`, raw), testEnv(sentinel), rev.token);
+  await handleReply(mkMessage("real@me.com", `shop+${rev.token}@hidemyemail.dev`, raw), testEnv(sentinel), rev.token);
   expect(sentinel.sent.length).toBe(1);
   expect(sentinel.sent[0].from).toBe("shop@hidemyemail.dev");
   expect(sentinel.sent[0].to).toBe("boss@store.com");
@@ -40,6 +40,6 @@ test("non-owner reply → rejected, no SES", async () => {
   const a = await q.autoCreateAlias(DB(), 1, "shop", "shop@hidemyemail.dev");
   const rev = await getOrCreateReverse(DB(), a.id, "boss@store.com");
   const raw = REPLY_RAW.replace("TOKEN", rev.token).replace("real@me.com", "attacker@evil.com");
-  await handleReply(mkMessage("attacker@evil.com", `r.${rev.token}@hidemyemail.dev`, raw), testEnv(sentinel), rev.token);
+  await handleReply(mkMessage("attacker@evil.com", `shop+${rev.token}@hidemyemail.dev`, raw), testEnv(sentinel), rev.token);
   expect(sentinel.sent.length).toBe(0);
 });

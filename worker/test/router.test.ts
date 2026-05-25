@@ -7,8 +7,9 @@ test("routes reverse-alias to reply, else inbound", async () => {
     handleInbound: async () => { calls.push("inbound"); },
     handleReply: async (_m: any, _e: any, t: string) => { calls.push("reply:" + t); },
   };
-  const env = { REVERSE_PREFIX: "r." } as any;
-  await routeEmail({ to: "r.abc@hidemyemail.dev" } as any, env, deps);
+  const env = {} as any;
+  const token = "abcdefghijklmnopqrstuvwx"; // 24-char base32
+  await routeEmail({ to: `shop+${token}@hidemyemail.dev` } as any, env, deps);
   await routeEmail({ to: "shop@hidemyemail.dev" } as any, env, deps);
-  expect(calls).toEqual(["reply:abc", "inbound"]);
+  expect(calls).toEqual([`reply:${token}`, "inbound"]);
 });
