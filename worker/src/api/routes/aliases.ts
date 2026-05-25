@@ -18,16 +18,35 @@ export function aliasRoutes() {
   r.post("/aliases", async (c) => {
     const userId = c.get("userId");
     const b = await c.req.json<{ domain_id: number; local_part: string; destination?: string; label?: string }>();
-    const dom = await c.env.DB.prepare("SELECT domain FROM domains WHERE id=?").bind(b.domain_id).first<{ domain: string }>();
+    const dom = await c.env.DB.prepare("SELECT domain, is_global, user_id FROM domains WHERE id=?").bind(b.domain_id).first<{ domain: string, is_global: number, user_id: number }>();
     if (!dom) return c.json({ error: "unknown domain" }, 400);
-    if (b.local_part.startsWith("r.")) return c.json({ error: "reserved prefix" }, 400);
-    const full = `${b.local_part.toLowerCase()}@${dom.domain}`;
+    
+    if (dom.is_global === 0 && dom.user_id !== userId) {
+      return c.json({ error: "not your domain" }, 403);
+    }
+
+    if (b.destination) {
+      const destVerified = await c.env.DB.prepare("SELECT id FROM destinations WHERE user_id = ? AND email = ? AND verified_at IS NOT NULL").bind(userId, b.destination.toLowerCase()).first();
+      if (!destVerified) return c.json({ error: "destination email not verified" }, 400);
+    }
+
+    let localPart = b.local_part.toLowerCase();
+    if (dom.is_global === 1) {
+      const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+      const arr = new Uint8Array(8);
+      crypto.getRandomValues(arr);
+      localPart = Array.from(arr).map(x => chars[x % chars.length]).join("");
+    } else {
+      if (localPart.startsWith("r.")) return c.json({ error: "reserved prefix" }, 400);
+    }
+    
+    const full = `${localPart}@${dom.domain}`;
     
     try {
       const row = await c.env.DB.prepare(
         "INSERT INTO aliases (domain_id, user_id, local_part, full_address, destination, label, active, source, created_at) " +
         "VALUES (?,?,?,?,?,?,1,'dashboard',?) RETURNING *"
-      ).bind(b.domain_id, userId, b.local_part.toLowerCase(), full, b.destination ?? null, b.label ?? null, Date.now()).first();
+      ).bind(b.domain_id, userId, localPart, full, b.destination ? b.destination.toLowerCase() : null, b.label ?? null, Date.now()).first();
       return c.json(row);
     } catch (err: any) {
       if (err.message && err.message.includes("UNIQUE constraint failed")) {
@@ -41,12 +60,19 @@ export function aliasRoutes() {
     const userId = c.get("userId");
     const id = Number(c.req.param("id"));
     const b = await c.req.json<{ active?: number; destination?: string | null; label?: string | null }>();
+    
+    if (b.destination) {
+      const destVerified = await c.env.DB.prepare("SELECT id FROM destinations WHERE user_id = ? AND email = ? AND verified_at IS NOT NULL").bind(userId, b.destination.toLowerCase()).first();
+      if (!destVerified) return c.json({ error: "destination email not verified" }, 400);
+    }
+
     const sets: string[] = []; const vals: unknown[] = [];
     if (b.active !== undefined) { sets.push("active=?"); vals.push(b.active); }
-    if (b.destination !== undefined) { sets.push("destination=?"); vals.push(b.destination); }
+    if (b.destination !== undefined) { sets.push("destination=?"); vals.push(b.destination ? b.destination.toLowerCase() : null); }
     if (b.label !== undefined) { sets.push("label=?"); vals.push(b.label); }
     if (!sets.length) return c.json({ error: "no fields" }, 400);
     vals.push(id, userId);
+    
     const res = await c.env.DB.prepare(`UPDATE aliases SET ${sets.join(", ")} WHERE id=? AND user_id=?`).bind(...vals).run();
     if (res.meta.changes === 0) return c.json({ error: "not found" }, 404);
     return c.json({ ok: true });
