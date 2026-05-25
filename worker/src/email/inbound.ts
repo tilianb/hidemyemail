@@ -51,10 +51,9 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   const raw = await streamToBytes(message.raw);
   let mime = parseMime(raw);
   const origFrom = getHeader(mime, "From") ?? message.from;
-  // addy.io From style: "Sender Name 'sender@email'" <reverse@domain>. Real name leads,
-  // sender email single-quoted (providers keep it as literal text, not a spoofed address).
+  // "Sender Name via sender@email" <reverse@domain> — standard display name + origin visible.
   const senderName = extractDisplayName(origFrom);
-  const display = senderName ? `${senderName} '${message.from}'` : `'${message.from}'`;
+  const display = senderName ? `${senderName} via ${message.from}` : `via ${message.from}`;
   mime = setHeader(mime, "From", `"${sanitize(display)}" <${reverseAddr}>`);
   mime = setHeader(mime, "Reply-To", reverseAddr);
   mime = removeHeaders(mime, ["DKIM-Signature", "ARC-Seal", "ARC-Message-Signature", "ARC-Authentication-Results", "Return-Path", "Sender"]);
