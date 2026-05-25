@@ -94,28 +94,7 @@ export function Login() {
             lineHeight: 1.1,
             color: "var(--text-primary)",
           }}>
-            hide
-            <span style={{
-              display: "inline-block",
-              background: "var(--canvas)",
-              color: "transparent",
-              borderRadius: "2px",
-              padding: "0 4px",
-              marginLeft: "1px",
-              position: "relative",
-              cursor: "default",
-              transition: "background 200ms, color 200ms",
-            }}
-            onMouseEnter={e => {
-              (e.currentTarget as HTMLElement).style.background = "var(--accent-dim)";
-              (e.currentTarget as HTMLElement).style.color = "var(--accent)";
-            }}
-            onMouseLeave={e => {
-              (e.currentTarget as HTMLElement).style.background = "var(--canvas)";
-              (e.currentTarget as HTMLElement).style.color = "transparent";
-            }}
-            title="Hover to reveal"
-            >my</span>email
+            hide<span className="brand-redact" title="hideMYemail" style={{ fontSize: "0.85em", padding: "0 6px", verticalAlign: "middle" }}>my</span>email
           </div>
           <div style={{
             fontFamily: "var(--font-body)",
