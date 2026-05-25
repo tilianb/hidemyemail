@@ -46,7 +46,7 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
 
   const dest = alias.destination ?? domain.default_destination;
   const reverse = await getOrCreateReverse(db, alias.id, message.from);
-  const reverseAddr = reverseAddress(reverse.token, domainName);
+  const reverseAddr = reverseAddress(localPart, reverse.token, domainName);
 
   const raw = await streamToBytes(message.raw);
   let mime = parseMime(raw);
