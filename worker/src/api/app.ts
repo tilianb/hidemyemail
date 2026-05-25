@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { getCookie } from "hono/cookie";
 import type { Env } from "../types";
 import { verifySession } from "../lib/auth";
@@ -9,6 +10,7 @@ import { blockRoutes } from "./routes/blocks";
 import { statsRoutes } from "./routes/stats";
 import { sesWebhookRoutes } from "./routes/ses-webhook";
 import { sesInboundRoutes } from "./routes/ses-inbound";
+import { destinationRoutes, verificationRoute } from "./routes/destinations";
 
 export type AppEnv = {
   Bindings: Env;
@@ -20,8 +22,11 @@ export type AppEnv = {
 export function createApp() {
   const app = new Hono<AppEnv>();
 
+  app.use("*", cors({ origin: "*", allowHeaders: ["Content-Type", "Cookie"], credentials: true }));
+
   // public routes (no session)
   app.route("/api", authRoutes());
+  app.route("/api", verificationRoute());
   app.route("/api", sesWebhookRoutes());
   app.route("/api", sesInboundRoutes());
 
@@ -32,6 +37,7 @@ export function createApp() {
       p === "/api/login" ||
       p === "/api/register" ||
       p === "/api/logout" ||
+      p === "/api/verify" ||
       p === "/api/ses/notification" ||
       p === "/api/ses/inbound"
     ) return next();
@@ -46,8 +52,9 @@ export function createApp() {
   // guarded routers (inherit the session guard above)
   app.route("/api", domainRoutes());
   app.route("/api", aliasRoutes());
-  app.route("/api", blockRoutes());
   app.route("/api", statsRoutes());
+  app.route("/api", blockRoutes());
+  app.route("/api", destinationRoutes());
 
   return app;
 }

@@ -1,7 +1,9 @@
 export interface Domain {
   id: number;
+  user_id: number;
+  is_global: 0 | 1;
   domain: string;
-  default_destination: string;
+  default_destination: string | null;
   active: 0 | 1;
   created_at: number;
 }
@@ -69,18 +71,33 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export interface Destination {
+  id: number;
+  email: string;
+  verified_at: number | null;
+  created_at: number;
+}
+
 export const api = {
   login: (password: string) => req<{ ok: true, userId: number }>("/api/login", { method: "POST", body: JSON.stringify({ password }) }),
   register: (password: string) => req<{ ok: true, userId: number }>("/api/register", { method: "POST", body: JSON.stringify({ password }) }),
   logout: () => req<{ ok: true }>("/api/logout", { method: "POST" }),
   stats: () => req<StatsData>("/api/stats"),
+  
+  destinations: () => req<Destination[]>("/api/destinations"),
+  createDestination: (email: string) => req<{ ok: true }>("/api/destinations", { method: "POST", body: JSON.stringify({ email }) }),
+  deleteDestination: (id: number) => req<{ ok: true }>(`/api/destinations/${id}`, { method: "DELETE" }),
+
   domains: () => req<Domain[]>("/api/domains"),
   createDomain: (domain: string, default_destination: string) => req<Domain>("/api/domains", { method: "POST", body: JSON.stringify({ domain, default_destination }) }),
+  deleteDomain: (id: number) => req<{ ok: true }>(`/api/domains/${id}`, { method: "DELETE" }),
+
   aliases: (q = "") => req<Alias[]>(`/api/aliases${q ? `?q=${encodeURIComponent(q)}` : ""}`),
   createAlias: (b: { domain_id: number; local_part: string; destination?: string; label?: string }) => req<Alias>("/api/aliases", { method: "POST", body: JSON.stringify(b) }),
   patchAlias: (id: number, b: Record<string, unknown>) => req<{ ok: true }>(`/api/aliases/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
   deleteAlias: (id: number) => req<{ ok: true }>(`/api/aliases/${id}`, { method: "DELETE" }),
   events: (id: number) => req<EmailEvent[]>(`/api/aliases/${id}/events`),
+
   blocks: () => req<Block[]>("/api/blocks"),
   createBlock: (pattern: string, alias_id?: number) => req<Block>("/api/blocks", { method: "POST", body: JSON.stringify({ pattern, alias_id }) }),
   deleteBlock: (id: number) => req<{ ok: true }>(`/api/blocks/${id}`, { method: "DELETE" }),

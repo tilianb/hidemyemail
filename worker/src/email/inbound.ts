@@ -19,6 +19,12 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   if (!domain || domain.active === 0) return;
 
   const alias = await q.autoCreateAlias(db, domain.id, localPart, message.to.toLowerCase());
+  
+  if (!alias) {
+    // No alias found, and autoCreate failed because no default destination
+    // Silently drop
+    return;
+  }
 
   if (alias.active === 0) {
     await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "disabled", ts: now });
@@ -45,6 +51,10 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   }
 
   const dest = alias.destination ?? domain.default_destination;
+  if (!dest) {
+    await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "no_destination", ts: now });
+    return;
+  }
   const reverseAddr = reverseAddress(localPart, message.from, domainName);
 
   const raw = await streamToBytes(message.raw);
