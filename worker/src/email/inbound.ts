@@ -31,7 +31,7 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
     return;
   }
 
-  const rules = await q.listBlocks(db, alias.id);
+  const rules = await q.listBlocks(db, alias.id, alias.user_id);
   if (isBlocked(rules, message.from)) {
     await q.insertEvent(db, { alias_id: alias.id, type: "block", external_sender: message.from, ts: now });
     await q.incCounter(db, alias.id, "blocked_count");
