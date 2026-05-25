@@ -51,8 +51,10 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   const raw = await streamToBytes(message.raw);
   let mime = parseMime(raw);
   const origFrom = getHeader(mime, "From") ?? message.from;
-  const displayName = extractDisplayName(origFrom) || message.from;
-  mime = setHeader(mime, "From", `"${sanitize(displayName)} via ${alias.full_address}" <${reverseAddr}>`);
+  // Sender's name only — never the sender's email in the display name (Microsoft
+  // treats email-in-display-name as spoofing → SFTY:9.25 → junk). Alias shown in parens.
+  const senderName = extractDisplayName(origFrom) || (message.from.split("@")[0] ?? message.from);
+  mime = setHeader(mime, "From", `"${sanitize(senderName)} (via ${alias.full_address})" <${reverseAddr}>`);
   mime = setHeader(mime, "Reply-To", reverseAddr);
   mime = removeHeaders(mime, ["DKIM-Signature", "ARC-Seal", "ARC-Message-Signature", "ARC-Authentication-Results", "Return-Path", "Sender"]);
   mime = setHeader(mime, "X-Reinjected", "1");
