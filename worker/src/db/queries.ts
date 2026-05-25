@@ -54,8 +54,8 @@ export async function touchReverse(db: D1Database, id: number): Promise<void> {
   await db.prepare("UPDATE reverse_map SET last_used_at = ? WHERE id = ?").bind(Date.now(), id).run();
 }
 
-export async function listBlocks(db: D1Database, aliasId: number): Promise<BlockRow[]> {
-  const r = await db.prepare("SELECT * FROM blocks WHERE alias_id IS NULL OR alias_id = ?").bind(aliasId).all<BlockRow>();
+export async function listBlocks(db: D1Database, aliasId: number, userId: number): Promise<BlockRow[]> {
+  const r = await db.prepare("SELECT * FROM blocks WHERE alias_id = ? OR (alias_id IS NULL AND user_id = ?)").bind(aliasId, userId).all<BlockRow>();
   return r.results ?? [];
 }
 

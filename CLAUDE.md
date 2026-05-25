@@ -57,6 +57,9 @@ Add the following variables in `wrangler.jsonc` or via `wrangler secret put`:
 *Commits must be signed via 1Password SSH agent:*
 `SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock" git commit -S -m "..."`
 
+## PR & Workflow Rules
+- **Pull Requests:** PRs must ALWAYS contain a comprehensive summary of the changes in their body description.
+
 ## Dev & Build Commands
 - `cd worker && npm install && npm test` — Run complete Vitest suite (Vitest pool workers)
 - `cd worker && npx wrangler dev` — Run local worker with local SPA assets
