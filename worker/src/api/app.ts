@@ -3,6 +3,8 @@ import { getCookie } from "hono/cookie";
 import type { Env } from "../types";
 import { verifySession } from "../lib/auth";
 import { authRoutes } from "./routes/auth";
+import { domainRoutes } from "./routes/domains";
+import { aliasRoutes } from "./routes/aliases";
 
 export type AppEnv = { Bindings: Env };
 
@@ -20,6 +22,10 @@ export function createApp() {
     if (!token || !(await verifySession(c.env.SESSION_SECRET, token))) return c.json({ error: "unauthorized" }, 401);
     return next();
   });
+
+  // guarded routers (inherit the session guard above)
+  app.route("/api", domainRoutes());
+  app.route("/api", aliasRoutes());
 
   // temporary guarded route so the auth test has an endpoint; replaced by real stats in Task 13
   app.get("/api/stats", (c) => c.json({ ok: true }));
