@@ -54,11 +54,16 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   // Reply-To is the reverse address so hitting Reply routes back through the alias.
   // e.g. From: "Alice 'alice@store.com'" <shop@domain>  Reply-To: shop+alice=store.com@domain
   const senderName = extractDisplayName(origFrom);
-  const display = senderName ? `${senderName} '${message.from}'` : message.from;
+  const safeSenderName = senderName.replace(/@/g, " at ");
+  const safeFrom = message.from.replace(/@/g, " at ");
+  const display = safeSenderName ? `${safeSenderName} - ${safeFrom}` : safeFrom;
   mime = setHeader(mime, "From", `"${sanitize(display)}" <${alias.full_address}>`);
   mime = setHeader(mime, "Reply-To", reverseAddr);
   mime = removeHeaders(mime, ["DKIM-Signature", "ARC-Seal", "ARC-Message-Signature", "ARC-Authentication-Results", "Return-Path", "Sender"]);
   mime = setHeader(mime, "X-Reinjected", "1");
+  mime = setHeader(mime, "X-Forwarded-For", message.from);
+  mime = setHeader(mime, "X-Forwarded-To", message.to);
+  mime = setHeader(mime, "X-Original-From", origFrom);
   const rawBase64 = toBase64(serializeMime(mime));
 
   try {
