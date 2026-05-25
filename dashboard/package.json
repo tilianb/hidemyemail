@@ -1,0 +1,8 @@
+{
+  "name": "hidemyemail-dashboard",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "vite", "build": "tsc && vite build", "preview": "vite preview" },
+  "dependencies": { "react": "^18.3.1", "react-dom": "^18.3.1" },
+  "devDependencies": { "@vitejs/plugin-react": "^4.3.0", "typescript": "^5.6.0", "vite": "^5.4.0", "@types/react": "^18.3.0", "@types/react-dom": "^18.3.0" }
+}
