@@ -1,8 +1,9 @@
 import type { Env } from "./types";
+import { routeEmail } from "./email/router";
 
 export default {
   async email(message: ForwardableEmailMessage, env: Env, ctx: ExecutionContext): Promise<void> {
-    // wired in Task 10
+    await routeEmail(message, env);
   },
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     return new Response("ok"); // replaced in Task 14
