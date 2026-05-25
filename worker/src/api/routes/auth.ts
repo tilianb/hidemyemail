@@ -75,7 +75,7 @@ export function authRoutes() {
     try {
       const res = await c.env.DB.prepare(
         "INSERT INTO users (passphrase_hash, created_at) VALUES (?, ?)"
-      ).bind(hash, Math.floor(Date.now() / 1000)).run();
+      ).bind(hash, Date.now()).run();
       
       const userId = res.meta.last_row_id;
       const token = await signSession(c.env.SESSION_SECRET, userId, SESSION_TTL);

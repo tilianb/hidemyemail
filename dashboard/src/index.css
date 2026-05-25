@@ -38,7 +38,7 @@
 
   /* Typography */
   --font-display:  'Bricolage Grotesque', sans-serif;
-  --font-body:     'Newsreader', Georgia, serif;
+  --font-body:     'Inter', system-ui, sans-serif;
   --font-mono:     'JetBrains Mono', 'Menlo', monospace;
 
   /* Spacing scale */
