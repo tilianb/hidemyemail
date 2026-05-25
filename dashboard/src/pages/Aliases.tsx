@@ -95,7 +95,8 @@ export function Aliases() {
       await api.deleteAlias(target.id);
       setRows(prev => prev.filter(a => a.id !== target.id));
       toast(`${target.full_address} deleted`, "success");
-    } catch {
+    } catch (err: any) {
+      console.error("Failed to delete alias:", err);
       toast("Failed to delete alias", "error");
     }
   }
