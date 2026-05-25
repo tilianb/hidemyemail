@@ -51,10 +51,11 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   const raw = await streamToBytes(message.raw);
   let mime = parseMime(raw);
   const origFrom = getHeader(mime, "From") ?? message.from;
-  // Sender's name only — never the sender's email in the display name (Microsoft
-  // treats email-in-display-name as spoofing → SFTY:9.25 → junk). Alias shown in parens.
-  const senderName = extractDisplayName(origFrom) || (message.from.split("@")[0] ?? message.from);
-  mime = setHeader(mime, "From", `"${sanitize(senderName)} (via ${alias.full_address})" <${reverseAddr}>`);
+  // addy.io From style: "Sender Name 'sender@email'" <reverse@domain>. Real name leads,
+  // sender email single-quoted (providers keep it as literal text, not a spoofed address).
+  const senderName = extractDisplayName(origFrom);
+  const display = senderName ? `${senderName} '${message.from}'` : `'${message.from}'`;
+  mime = setHeader(mime, "From", `"${sanitize(display)}" <${reverseAddr}>`);
   mime = setHeader(mime, "Reply-To", reverseAddr);
   mime = removeHeaders(mime, ["DKIM-Signature", "ARC-Seal", "ARC-Message-Signature", "ARC-Authentication-Results", "Return-Path", "Sender"]);
   mime = setHeader(mime, "X-Reinjected", "1");
