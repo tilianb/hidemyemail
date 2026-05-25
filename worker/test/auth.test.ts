@@ -9,9 +9,9 @@ test("password hash + verify", async () => {
 
 test("session sign/verify round-trip and expiry", async () => {
   const secret = "topsecret";
-  const tok = await signSession(secret, 3600);
-  expect(await verifySession(secret, tok)).toBe(true);
-  expect(await verifySession("other", tok)).toBe(false);
-  const expired = await signSession(secret, -1);
-  expect(await verifySession(secret, expired)).toBe(false);
+  const tok = await signSession(secret, 1, 3600);
+  expect(await verifySession(secret, tok)).toBe(1);
+  expect(await verifySession("other", tok)).toBe(null);
+  const expired = await signSession(secret, 1, -1);
+  expect(await verifySession(secret, expired)).toBe(null);
 });
