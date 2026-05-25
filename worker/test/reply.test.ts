@@ -2,7 +2,6 @@ import { env } from "cloudflare:test";
 import { beforeEach, expect, test, vi } from "vitest";
 import { handleReply } from "../src/email/reply";
 import * as q from "../src/db/queries";
-import { getOrCreateReverse } from "../src/lib/reverse";
 import { utf8 } from "../src/lib/bytes";
 import { resetDb } from "./helpers";
 
@@ -15,16 +14,19 @@ function testEnv(sentinel: { sent: any[] }) {
   return { ...env, SES_ACCESS_KEY_ID: "AKIA", SES_SECRET_ACCESS_KEY: "s", SES_REGION: "us-east-1",
     __sesSend: async (_c: any, m: any) => { sentinel.sent.push(m); return "mid"; } } as any;
 }
-const REPLY_RAW = "From: Me <real@me.com>\r\nTo: shop+TOKEN@hidemyemail.dev\r\nSubject: Re: Hi\r\nMessage-ID: <x@gmail.com>\r\n\r\nmy reply\r\n";
+const TO = "shop+boss=store.com@hidemyemail.dev";
+const PARSED = { aliasLocal: "shop", externalSender: "boss@store.com" };
+const REPLY_RAW = `From: Me <real@me.com>\r\nTo: ${TO}\r\nSubject: Re: Hi\r\nMessage-ID: <x@gmail.com>\r\n\r\nmy reply\r\n`;
 
-beforeEach(async () => { await resetDb(DB()); await q.createDomain(DB(), "hidemyemail.dev", "real@me.com"); });
+beforeEach(async () => {
+  await resetDb(DB());
+  await q.createDomain(DB(), "hidemyemail.dev", "real@me.com");
+  await q.autoCreateAlias(DB(), 1, "shop", "shop@hidemyemail.dev");
+});
 
-test("owner reply → SES send as alias, leaks stripped", async () => {
+test("owner reply with SPF pass → SES send as alias, leaks stripped", async () => {
   const sentinel = { sent: [] as any[] };
-  const a = await q.autoCreateAlias(DB(), 1, "shop", "shop@hidemyemail.dev");
-  const rev = await getOrCreateReverse(DB(), a.id, "boss@store.com");
-  const raw = REPLY_RAW.replace("TOKEN", rev.token);
-  await handleReply(mkMessage("real@me.com", `shop+${rev.token}@hidemyemail.dev`, raw), testEnv(sentinel), rev.token);
+  await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
   expect(sentinel.sent.length).toBe(1);
   expect(sentinel.sent[0].from).toBe("shop@hidemyemail.dev");
   expect(sentinel.sent[0].to).toBe("boss@store.com");
@@ -37,9 +39,12 @@ test("owner reply → SES send as alias, leaks stripped", async () => {
 
 test("non-owner reply → rejected, no SES", async () => {
   const sentinel = { sent: [] as any[] };
-  const a = await q.autoCreateAlias(DB(), 1, "shop", "shop@hidemyemail.dev");
-  const rev = await getOrCreateReverse(DB(), a.id, "boss@store.com");
-  const raw = REPLY_RAW.replace("TOKEN", rev.token).replace("real@me.com", "attacker@evil.com");
-  await handleReply(mkMessage("attacker@evil.com", `shop+${rev.token}@hidemyemail.dev`, raw), testEnv(sentinel), rev.token);
+  await handleReply(mkMessage("attacker@evil.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
+  expect(sentinel.sent.length).toBe(0);
+});
+
+test("owner address but SPF/DMARC fail → rejected, no SES (anti-spoof)", async () => {
+  const sentinel = { sent: [] as any[] };
+  await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "FAIL", dmarc: "FAIL" });
   expect(sentinel.sent.length).toBe(0);
 });

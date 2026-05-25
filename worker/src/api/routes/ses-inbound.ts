@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
-import { handleInbound } from "../../email/inbound";
+import { routeEmail } from "../../email/router";
 import { fetchS3Object } from "../../lib/s3";
 
 export function sesInboundRoutes() {
@@ -40,6 +40,12 @@ export function sesInboundRoutes() {
       return c.json({ error: "missing required fields" }, 400);
     }
 
+    // SES receipt verdicts — used as the anti-spoof gate for reverse-alias replies.
+    const auth = {
+      spf: msg.receipt?.spfVerdict?.status as string | undefined,
+      dmarc: msg.receipt?.dmarcVerdict?.status as string | undefined,
+    };
+
     // Fetch full raw MIME from S3 (supports emails of any size, no SNS 256KB truncation risk)
     const creds = {
       accessKeyId: c.env.SES_ACCESS_KEY_ID,
@@ -75,9 +81,10 @@ export function sesInboundRoutes() {
     } as unknown as ForwardableEmailMessage;
 
     try {
-      await handleInbound(fakeMessage, c.env);
+      // routeEmail dispatches reverse-alias replies → handleReply, everything else → handleInbound.
+      await routeEmail(fakeMessage, c.env, undefined, auth);
     } catch (err) {
-      console.error("handleInbound failed for", messageId, String(err));
+      console.error("routeEmail failed for", messageId, String(err));
       return c.json({ error: "processing failed" }, 500); // 5xx → SNS retries
     }
 
