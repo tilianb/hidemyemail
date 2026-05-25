@@ -6,7 +6,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
   "d1_databases": [
-    { "binding": "DB", "database_name": "hidemyemail", "database_id": "PLACEHOLDER_SET_AFTER_d1_create", "migrations_dir": "migrations" }
+    { "binding": "DB", "database_name": "hidemyemail", "database_id": "bb183c55-092f-4b63-85c0-e9d457eed8fa", "migrations_dir": "migrations" }
   ],
   "vars": { "SES_REGION": "us-east-1", "REVERSE_PREFIX": "r." }
   // Secrets (wrangler secret put): SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY,
