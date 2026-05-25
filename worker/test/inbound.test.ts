@@ -24,7 +24,7 @@ test("clean mail to new alias → SES re-inject with rewritten headers", async (
   await handleInbound(mkMessage("alice@store.com", "shop@hidemyemail.dev", RAW), testEnv(sentinel));
   expect(sentinel.sent.length).toBe(1);
   const decoded = atob(sentinel.sent[0].rawBase64);
-  expect(decoded).toContain(`From: "Alice 'alice@store.com'" <r.`); // addy-style: name 'email'
+  expect(decoded).toContain(`From: "Alice via alice@store.com" <r.`);
   expect(decoded).toContain("Reply-To: r.");
   expect(decoded).not.toContain("DKIM-Signature");
   expect((await q.getAlias(DB(), "shop@hidemyemail.dev"))?.fwd_count).toBe(1);
