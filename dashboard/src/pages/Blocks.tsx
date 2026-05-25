@@ -16,7 +16,7 @@ interface DeleteTarget {
 }
 
 function formatDate(ts: number): string {
-  return new Date(ts * 1000).toLocaleDateString("en-US", {
+  return new Date(ts > 1e11 ? ts : ts * 1000).toLocaleDateString("en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",
