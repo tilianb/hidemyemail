@@ -5,11 +5,19 @@ test("routes reverse-alias to reply, else inbound", async () => {
   const calls: string[] = [];
   const deps = {
     handleInbound: async () => { calls.push("inbound"); },
-    handleReply: async (_m: any, _e: any, t: string) => { calls.push("reply:" + t); },
+    handleReply: async (_m: any, _e: any, p: any) => { calls.push(`reply:${p.aliasLocal}:${p.externalSender}`); },
   };
-  const env = {} as any;
-  const token = "abcdefghijklmnopqrstuvwx"; // 24-char base32
-  await routeEmail({ to: `shop+${token}@hidemyemail.dev` } as any, env, deps);
-  await routeEmail({ to: "shop@hidemyemail.dev" } as any, env, deps);
-  expect(calls).toEqual([`reply:${token}`, "inbound"]);
+  await routeEmail({ to: "shop+alice=store.com@hidemyemail.dev" } as any, {} as any, deps);
+  await routeEmail({ to: "shop@hidemyemail.dev" } as any, {} as any, deps);
+  expect(calls).toEqual(["reply:shop:alice@store.com", "inbound"]);
+});
+
+test("threads SES auth verdicts into handleReply", async () => {
+  let seen: any;
+  const deps = {
+    handleInbound: async () => {},
+    handleReply: async (_m: any, _e: any, _p: any, auth: any) => { seen = auth; },
+  };
+  await routeEmail({ to: "shop+alice=store.com@hidemyemail.dev" } as any, {} as any, deps, { spf: "PASS" });
+  expect(seen).toEqual({ spf: "PASS" });
 });
