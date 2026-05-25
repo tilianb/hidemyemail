@@ -10,7 +10,12 @@ import { statsRoutes } from "./routes/stats";
 import { sesWebhookRoutes } from "./routes/ses-webhook";
 import { sesInboundRoutes } from "./routes/ses-inbound";
 
-export type AppEnv = { Bindings: Env };
+export type AppEnv = {
+  Bindings: Env;
+  Variables: {
+    userId: number;
+  };
+};
 
 export function createApp() {
   const app = new Hono<AppEnv>();
@@ -25,12 +30,16 @@ export function createApp() {
     const p = new URL(c.req.url).pathname;
     if (
       p === "/api/login" ||
+      p === "/api/register" ||
       p === "/api/logout" ||
       p === "/api/ses/notification" ||
       p === "/api/ses/inbound"
     ) return next();
     const token = getCookie(c, "session");
-    if (!token || !(await verifySession(c.env.SESSION_SECRET, token))) return c.json({ error: "unauthorized" }, 401);
+    if (!token) return c.json({ error: "unauthorized" }, 401);
+    const userId = await verifySession(c.env.SESSION_SECRET, token);
+    if (userId === null) return c.json({ error: "unauthorized" }, 401);
+    c.set("userId", userId);
     return next();
   });
 

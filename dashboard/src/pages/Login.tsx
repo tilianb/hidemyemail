@@ -1,12 +1,15 @@
 import { useState } from "react";
 import { api } from "../api";
 import { useAuth } from "../auth";
+import { generatePassphrase } from "../lib/passphrase";
 
 export function Login() {
   const { setAuthed } = useAuth();
   const [pw, setPw] = useState("");
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const [generated, setGenerated] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -18,6 +21,23 @@ export function Login() {
     } catch {
       setErr("Access denied — invalid credentials.");
       setPw("");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function generate() {
+    setErr("");
+    setLoading(true);
+    const newPw = generatePassphrase();
+    try {
+      await api.register(newPw);
+      setGenerated(newPw);
+      setPw(newPw);
+      // We don't auto-login immediately so they have a chance to copy the password.
+      // Or we can let them log in after they see it.
+    } catch (e: any) {
+      setErr("Failed to generate account. Try again.");
     } finally {
       setLoading(false);
     }
@@ -162,51 +182,98 @@ export function Login() {
             AUTHENTICATE
           </div>
 
-          <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-            <div className="field">
-              <label className="field-label" htmlFor="login-pw">Access passphrase</label>
-              <input
-                id="login-pw"
-                className="input"
-                type="password"
-                value={pw}
-                onChange={e => setPw(e.target.value)}
-                placeholder="Enter passphrase"
-                autoFocus
-                autoComplete="current-password"
-                disabled={loading}
-              />
-            </div>
-
-            {err && (
+          {generated ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
               <div style={{
-                fontFamily: "var(--font-display)",
-                fontSize: "0.8rem",
-                color: "var(--red)",
-                background: "var(--red-dim)",
-                border: "1px solid rgba(255,80,80,0.2)",
-                borderRadius: "var(--radius-sm)",
-                padding: "8px 12px",
-                animation: "fade-in 200ms ease",
+                background: "var(--surface-1)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius)",
+                padding: "20px",
+                textAlign: "center"
               }}>
-                {err}
+                <h3 style={{ margin: "0 0 10px 0", color: "var(--text-primary)" }}>Account created!</h3>
+                <p style={{ margin: "0 0 15px 0", color: "var(--text-muted)", fontSize: "0.9rem" }}>
+                  Please save this passphrase. You will need it to login in the future.
+                </p>
+                <div style={{
+                  fontFamily: "var(--font-mono)",
+                  background: "var(--canvas)",
+                  padding: "12px",
+                  borderRadius: "var(--radius-sm)",
+                  color: "var(--accent)",
+                  fontSize: "1.1rem",
+                  letterSpacing: "0.05em",
+                  border: "1px solid var(--border)"
+                }}>
+                  {generated}
+                </div>
               </div>
-            )}
+              <button
+                className="btn btn-primary"
+                onClick={() => setAuthed(true)}
+                style={{ width: "100%", justifyContent: "center", padding: "10px 16px", fontSize: "0.85rem" }}
+              >
+                I have saved it, take me to dashboard
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              <div className="field">
+                <label className="field-label" htmlFor="login-pw">Access passphrase</label>
+                <input
+                  id="login-pw"
+                  className="input"
+                  type="password"
+                  value={pw}
+                  onChange={e => setPw(e.target.value)}
+                  placeholder="Enter passphrase"
+                  autoFocus
+                  autoComplete="current-password"
+                  disabled={loading}
+                />
+              </div>
 
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={loading || !pw}
-              style={{ width: "100%", justifyContent: "center", padding: "10px 16px", fontSize: "0.85rem" }}
-            >
-              {loading ? (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>◌</span>
-                  Authenticating…
-                </span>
-              ) : "Gain access"}
-            </button>
-          </form>
+              {err && (
+                <div style={{
+                  fontFamily: "var(--font-display)",
+                  fontSize: "0.8rem",
+                  color: "var(--red)",
+                  background: "var(--red-dim)",
+                  border: "1px solid rgba(255,80,80,0.2)",
+                  borderRadius: "var(--radius-sm)",
+                  padding: "8px 12px",
+                  animation: "fade-in 200ms ease",
+                }}>
+                  {err}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: "10px" }}>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={loading || !pw}
+                  style={{ flex: 1, justifyContent: "center", padding: "10px 16px", fontSize: "0.85rem" }}
+                >
+                  {loading ? (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>◌</span>
+                      Authenticating…
+                    </span>
+                  ) : "Gain access"}
+                </button>
+                <button
+                  type="button"
+                  onClick={generate}
+                  className="btn"
+                  disabled={loading}
+                  style={{ flex: 1, justifyContent: "center", padding: "10px 16px", fontSize: "0.85rem", background: "var(--surface-2)", color: "var(--text-secondary)" }}
+                >
+                  Generate New
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       </div>
 
