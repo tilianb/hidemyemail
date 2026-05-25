@@ -5,6 +5,8 @@ import { verifySession } from "../lib/auth";
 import { authRoutes } from "./routes/auth";
 import { domainRoutes } from "./routes/domains";
 import { aliasRoutes } from "./routes/aliases";
+import { blockRoutes } from "./routes/blocks";
+import { statsRoutes } from "./routes/stats";
 
 export type AppEnv = { Bindings: Env };
 
@@ -26,9 +28,8 @@ export function createApp() {
   // guarded routers (inherit the session guard above)
   app.route("/api", domainRoutes());
   app.route("/api", aliasRoutes());
-
-  // temporary guarded route so the auth test has an endpoint; replaced by real stats in Task 13
-  app.get("/api/stats", (c) => c.json({ ok: true }));
+  app.route("/api", blockRoutes());
+  app.route("/api", statsRoutes());
 
   return app;
 }
