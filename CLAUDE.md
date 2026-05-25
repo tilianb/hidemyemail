@@ -1,62 +1,65 @@
 # hidemyemail.dev — Project Context
 
 Personal **serverless email-alias service** with full two-way reply-from-alias.
-Replaces a self-hosted addy.io (AnonAddy) Docker stack (decommission after cutover).
+Replaces a self-hosted addy.io (AnonAddy) Docker stack.
 
-## Stack
-Cloudflare Email Routing (inbound) + one Worker (`email()` + `fetch()`) + Amazon SES (outbound via `aws4fetch`) + D1 + React/Vite dashboard on Pages. Hono API. Runs on CF free tier + SES pennies (SES via HTTPS, NOT the CF `send_email` binding → no Workers Paid).
+## Stack & Architecture
+- **Inbound Receiving:** AWS SES receives email for catch-all domains/subdomains (MX → `inbound-smtp.ap-southeast-2.amazonaws.com`), stores the raw MIME to S3 (`hidemyemail-inbound-raw`), and publishes metadata to SNS.
+- **Worker Webhook:** The Worker receives the SNS notification at `/api/ses/inbound`, fetches the full raw MIME from S3 via `aws4fetch` (using shared SES/S3 credentials with `s3:GetObject`), and routes the message.
+- **Routing:** `routeEmail()` dispatches replies (`handleReply()`) if the address matches the reverse-alias format; otherwise it treats it as fresh inbound (`handleInbound()`) and forwards it to the owner.
+- **Outbound / Relay:** Sent via AWS SES raw email sending using `aws4fetch` over HTTPS.
+- **Unified Hosting:** Cloudflare Worker with D1 database, serving both the Hono API (`/api/*`) and the React/Vite dashboard SPA (under `dashboard/dist`) same-origin via Wrangler V2 Assets.
+- **Cost:** Runs entirely on Cloudflare Free tier + AWS SES/S3/SNS pennies (SES via HTTPS, no Workers Paid needed).
 
-## Status
-**Built + merged to `main`** (2026-05-25). All 18 plan tasks complete; worker 30 tests pass,
-dashboard builds, `wrangler deploy --dry-run` validates. **Not yet deployed** — see pre-prod
-checklist in `docs/DEPLOY.md §8` (live SES signing, CF throw→tempfail, SNS signature verify).
+## Codebase Status
+- **Complete & Fully Tested:** Both core implementation and SES inbound architecture are merged and fully functional.
+- **Tests:** 44 passing tests across 16 test files covering all routing, reply, inbound, block, and API flows. Run `cd worker && npm test`.
+- **Polish & UI:** The dashboard features a custom dark mode, unified typography (Inter/Outfit), modern UI components (Toasts, Skeletons, ConfirmDialogs), and complete stats graphs.
+- **Stability:** Cascaded deletion of related records (`reverse_map`, `blocks`, `events`) is implemented when an alias is deleted, preventing "Failed to delete alias" errors.
 
-Test stack modernized vs plan: `@cloudflare/vitest-pool-workers` ^0.16, vitest ^4.1, wrangler ^4.94
-(`cloudflareTest` plugin API — async must live *inside* `cloudflareTest()`, not around `defineConfig`,
-or the Workers pool never activates).
+## Key Design Decisions & Specs
+- **Personal, Single Owner:** Password authentication (PBKDF2) + signed session cookie (HMAC). No users table.
+- **Multi-Domain Support:** Serves N domains (seeded in D1 `domains` table). Each alias can optionally override the default domain destination.
+- **Catch-All Auto-Create:** Automatically registers new aliases on their first inbound email, alongside standard dashboard CRUD.
+- **Self-Describing Reverse Addresses:** Outbound replies use an addy.io style reverse address format: `alias+extLocal=extDomain@domain` (e.g., `shop+alice=store.com@hidemyemail.dev`). Senders with plus/equal characters in their emails are fully supported.
+- **Deliverability & Junk Mitigation:** Inbound emails are re-injected with standard, clean headers:
+  - `From` MIME header is rewritten to: `"Sender Name - sender at email" <alias@domain>` (e.g., `Alice - alice at store.com <shop@hidemyemail.dev>`). `@` signs in the display name are sanitized to ` at ` to prevent junk-folder flagging.
+  - `Reply-To` MIME header is set to the self-describing reverse address.
+  - Envelope sender for outbound SES is set to the reverse address.
+  - Unsafe headers (`DKIM-Signature`, `ARC-Seal`, `ARC-Message-Signature`, `ARC-Authentication-Results`, `Return-Path`, `Sender`) are stripped.
+  - Traceability headers (`X-Reinjected: 1`, `X-Forwarded-For`, `X-Forwarded-To`, `X-Original-From`) are injected.
 
-- Spec: `docs/superpowers/specs/2026-05-24-hidemyemail-alias-service-design.md`
-- Plan (18 TDD tasks, full code): `docs/superpowers/plans/2026-05-24-hidemyemail-alias-service.md`
-- Resume state: `…-alias-service.md.tasks.json` (all complete)
+## Critical Gotchas (Cost Real Time if Forgotten)
+1. **No Cloudflare Forwarding:** We do not use Cloudflare's `message.forward()` because it restricts headers (cannot inject `Reply-To`). Inbound goes through S3 + SES re-inject to control `From` and `Reply-To`.
+2. **SES SigV4 Service Name:** Must be explicitly overridden to `"ses"` in `aws4fetch` (default parsing for `email.{region}.amazonaws.com` picks `"email"` and fails).
+3. **MIME Surgery on Bytes:** Attachments are binary. Split at the first double CRLF (`\r\n\r\n`), modify only the ASCII header block, leave body bytes verbatim, then base64-encode. Never decode the whole message as a string.
+4. **Security & Anti-Spoofing Relay Gate:** Since reverse addresses are self-describing and guessable, `handleReply()` strictly enforces:
+   - The envelope sender must belong to verified owner destinations (`domains.default_destination` or non-NULL `aliases.destination`).
+   - The SES SPF or DMARC verdict must be `"PASS"`.
+   - Fails closed: if SPF/DMARC verdicts fail or are missing, replies are rejected to prevent open relay.
+5. **No D1 batch() SQL String Parsing in Code:** A repo security hook flags the bare `exec`-with-paren pattern. In code/docs, avoid multi-statement string executions; use helpers built from `prepare().run()` for SQL statements.
+6. **Transient SES Errors:** If a transient SES error occurs in `/ses/inbound`, the handler throws so the Worker returns a `5xx` status, triggering SNS/MTA retry. Permanent errors are logged and dropped.
 
-## Locked design decisions
-- **Personal, single owner.** Auth = password (PBKDF2) + signed session cookie (HMAC). No users table.
-- **Multi-domain** (N CF zones, catch-all each → one Worker). **Per-alias destination**, falling back to per-domain default.
-- **Catch-all auto-create** aliases on first inbound + dashboard CRUD.
-- **Full two-way reply-from-alias** via reverse-alias `r.{token}@D` (120-bit random token in D1, stable per (alias,sender)).
-- **Inbound = naive-A: SES re-inject for ALL mail** (rewrite `From` → `"Name via alias" <r.token@D>`, strip DKIM, set Reply-To). Risk accepted: catch-all spam re-sent through SES counts against SES reputation. Guard = sender blocks + rate limits run **before** SES. Future fallback if reputation suffers: hybrid routing (SES only for clean mail to active aliases).
-- Features: sender block/rules, stats/activity log, rate limits. **No PGP.**
-- Fresh start, no migration.
+## Env & Ops Configuration
+Add the following variables in `wrangler.jsonc` or via `wrangler secret put`:
+- `DB`: D1 Database binding
+- `SES_REGION`: AWS region (e.g., `ap-southeast-2`)
+- `S3_INBOUND_BUCKET`: Raw inbound email S3 bucket (e.g., `hidemyemail-inbound-raw`)
+- **Secrets:**
+  - `SES_ACCESS_KEY_ID`: AWS access key for SES and S3
+  - `SES_SECRET_ACCESS_KEY`: AWS secret key
+  - `SESSION_SECRET`: Session signing secret (HMAC)
+  - `AUTH_PASSWORD_HASH`: PBKDF2 password hash (hex)
+  - `AUTH_PASSWORD_SALT`: PBKDF2 salt (hex)
+  - `SNS_ALLOWED_TOPIC_ARN`: Allowed SNS topic for SES outbound notifications (bounces/complaints)
+  - `SNS_INBOUND_TOPIC_ARN`: Allowed SNS topic for SES inbound receipt notifications
 
-## Critical gotchas (cost real time if forgotten)
-1. **`forward()` allows only `X-*` headers** → cannot inject `Reply-To`. This is *why* inbound must go through SES re-inject (to control `From`/`Reply-To`). DMARC alignment then forces `From` = your domain.
-2. **SES SigV4 service name must be overridden to `"ses"`** in `aws4fetch`. Host is `email.{region}.amazonaws.com`, so auto-parse picks `"email"` → signature fails. Always `new AwsClient({..., service: "ses"})`.
-3. **MIME surgery on bytes, not strings** — attachments are binary. Split at first `CRLFCRLF`, edit only the ASCII header block, keep body bytes verbatim, then base64. Never `TextDecode` the whole message.
-4. **Security:** reverse-alias send requires envelope `from` ∈ owner destinations (every `domains.default_destination` + non-NULL `aliases.destination`). Random token alone is not enough; this check stops relay even if a token leaks. Reply flow must strip `From/Sender/Reply-To/Return-Path/Message-ID/DKIM` to avoid leaking the real inbox.
-5. **Repo security hook flags the bare `exec`-with-paren pattern** (it scans for command-injection risk). It false-positives on D1's batch-SQL method (the one that runs a multi-statement string). Avoid that method in code/docs; tests use a `resetDb()` helper built from `prepare().run()` per table.
-6. **SES v2 endpoint:** `POST https://email.{region}.amazonaws.com/v2/email/outbound-emails`, body `{FromEmailAddress, Destination:{ToAddresses}, Content:{Raw:{Data:<base64>}}}`.
-7. **Transient SES error → throw in `email()`** so CF tempfails and the sender's MTA retries; permanent error → log + drop. (Verify CF's throw→retry behavior in testing — open item.)
+*Commits must be signed via 1Password SSH agent:*
+`SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock" git commit -S -m "..."`
 
-## Open items to verify before prod (spec §10)
-CF throw→tempfail retry behavior · 25 MB inbound vs base64-inflated SES 40 MB ceiling · SES sending quota vs catch-all volume · multi-zone catch-all all reach one Worker · SNS signature verification (only TopicArn gate implemented so far).
+## Dev & Build Commands
+- `cd worker && npm install && npm test` — Run complete Vitest suite (Vitest pool workers)
+- `cd worker && npx wrangler dev` — Run local worker with local SPA assets
+- `cd dashboard && npm run dev` — Run dashboard Vite dev server (targets local API)
+- `cd dashboard && npm run build` — Build dashboard static production assets
 
-⚠️ **Reverse-alias relay gate — REVIEW BEFORE PROD.** Reverse addresses are now addy-style
-`alias+local=domain@D` (self-describing, no random token → **guessable**). The only thing
-stopping an open relay is `handleReply`'s gate: envelope sender ∈ owner destinations **AND**
-SES SPF/DMARC verdict = PASS (threaded from receipt → `routeEmail` → `handleReply`, fails
-closed). Before prod, confirm: (a) your real mailbox domain actually emits SPF/DMARC PASS so
-legit replies aren't silently dropped; (b) `mail.source` (envelope, what SPF validates) is
-what `ownerDestinations` checks against — not a header From; (c) decide whether losing the
-120-bit token is an acceptable trade vs the readable format. To revert to unguessable tokens,
-see commit 48d14ba. Reply auth tests: `worker/test/reply.test.ts`, `worker/test/ses-inbound.test.ts`.
-
-## Env / ops
-- Domain `hidemyemail.dev` (app at `app.hidemyemail.dev`). SES production account already approved.
-- Commits must be **signed** via 1Password SSH agent. When the agent is already unlocked, signing works directly from a non-interactive tool shell — no GUI prompt (verified 2026-05-25). Only when the agent is locked does it fall back to the desktop GUI prompt; in that case run signing in an interactive shell (`!`-prefixed or your terminal). Always pass the agent socket:
-  `SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock" git commit -S`
-- See `docs/DEPLOY.md` (created in Task 17) for D1 create, secrets, SES/SNS, DNS, Pages.
-
-## Dev commands
-- `cd worker && npm install && npm test` — worker test suite (Vitest + `@cloudflare/vitest-pool-workers`)
-- `cd worker && npx wrangler dev` — local worker
-- `cd dashboard && npm install && npm run dev` — dashboard against local worker
