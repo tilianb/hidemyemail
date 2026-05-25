@@ -5,6 +5,11 @@
   "compatibility_date": "2026-05-01",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
+  "assets": {
+    "directory": "../dashboard/dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
   "d1_databases": [
     { "binding": "DB", "database_name": "hidemyemail", "database_id": "bb183c55-092f-4b63-85c0-e9d457eed8fa", "migrations_dir": "migrations" }
   ],
