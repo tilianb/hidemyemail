@@ -8,6 +8,8 @@ export interface Env {
   AUTH_PASSWORD_HASH: string;   // hex PBKDF2 output
   AUTH_PASSWORD_SALT: string;   // hex salt
   SNS_ALLOWED_TOPIC_ARN?: string;
+  SNS_INBOUND_TOPIC_ARN?: string;   // SNS topic for SES inbound receipt notifications
+  S3_INBOUND_BUCKET: string;        // S3 bucket where SES stores raw inbound emails
   TEST_MIGRATIONS?: unknown;
 }
 
