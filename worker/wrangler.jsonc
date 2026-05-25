@@ -13,7 +13,7 @@
   "d1_databases": [
     { "binding": "DB", "database_name": "hidemyemail", "database_id": "bb183c55-092f-4b63-85c0-e9d457eed8fa", "migrations_dir": "migrations" }
   ],
-  "vars": { "SES_REGION": "ap-southeast-2", "REVERSE_PREFIX": "r.", "S3_INBOUND_BUCKET": "hidemyemail-inbound-raw" }
+  "vars": { "SES_REGION": "ap-southeast-2", "S3_INBOUND_BUCKET": "hidemyemail-inbound-raw" }
   // Secrets (wrangler secret put): SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY,
   // SESSION_SECRET, AUTH_PASSWORD_HASH, AUTH_PASSWORD_SALT, SNS_ALLOWED_TOPIC_ARN
 }

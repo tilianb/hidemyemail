@@ -12,7 +12,7 @@ function mkMessage(from: string, to: string, raw: string) {
     setReject: vi.fn(), forward: vi.fn(), reply: vi.fn() } as unknown as ForwardableEmailMessage;
 }
 function testEnv(sentinel: { sent: any[] }) {
-  return { ...env, SES_ACCESS_KEY_ID: "AKIA", SES_SECRET_ACCESS_KEY: "s", SES_REGION: "us-east-1", REVERSE_PREFIX: "r.",
+  return { ...env, SES_ACCESS_KEY_ID: "AKIA", SES_SECRET_ACCESS_KEY: "s", SES_REGION: "us-east-1",
     __sesSend: async (_c: any, m: any) => { sentinel.sent.push(m); return "mid"; } } as any;
 }
 const RAW = "From: Alice <alice@store.com>\r\nTo: shop@hidemyemail.dev\r\nSubject: Hi\r\nDKIM-Signature: v=1; x\r\n\r\nhello\r\n";
@@ -24,8 +24,8 @@ test("clean mail to new alias → SES re-inject with rewritten headers", async (
   await handleInbound(mkMessage("alice@store.com", "shop@hidemyemail.dev", RAW), testEnv(sentinel));
   expect(sentinel.sent.length).toBe(1);
   const decoded = atob(sentinel.sent[0].rawBase64);
-  expect(decoded).toContain(`From: "Alice via alice@store.com" <r.`);
-  expect(decoded).toContain("Reply-To: r.");
+  expect(decoded).toContain(`From: "Alice via alice@store.com" <shop+`);
+  expect(decoded).toContain("Reply-To: shop+");
   expect(decoded).not.toContain("DKIM-Signature");
   expect((await q.getAlias(DB(), "shop@hidemyemail.dev"))?.fwd_count).toBe(1);
 });
