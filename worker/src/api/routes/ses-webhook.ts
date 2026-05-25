@@ -25,6 +25,7 @@ export function sesWebhookRoutes() {
         return c.json({ error: "invalid subscribe url" }, 400);
       }
       console.log("SNS SubscribeURL:", subscribeUrl);
+      await fetch(subscribeUrl).catch(console.error);
       return c.json({ ok: true });
     }
 
