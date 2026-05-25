@@ -1,5 +1,9 @@
 {
   "name": "hidemyemail-dashboard",
+  "version": "1.0.0",
+  "description": "React Dashboard for HideMyEmail alias service",
+  "author": "Tilian Burger",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {
