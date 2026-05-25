@@ -17,14 +17,18 @@ export async function getAlias(db: D1Database, fullAddress: string): Promise<Ali
 
 export async function autoCreateAlias(
   db: D1Database, domainId: number, localPart: string, fullAddress: string, source = "auto"
-): Promise<AliasRow> {
+): Promise<AliasRow | null> {
   const existing = await getAlias(db, fullAddress);
   if (existing) return existing;
+
+  const dom = await db.prepare("SELECT user_id, default_destination FROM domains WHERE id = ?").bind(domainId).first<{ user_id: number, default_destination: string | null }>();
+  if (!dom || !dom.default_destination) return null; // Do not auto-create if there is no default destination
+
   await db.prepare(
-    "INSERT INTO aliases (domain_id, local_part, full_address, active, source, created_at) VALUES (?,?,?,1,?,?) " +
+    "INSERT INTO aliases (domain_id, user_id, local_part, full_address, active, source, created_at) VALUES (?,?,?,?,1,?,?) " +
     "ON CONFLICT(full_address) DO NOTHING"
-  ).bind(domainId, localPart, fullAddress, source, Date.now()).run();
-  return (await getAlias(db, fullAddress))!;
+  ).bind(domainId, dom.user_id, localPart, fullAddress, source, Date.now()).run();
+  return await getAlias(db, fullAddress);
 }
 
 export async function setAliasDestination(db: D1Database, id: number, dest: string | null): Promise<void> {
