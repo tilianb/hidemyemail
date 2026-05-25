@@ -3,7 +3,7 @@ import * as q from "../db/queries";
 import { isBlocked } from "../lib/blocks";
 import { streamToBytes, toBase64 } from "../lib/bytes";
 import { parseMime, setHeader, removeHeaders, getHeader, serializeMime } from "../lib/mime";
-import { getOrCreateReverse, reverseAddress } from "../lib/reverse";
+import { reverseAddress } from "../lib/reverse";
 import { sendRaw, SesTransientError } from "../lib/ses";
 import { RATE_PER_HOUR_ALIAS, RATE_PER_HOUR_GLOBAL, MAX_INBOUND_BYTES } from "../config";
 
@@ -45,16 +45,17 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   }
 
   const dest = alias.destination ?? domain.default_destination;
-  const reverse = await getOrCreateReverse(db, alias.id, message.from);
-  const reverseAddr = reverseAddress(localPart, reverse.token, domainName);
+  const reverseAddr = reverseAddress(localPart, message.from, domainName);
 
   const raw = await streamToBytes(message.raw);
   let mime = parseMime(raw);
   const origFrom = getHeader(mime, "From") ?? message.from;
-  // "Sender Name via sender@email" <reverse@domain> — standard display name + origin visible.
+  // addy style: From shows the alias, display name carries the real sender's name + email;
+  // Reply-To is the reverse address so hitting Reply routes back through the alias.
+  // e.g. From: "Alice 'alice@store.com'" <shop@domain>  Reply-To: shop+alice=store.com@domain
   const senderName = extractDisplayName(origFrom);
-  const display = senderName ? `${senderName} via ${message.from}` : `via ${message.from}`;
-  mime = setHeader(mime, "From", `"${sanitize(display)}" <${reverseAddr}>`);
+  const display = senderName ? `${senderName} '${message.from}'` : message.from;
+  mime = setHeader(mime, "From", `"${sanitize(display)}" <${alias.full_address}>`);
   mime = setHeader(mime, "Reply-To", reverseAddr);
   mime = removeHeaders(mime, ["DKIM-Signature", "ARC-Seal", "ARC-Message-Signature", "ARC-Authentication-Results", "Return-Path", "Sender"]);
   mime = setHeader(mime, "X-Reinjected", "1");

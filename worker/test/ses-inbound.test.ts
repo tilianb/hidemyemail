@@ -16,8 +16,9 @@ const RAW_EMAIL = [
   "",
 ].join("\r\n");
 
-function testEnv(opts: { s3Throws?: boolean } = {}) {
+function testEnv(opts: { s3Throws?: boolean; raw?: string } = {}) {
   const sesSent: any[] = [];
+  const raw = opts.raw ?? RAW_EMAIL;
   return {
     ...env,
     SNS_INBOUND_TOPIC_ARN: INBOUND_ARN,
@@ -28,20 +29,27 @@ function testEnv(opts: { s3Throws?: boolean } = {}) {
 
     __s3Fetch: opts.s3Throws
       ? async () => { throw new Error("S3 unavailable"); }
-      : async () => new TextEncoder().encode(RAW_EMAIL),
+      : async () => new TextEncoder().encode(raw),
     __sesSend: async (_c: any, m: any) => { sesSent.push(m); return "mid"; },
     _sesSent: sesSent,
   } as any;
 }
 
-function snsNotification(to = "shop@test.hidemyemail.dev", messageId = "msg-001-test") {
+function snsNotification(
+  to = "shop@test.hidemyemail.dev", messageId = "msg-001-test",
+  opts: { source?: string; spf?: string; dmarc?: string } = {},
+) {
   return JSON.stringify({
     Type: "Notification",
     TopicArn: INBOUND_ARN,
     Message: JSON.stringify({
       notificationType: "Received",
-      mail: { source: "alice@store.com", messageId, destination: [to] },
-      receipt: { recipients: [to] },
+      mail: { source: opts.source ?? "alice@store.com", messageId, destination: [to] },
+      receipt: {
+        recipients: [to],
+        spfVerdict: { status: opts.spf ?? "PASS" },
+        dmarcVerdict: { status: opts.dmarc ?? "PASS" },
+      },
     }),
   });
 }
@@ -75,7 +83,7 @@ test("SubscriptionConfirmation → 200", async () => {
   expect(res.status).toBe(200);
 });
 
-test("valid Received → S3 fetched, handleInbound called, SES sends, 200", async () => {
+test("valid Received → S3 fetched, inbound forwarded, SES sends, 200", async () => {
   const e = testEnv();
   const app = createApp();
   const res = await app.request("/api/ses/inbound", {
@@ -85,8 +93,46 @@ test("valid Received → S3 fetched, handleInbound called, SES sends, 200", asyn
   }, e);
   expect(res.status).toBe(200);
   expect(e._sesSent.length).toBe(1);
-  // MIME surgery: From rewritten to reverse alias
-  expect(atob(e._sesSent[0].rawBase64)).toContain("shop+");
+  // addy-style Reply-To with the sender encoded inline
+  expect(atob(e._sesSent[0].rawBase64)).toContain("Reply-To: shop+alice=store.com@test.hidemyemail.dev");
+});
+
+test("reply to reverse alias routes to handleReply, not a re-wrapped inbound", async () => {
+  await q.autoCreateAlias(env.DB as D1Database, 1, "shop", "shop@test.hidemyemail.dev");
+  const replyRaw = [
+    "From: Me <real@me.com>",
+    "To: shop+alice=store.com@test.hidemyemail.dev",
+    "Subject: Re: Order update",
+    "",
+    "Thanks, got it.",
+    "",
+  ].join("\r\n");
+  const e = testEnv({ raw: replyRaw });
+  const app = createApp();
+  const res = await app.request("/api/ses/inbound", {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: snsNotification("shop+alice=store.com@test.hidemyemail.dev", "msg-reply", { source: "real@me.com", spf: "PASS" }),
+  }, e);
+  expect(res.status).toBe(200);
+  expect(e._sesSent.length).toBe(1);
+  // Sent AS the alias, TO the original external sender — no doubled token.
+  expect(e._sesSent[0].from).toBe("shop@test.hidemyemail.dev");
+  expect(e._sesSent[0].to).toBe("alice@store.com");
+  expect(atob(e._sesSent[0].rawBase64)).not.toContain("=store.com=");
+});
+
+test("reply with SPF fail → no SES send (anti-spoof)", async () => {
+  await q.autoCreateAlias(env.DB as D1Database, 1, "shop", "shop@test.hidemyemail.dev");
+  const e = testEnv({ raw: "From: x\r\nTo: y\r\n\r\nz\r\n" });
+  const app = createApp();
+  const res = await app.request("/api/ses/inbound", {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: snsNotification("shop+alice=store.com@test.hidemyemail.dev", "msg-spoof", { source: "real@me.com", spf: "FAIL", dmarc: "FAIL" }),
+  }, e);
+  expect(res.status).toBe(200);
+  expect(e._sesSent.length).toBe(0);
 });
 
 test("S3 fetch failure → 500 so SNS retries", async () => {

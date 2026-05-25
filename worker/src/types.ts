@@ -20,5 +20,10 @@ export interface AliasRow {
   created_at: number; last_seen_at: number | null;
 }
 export interface ReverseRow { id: number; token: string; alias_id: number; external_sender: string; created_at: number; last_used_at: number | null; }
+
+// Decoded reverse address: "shop+alice=store.com@domain" → { aliasLocal: "shop", externalSender: "alice@store.com" }
+export interface ParsedReverse { aliasLocal: string; externalSender: string; }
+// SES receipt verdicts threaded into reply routing as the anti-spoof gate.
+export interface ReplyAuth { spf?: string; dmarc?: string; }
 export interface BlockRow { id: number; alias_id: number | null; pattern: string; created_at: number; }
 export type EventType = "forward" | "reply" | "block" | "reject" | "error";
