@@ -5,14 +5,16 @@ import { Domains } from "./pages/Domains";
 import { Aliases } from "./pages/Aliases";
 import { Blocks } from "./pages/Blocks";
 import { Stats } from "./pages/Stats";
+import { Destinations } from "./pages/Destinations";
 import { api } from "./api";
-import { Globe, Mail, Ban, BarChart3, LogOut } from "lucide-react";
+import { Globe, Mail, Ban, BarChart3, LogOut, Send } from "lucide-react";
 
-type Tab = "domains" | "aliases" | "blocks" | "stats";
+type Tab = "domains" | "aliases" | "destinations" | "blocks" | "stats";
 
 const NAV = [
   { id: "domains" as Tab, label: "Domains", icon: Globe, title: "Managed domains" },
   { id: "aliases" as Tab, label: "Aliases", icon: Mail, title: "Email aliases" },
+  { id: "destinations" as Tab, label: "Destinations", icon: Send, title: "Verified destinations" },
   { id: "blocks" as Tab, label: "Blocks", icon: Ban, title: "Blocked senders" },
   { id: "stats" as Tab, label: "Stats", icon: BarChart3, title: "Activity & stats" },
 ];
@@ -110,6 +112,7 @@ export function App() {
         <div className="page-content">
           {tab === "domains" && <Domains />}
           {tab === "aliases" && <Aliases />}
+          {tab === "destinations" && <Destinations />}
           {tab === "blocks" && <Blocks />}
           {tab === "stats"  && <Stats />}
         </div>
