@@ -42,11 +42,21 @@ export function aliasRoutes() {
 
   r.delete("/aliases/:id", async (c) => {
     const id = Number(c.req.param("id"));
-    await c.env.DB.prepare("DELETE FROM reverse_map WHERE alias_id=?").bind(id).run();
-    await c.env.DB.prepare("DELETE FROM blocks WHERE alias_id=?").bind(id).run();
-    await c.env.DB.prepare("DELETE FROM events WHERE alias_id=?").bind(id).run();
-    await c.env.DB.prepare("DELETE FROM aliases WHERE id=?").bind(id).run();
-    return c.json({ ok: true });
+    if (isNaN(id)) return c.json({ error: "invalid id" }, 400);
+    try {
+      const exists = await c.env.DB.prepare("SELECT id FROM aliases WHERE id=?").bind(id).first();
+      if (!exists) return c.json({ error: "alias not found" }, 404);
+      await c.env.DB.batch([
+        c.env.DB.prepare("DELETE FROM reverse_map WHERE alias_id=?").bind(id),
+        c.env.DB.prepare("DELETE FROM blocks WHERE alias_id=?").bind(id),
+        c.env.DB.prepare("DELETE FROM events WHERE alias_id=?").bind(id),
+        c.env.DB.prepare("DELETE FROM aliases WHERE id=?").bind(id),
+      ]);
+      return c.json({ ok: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "unknown error";
+      return c.json({ error: `delete failed: ${msg}` }, 500);
+    }
   });
 
   r.get("/aliases/:id/events", async (c) => {
