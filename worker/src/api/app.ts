@@ -8,6 +8,7 @@ import { aliasRoutes } from "./routes/aliases";
 import { blockRoutes } from "./routes/blocks";
 import { statsRoutes } from "./routes/stats";
 import { sesWebhookRoutes } from "./routes/ses-webhook";
+import { sesInboundRoutes } from "./routes/ses-inbound";
 
 export type AppEnv = { Bindings: Env };
 
@@ -17,11 +18,17 @@ export function createApp() {
   // public routes (no session)
   app.route("/api", authRoutes());
   app.route("/api", sesWebhookRoutes());
+  app.route("/api", sesInboundRoutes());
 
   // session guard for everything else under /api
   app.use("/api/*", async (c, next) => {
     const p = new URL(c.req.url).pathname;
-    if (p === "/api/login" || p === "/api/logout" || p === "/api/ses/notification") return next();
+    if (
+      p === "/api/login" ||
+      p === "/api/logout" ||
+      p === "/api/ses/notification" ||
+      p === "/api/ses/inbound"
+    ) return next();
     const token = getCookie(c, "session");
     if (!token || !(await verifySession(c.env.SESSION_SECRET, token))) return c.json({ error: "unauthorized" }, 401);
     return next();
