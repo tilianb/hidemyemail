@@ -23,7 +23,7 @@ export function destinationRoutes() {
     try {
       await c.env.DB.prepare(
         "INSERT INTO destinations (user_id, email, token, created_at) VALUES (?, ?, ?, ?)"
-      ).bind(userId, email, token, Math.floor(Date.now() / 1000)).run();
+      ).bind(userId, email, token, Date.now()).run();
       
       // Send verification email via SES
       if (c.env.SES_ACCESS_KEY_ID && c.env.SES_SECRET_ACCESS_KEY && c.env.SES_REGION) {
@@ -85,7 +85,7 @@ export function verificationRoute() {
       return c.html(`<html><body><h1>Invalid or expired token</h1><p>This verification link has expired or the email is already verified.</p></body></html>`, 400);
     }
 
-    await c.env.DB.prepare("UPDATE destinations SET verified_at = ? WHERE id = ?").bind(Math.floor(Date.now() / 1000), dest.id).run();
+    await c.env.DB.prepare("UPDATE destinations SET verified_at = ? WHERE id = ?").bind(Date.now(), dest.id).run();
     
     return c.html(`<html><body><h1>Email verified!</h1><p>You can now use this email address for forwarding.</p><script>setTimeout(() => window.location.href = '/', 3000);</script></body></html>`);
   });
