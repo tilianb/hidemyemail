@@ -5,14 +5,16 @@ import { Domains } from "./pages/Domains";
 import { Aliases } from "./pages/Aliases";
 import { Blocks } from "./pages/Blocks";
 import { Stats } from "./pages/Stats";
+import { Destinations } from "./pages/Destinations";
 import { api } from "./api";
-import { Globe, Mail, Ban, BarChart3, LogOut } from "lucide-react";
+import { Globe, Mail, Ban, BarChart3, LogOut, Send } from "lucide-react";
 
-type Tab = "domains" | "aliases" | "blocks" | "stats";
+type Tab = "domains" | "aliases" | "destinations" | "blocks" | "stats";
 
 const NAV = [
   { id: "domains" as Tab, label: "Domains", icon: Globe, title: "Managed domains" },
   { id: "aliases" as Tab, label: "Aliases", icon: Mail, title: "Email aliases" },
+  { id: "destinations" as Tab, label: "Destinations", icon: Send, title: "Verified destinations" },
   { id: "blocks" as Tab, label: "Blocks", icon: Ban, title: "Blocked senders" },
   { id: "stats" as Tab, label: "Stats", icon: BarChart3, title: "Activity & stats" },
 ];
@@ -39,13 +41,13 @@ export function App() {
           marginBottom: "20px",
           letterSpacing: "-0.03em"
         }}>
-          hide<span style={{ padding: "2px 6px", margin: "0 2px", background: "rgba(239, 68, 68, 0.15)", color: "#f87171", borderRadius: "4px" }}>my</span>email
+          hide<span className="brand-redact" style={{ fontSize: "16px", padding: "1px 5px", verticalAlign: "middle" }}>my</span>email
         </div>
         <div style={{
           width: "24px",
           height: "24px",
-          border: "2px solid rgba(248, 113, 113, 0.1)",
-          borderTop: "2px solid #f87171",
+          border: "2px solid rgba(255, 179, 0, 0.1)",
+          borderTop: "2px solid #ffb300",
           borderRadius: "50%",
           animation: "spin 1s linear infinite"
         }} />
@@ -67,7 +69,7 @@ export function App() {
       <aside className="sidebar">
         <div className="sidebar-brand">
           <span className="sidebar-logo">
-            hide<span className="redact" title="my email" style={{ padding: "0 2px" }}>my</span>email
+            hide<span className="brand-redact" title="my email" style={{ fontSize: "0.85em", padding: "0 4px", verticalAlign: "middle" }}>my</span>email
           </span>
           <div className="sidebar-logo-sub">.dev — privacy console</div>
         </div>
@@ -110,6 +112,7 @@ export function App() {
         <div className="page-content">
           {tab === "domains" && <Domains />}
           {tab === "aliases" && <Aliases />}
+          {tab === "destinations" && <Destinations />}
           {tab === "blocks" && <Blocks />}
           {tab === "stats"  && <Stats />}
         </div>

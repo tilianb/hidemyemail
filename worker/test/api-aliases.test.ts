@@ -5,21 +5,24 @@ import { signSession } from "../src/lib/auth";
 import { resetDb } from "./helpers";
 
 let testEnv: any; let cookie: string;
-beforeAll(async () => { testEnv = { ...env, SESSION_SECRET: "sek" }; cookie = "session=" + (await signSession("sek", 3600)); });
+beforeAll(async () => { testEnv = { ...env, SESSION_SECRET: "sek" }; cookie = "session=" + (await signSession("sek", 1, 3600)); });
 beforeEach(async () => { await resetDb(env.DB as D1Database); });
 
 test("create domain, create + list + patch + delete alias", async () => {
   const app = createApp();
   const h = { cookie, "Content-Type": "application/json" };
 
-  const cd = await app.request("/api/domains", { method: "POST", headers: h, body: JSON.stringify({ domain: "hidemyemail.dev", default_destination: "real@me.com" }) }, testEnv);
+  await (env.DB as D1Database).prepare("INSERT INTO destinations (user_id, email, token, verified_at, created_at) VALUES (1, 'real@me.com', 'tok1', 123, 123)").run();
+  await (env.DB as D1Database).prepare("INSERT INTO destinations (user_id, email, token, verified_at, created_at) VALUES (1, 'work@me.com', 'tok2', 123, 123)").run();
+
+  const cd = await app.request("/api/domains", { method: "POST", headers: h, body: JSON.stringify({ domain: "test-sub", default_destination: "real@me.com" }) }, testEnv);
   expect(cd.status).toBe(200);
   const { id: domainId } = await cd.json<{ id: number }>();
 
   const ca = await app.request("/api/aliases", { method: "POST", headers: h, body: JSON.stringify({ domain_id: domainId, local_part: "shop", label: "shopping" }) }, testEnv);
   expect(ca.status).toBe(200);
   const alias = await ca.json<{ id: number; full_address: string; source: string }>();
-  expect(alias.full_address).toBe("shop@hidemyemail.dev");
+  expect(alias.full_address).toBe("shop@test-sub.hidemyemail.dev");
   expect(alias.source).toBe("dashboard");
 
   const list = await app.request("/api/aliases", { headers: { cookie } }, testEnv);
