@@ -1,3 +1,56 @@
+export interface Domain {
+  id: number;
+  domain: string;
+  default_destination: string;
+  active: 0 | 1;
+  created_at: number;
+}
+
+export interface Alias {
+  id: number;
+  domain_id: number;
+  local_part: string;
+  full_address: string;
+  destination: string | null;
+  label: string | null;
+  active: 0 | 1;
+  source: string;
+  fwd_count: number;
+  blocked_count: number;
+  reply_count: number;
+  created_at: number;
+  last_seen_at: number | null;
+}
+
+export interface Block {
+  id: number;
+  alias_id: number | null;
+  pattern: string;
+  created_at: number;
+}
+
+export interface EmailEvent {
+  id: number;
+  alias_id: number | null;
+  type: string;
+  external_sender: string | null;
+  subject: string | null;
+  bytes: number | null;
+  detail: string | null;
+  ts: number;
+}
+
+export interface StatsData {
+  totals: { aliases: number; active: number };
+  last24h: { forward: number; reply: number; block: number; reject: number; error: number };
+  topAliases: {
+    full_address: string;
+    fwd_count: number;
+    reply_count: number;
+    blocked_count: number;
+  }[];
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { ...init, credentials: "include", headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } });
   if (res.status === 401) throw new Error("unauthorized");
@@ -15,18 +68,19 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   }
   return res.json() as Promise<T>;
 }
+
 export const api = {
   login: (password: string) => req<{ ok: true }>("/api/login", { method: "POST", body: JSON.stringify({ password }) }),
-  logout: () => req("/api/logout", { method: "POST" }),
-  stats: () => req<any>("/api/stats"),
-  domains: () => req<any[]>("/api/domains"),
-  createDomain: (domain: string, default_destination: string) => req("/api/domains", { method: "POST", body: JSON.stringify({ domain, default_destination }) }),
-  aliases: (q = "") => req<any[]>(`/api/aliases${q ? `?q=${encodeURIComponent(q)}` : ""}`),
-  createAlias: (b: { domain_id: number; local_part: string; destination?: string; label?: string }) => req("/api/aliases", { method: "POST", body: JSON.stringify(b) }),
-  patchAlias: (id: number, b: Record<string, unknown>) => req(`/api/aliases/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
-  deleteAlias: (id: number) => req(`/api/aliases/${id}`, { method: "DELETE" }),
-  events: (id: number) => req<any[]>(`/api/aliases/${id}/events`),
-  blocks: () => req<any[]>("/api/blocks"),
-  createBlock: (pattern: string, alias_id?: number) => req("/api/blocks", { method: "POST", body: JSON.stringify({ pattern, alias_id }) }),
-  deleteBlock: (id: number) => req(`/api/blocks/${id}`, { method: "DELETE" }),
+  logout: () => req<{ ok: true }>("/api/logout", { method: "POST" }),
+  stats: () => req<StatsData>("/api/stats"),
+  domains: () => req<Domain[]>("/api/domains"),
+  createDomain: (domain: string, default_destination: string) => req<Domain>("/api/domains", { method: "POST", body: JSON.stringify({ domain, default_destination }) }),
+  aliases: (q = "") => req<Alias[]>(`/api/aliases${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+  createAlias: (b: { domain_id: number; local_part: string; destination?: string; label?: string }) => req<Alias>("/api/aliases", { method: "POST", body: JSON.stringify(b) }),
+  patchAlias: (id: number, b: Record<string, unknown>) => req<{ ok: true }>(`/api/aliases/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
+  deleteAlias: (id: number) => req<{ ok: true }>(`/api/aliases/${id}`, { method: "DELETE" }),
+  events: (id: number) => req<EmailEvent[]>(`/api/aliases/${id}/events`),
+  blocks: () => req<Block[]>("/api/blocks"),
+  createBlock: (pattern: string, alias_id?: number) => req<Block>("/api/blocks", { method: "POST", body: JSON.stringify({ pattern, alias_id }) }),
+  deleteBlock: (id: number) => req<{ ok: true }>(`/api/blocks/${id}`, { method: "DELETE" }),
 };

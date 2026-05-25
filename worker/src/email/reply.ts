@@ -23,7 +23,7 @@ export async function handleReply(
   // SPF/DMARC verdict PASS so that owner address cannot be spoofed. Fail closed.
   const owners = await q.ownerDestinations(db);
   const fromOwner = owners.has(message.from.toLowerCase());
-  const authOk = !auth || auth.spf === "PASS" || auth.dmarc === "PASS";
+  const authOk = auth?.spf === "PASS" || auth?.dmarc === "PASS";
   if (!fromOwner || !authOk) {
     await q.insertEvent(db, {
       alias_id: alias.id, type: "reject", external_sender: parsed.externalSender,
