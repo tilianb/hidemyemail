@@ -126,7 +126,7 @@ export function Destinations() {
                     </td>
                     <td>
                       <span className="font-mono text-muted" style={{ fontSize: "0.78rem" }}>
-                        {new Date(d.created_at * 1000).toLocaleDateString()}
+                        {new Date(d.created_at > 1e11 ? d.created_at : d.created_at * 1000).toLocaleDateString()}
                       </span>
                     </td>
                     <td>

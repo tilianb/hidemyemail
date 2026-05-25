@@ -33,7 +33,7 @@ export function domainRoutes() {
     try {
       const res = await c.env.DB.prepare(
         "INSERT INTO domains (user_id, is_global, domain, default_destination, created_at) VALUES (?, 0, ?, ?, ?)"
-      ).bind(userId, fullDomain, default_destination ? default_destination.toLowerCase() : null, Math.floor(Date.now() / 1000)).run();
+      ).bind(userId, fullDomain, default_destination ? default_destination.toLowerCase() : null, Date.now()).run();
       
       return c.json({ id: res.meta.last_row_id, domain: fullDomain, default_destination });
     } catch (err: any) {
