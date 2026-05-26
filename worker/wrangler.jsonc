@@ -11,7 +11,13 @@
     "run_worker_first": ["/api/*"]
   },
   "d1_databases": [
-    { "binding": "DB", "database_name": "hidemyemail", "database_id": "bb183c55-092f-4b63-85c0-e9d457eed8fa", "migrations_dir": "migrations" }
+    { 
+      "binding": "DB", 
+      "database_name": "hidemyemail", 
+      "database_id": "bb183c55-092f-4b63-85c0-e9d457eed8fa",
+      "preview_database_id": "16892446-d27c-44ac-b9e1-dec80a64c987",
+      "migrations_dir": "migrations" 
+    }
   ],
   "vars": { "SES_REGION": "ap-southeast-2", "S3_INBOUND_BUCKET": "hidemyemail-inbound-raw" }
   // Secrets (wrangler secret put): SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY,

@@ -6,6 +6,7 @@ import { parseMime, setHeader, removeHeaders, getHeader, serializeMime } from ".
 import { reverseAddress } from "../lib/reverse";
 import { sendRaw, SesTransientError } from "../lib/ses";
 import { RATE_PER_HOUR_ALIAS, RATE_PER_HOUR_GLOBAL, MAX_INBOUND_BYTES } from "../config";
+import { decryptDestination } from "../lib/crypto";
 
 type SesSend = typeof sendRaw;
 
@@ -50,11 +51,12 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
     return;
   }
 
-  const dest = alias.destination ?? domain.default_destination;
-  if (!dest) {
+  const encDest = alias.destination ?? domain.default_destination;
+  if (!encDest) {
     await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "no_destination", ts: now });
     return;
   }
+  const dest = await decryptDestination(encDest, env.DESTINATION_ENCRYPTION_KEY);
   const reverseAddr = reverseAddress(localPart, message.from, domainName);
 
   const raw = await streamToBytes(message.raw);
