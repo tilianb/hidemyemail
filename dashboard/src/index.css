@@ -874,6 +874,7 @@ table.dossier tbody td {
 }
 .form-strip .field { min-width: 140px; }
 .form-strip .field.grow { flex: 1; min-width: 160px; }
+.form-strip > .btn { margin-bottom: 4px; }
 
 /* ─── Reply hint callout ─────────────────────────────────────────────────── */
 .callout {
