@@ -190,6 +190,32 @@ body {
   border-color: rgba(255,80,80,0.2);
   color: var(--red);
 }
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
+}
+.btn-icon:hover {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+.btn-icon:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-accent);
+}
+.btn-icon.danger:hover {
+  background: var(--red-dim);
+  border-color: rgba(255,80,80,0.2);
+  color: var(--red);
+}
 
 /* ─── Form inputs ───────────────────────────────────────────────────────── */
 .field {
@@ -227,6 +253,44 @@ body {
   font-size: 0.82rem;
 }
 select.input { cursor: pointer; }
+
+.input-group {
+  display: flex;
+  align-items: stretch;
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+  overflow: hidden;
+}
+.input-group:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+.input-group .input {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+  outline: none;
+}
+.input-group .input:focus {
+  box-shadow: none;
+}
+.input-suffix {
+  padding: 0 12px;
+  background: var(--surface-2);
+  border-left: 1px solid var(--border-strong);
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  transition: border-color var(--t-fast);
+}
+.input-group:focus-within .input-suffix {
+  border-left-color: var(--accent);
+}
 
 /* ─── Card ───────────────────────────────────────────────────────────────── */
 .card {

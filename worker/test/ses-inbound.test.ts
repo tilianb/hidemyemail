@@ -26,6 +26,7 @@ function testEnv(opts: { s3Throws?: boolean; raw?: string } = {}) {
     SES_ACCESS_KEY_ID: "AKIATEST",
     SES_SECRET_ACCESS_KEY: "testsecret",
     SES_REGION: "ap-southeast-2",
+    SNS_SECRET: "test-sns-secret",
 
     __s3Fetch: opts.s3Throws
       ? async () => { throw new Error("S3 unavailable"); }
@@ -61,7 +62,7 @@ beforeEach(async () => {
 
 test("wrong TopicArn → 403", async () => {
   const app = createApp();
-  const res = await app.request("/api/ses/inbound", {
+  const res = await app.request("/api/ses/inbound?secret=test-sns-secret", {
     method: "POST",
     headers: { "Content-Type": "text/plain" },
     body: JSON.stringify({ Type: "Notification", TopicArn: "arn:aws:sns:ap-southeast-2:999:wrong" }),
@@ -71,7 +72,7 @@ test("wrong TopicArn → 403", async () => {
 
 test("SubscriptionConfirmation → 200", async () => {
   const app = createApp();
-  const res = await app.request("/api/ses/inbound", {
+  const res = await app.request("/api/ses/inbound?secret=test-sns-secret", {
     method: "POST",
     headers: { "Content-Type": "text/plain" },
     body: JSON.stringify({
@@ -86,7 +87,7 @@ test("SubscriptionConfirmation → 200", async () => {
 test("valid Received → S3 fetched, inbound forwarded, SES sends, 200", async () => {
   const e = testEnv();
   const app = createApp();
-  const res = await app.request("/api/ses/inbound", {
+  const res = await app.request("/api/ses/inbound?secret=test-sns-secret", {
     method: "POST",
     headers: { "Content-Type": "text/plain" },
     body: snsNotification(),
@@ -109,7 +110,7 @@ test("reply to reverse alias routes to handleReply, not a re-wrapped inbound", a
   ].join("\r\n");
   const e = testEnv({ raw: replyRaw });
   const app = createApp();
-  const res = await app.request("/api/ses/inbound", {
+  const res = await app.request("/api/ses/inbound?secret=test-sns-secret", {
     method: "POST",
     headers: { "Content-Type": "text/plain" },
     body: snsNotification("shop+alice=store.com@test.hidemyemail.dev", "msg-reply", { source: "real@me.com", spf: "PASS" }),
@@ -126,7 +127,7 @@ test("reply with SPF fail → no SES send (anti-spoof)", async () => {
   await q.autoCreateAlias(env.DB as D1Database, 1, "shop", "shop@test.hidemyemail.dev");
   const e = testEnv({ raw: "From: x\r\nTo: y\r\n\r\nz\r\n" });
   const app = createApp();
-  const res = await app.request("/api/ses/inbound", {
+  const res = await app.request("/api/ses/inbound?secret=test-sns-secret", {
     method: "POST",
     headers: { "Content-Type": "text/plain" },
     body: snsNotification("shop+alice=store.com@test.hidemyemail.dev", "msg-spoof", { source: "real@me.com", spf: "FAIL", dmarc: "FAIL" }),
@@ -137,7 +138,7 @@ test("reply with SPF fail → no SES send (anti-spoof)", async () => {
 
 test("S3 fetch failure → 500 so SNS retries", async () => {
   const app = createApp();
-  const res = await app.request("/api/ses/inbound", {
+  const res = await app.request("/api/ses/inbound?secret=test-sns-secret", {
     method: "POST",
     headers: { "Content-Type": "text/plain" },
     body: snsNotification(),
@@ -148,7 +149,7 @@ test("S3 fetch failure → 500 so SNS retries", async () => {
 test("Received for unknown domain → 200, no SES send", async () => {
   const e = testEnv();
   const app = createApp();
-  const res = await app.request("/api/ses/inbound", {
+  const res = await app.request("/api/ses/inbound?secret=test-sns-secret", {
     method: "POST",
     headers: { "Content-Type": "text/plain" },
     body: snsNotification("anything@unknown.dev", "msg-002"),
@@ -160,7 +161,7 @@ test("Received for unknown domain → 200, no SES send", async () => {
 test("non-Received notificationType → 200 ignored", async () => {
   const e = testEnv();
   const app = createApp();
-  const res = await app.request("/api/ses/inbound", {
+  const res = await app.request("/api/ses/inbound?secret=test-sns-secret", {
     method: "POST",
     headers: { "Content-Type": "text/plain" },
     body: JSON.stringify({

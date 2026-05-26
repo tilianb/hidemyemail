@@ -37,7 +37,7 @@ test("ownerDestinations unions domain defaults and alias overrides", async () =>
   const d = await q.createDomain(DB(), "hidemyemail.dev", "real@me.com");
   const a = await q.autoCreateAlias(DB(), d, "x", "x@hidemyemail.dev");
   await q.setAliasDestination(DB(), a.id, "work@me.com");
-  const set = await q.ownerDestinations(DB());
+  const set = await q.ownerDestinations(DB(), 1);
   expect(set.has("real@me.com")).toBe(true);
   expect(set.has("work@me.com")).toBe(true);
 });

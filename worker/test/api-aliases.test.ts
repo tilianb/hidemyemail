@@ -5,7 +5,7 @@ import { signSession } from "../src/lib/auth";
 import { resetDb } from "./helpers";
 
 let testEnv: any; let cookie: string;
-beforeAll(async () => { testEnv = { ...env, SESSION_SECRET: "sek" }; cookie = "session=" + (await signSession("sek", 1, 3600)); });
+beforeAll(async () => { testEnv = { ...env, SESSION_SECRET: "sek" }; cookie = "__Host-session=" + (await signSession("sek", 1, 3600)); });
 beforeEach(async () => { await resetDb(env.DB as D1Database); });
 
 test("create domain, create + list + patch + delete alias", async () => {
