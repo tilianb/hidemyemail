@@ -2,25 +2,66 @@ import { useState } from "react";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { generatePassphrase } from "../lib/passphrase";
+import { Fingerprint } from "lucide-react";
 
 export function Login() {
   const { refreshAuth } = useAuth();
   const [pw, setPw] = useState("");
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
-
   const [generated, setGenerated] = useState<string | null>(null);
+  const [mfaRequired, setMfaRequired] = useState(false);
+  const [mfaCode, setMfaCode] = useState("");
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr("");
     setLoading(true);
     try {
-      await api.login(pw);
-      await refreshAuth();
+      const result = await api.login(pw);
+      if ("mfa_required" in result && result.mfa_required) {
+        setMfaRequired(true);
+      } else {
+        await refreshAuth();
+      }
     } catch {
       setErr("Access denied — invalid credentials.");
       setPw("");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loginWithPasskey() {
+    setErr("");
+    setLoading(true);
+    try {
+      const options = await api.passkeyLoginChallenge();
+      const { startAuthentication } = await import("@simplewebauthn/browser");
+      const response = await startAuthentication({ optionsJSON: options as unknown as Parameters<typeof startAuthentication>[0]["optionsJSON"] });
+      await api.passkeyLoginVerify(response);
+      await refreshAuth();
+    } catch (err: any) {
+      if (err?.name === "NotAllowedError") {
+        setErr("Passkey sign-in was cancelled.");
+      } else {
+        setErr(err?.message || "Passkey sign-in failed.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function submitMfa(e: React.FormEvent) {
+    e.preventDefault();
+    setErr("");
+    setLoading(true);
+    try {
+      await api.completeMfa(mfaCode);
+      await refreshAuth();
+    } catch {
+      setErr("Invalid authentication code.");
+      setMfaCode("");
     } finally {
       setLoading(false);
     }
@@ -182,7 +223,78 @@ export function Login() {
             AUTHENTICATE
           </div>
 
-          {generated ? (
+          {mfaRequired ? (
+            <form onSubmit={submitMfa} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              <div>
+                <div style={{
+                  fontFamily: "var(--font-display)",
+                  fontSize: "1rem",
+                  fontWeight: 600,
+                  color: "var(--text-primary)",
+                  marginBottom: "6px",
+                }}>
+                  Two-Factor Authentication
+                </div>
+                <p style={{ margin: 0, fontFamily: "var(--font-body)", fontSize: "0.85rem", color: "var(--text-muted)", lineHeight: 1.5 }}>
+                  Enter the 6-digit code from your authenticator app, or one of your backup codes.
+                </p>
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="mfa-code">Authentication code</label>
+                <input
+                  id="mfa-code"
+                  className="input"
+                  type="text"
+                  inputMode="numeric"
+                  value={mfaCode}
+                  onChange={e => setMfaCode(e.target.value.replace(/\s/g, ""))}
+                  placeholder="000000 or XXXX-XXXX"
+                  autoFocus
+                  autoComplete="one-time-code"
+                  disabled={loading}
+                  maxLength={20}
+                />
+              </div>
+              {err && (
+                <div style={{
+                  fontFamily: "var(--font-display)",
+                  fontSize: "0.8rem",
+                  color: "var(--red)",
+                  background: "var(--red-dim)",
+                  border: "1px solid rgba(255,80,80,0.2)",
+                  borderRadius: "var(--radius-sm)",
+                  padding: "8px 12px",
+                  animation: "fade-in 200ms ease",
+                }}>
+                  {err}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: "10px" }}>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => { setMfaRequired(false); setMfaCode(""); setErr(""); }}
+                  disabled={loading}
+                  style={{ flex: 1, justifyContent: "center", padding: "10px 16px", fontSize: "0.85rem", background: "var(--surface-2)", color: "var(--text-secondary)" }}
+                >
+                  ← Back
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={loading || !mfaCode}
+                  style={{ flex: 2, justifyContent: "center", padding: "10px 16px", fontSize: "0.85rem" }}
+                >
+                  {loading ? (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>◌</span>
+                      Verifying…
+                    </span>
+                  ) : "Verify"}
+                </button>
+              </div>
+            </form>
+          ) : generated ? (
             <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
               <div style={{
                 background: "var(--surface-1)",
@@ -217,6 +329,26 @@ export function Login() {
               </button>
             </div>
           ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              {typeof window !== "undefined" && window.PublicKeyCredential && (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={loginWithPasskey}
+                    disabled={loading}
+                    style={{ width: "100%", justifyContent: "center", padding: "10px 16px", fontSize: "0.85rem", gap: 8 }}
+                  >
+                    <Fingerprint size={16} />
+                    {loading ? "Signing in…" : "Sign in with Passkey"}
+                  </button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                    <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontFamily: "var(--font-display)", letterSpacing: "0.08em" }}>OR</span>
+                    <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                  </div>
+                </>
+              )}
             <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
               <div className="field">
                 <label className="field-label" htmlFor="login-pw">Access passphrase</label>
@@ -273,6 +405,7 @@ export function Login() {
                 </button>
               </div>
             </form>
+            </div>
           )}
         </div>
       </div>
