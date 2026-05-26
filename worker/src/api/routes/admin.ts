@@ -85,10 +85,38 @@ export function adminRoutes() {
     const id = parseInt(c.req.param("id"));
     if (isNaN(id) || id === 1) return c.json({ error: "invalid id" }, 400);
 
+    const { sendEmail } = await c.req.json<{ sendEmail?: boolean }>().catch(() => ({}));
+
     const token = crypto.randomUUID();
     const expiresAt = Date.now() + 24 * 3600 * 1000; // 24 hours
 
     await db.prepare("UPDATE users SET recovery_token = ?, recovery_expires_at = ? WHERE id = ?").bind(token, expiresAt, id).run();
+
+    if (sendEmail) {
+      const { decryptDestination } = await import("../../lib/crypto");
+      const { sendRaw } = await import("../../lib/ses");
+      const { buildRecoveryEmail } = await import("../../lib/emails");
+      
+      const dest = await db.prepare("SELECT email FROM destinations WHERE user_id = ? AND is_default = 1").bind(id).first<{ email: string }>();
+      if (!dest) return c.json({ error: "user has no default destination email" }, 400);
+
+      const email = await decryptDestination(dest.email, c.env.DESTINATION_ENCRYPTION_KEY);
+      const url = `${new URL(c.req.url).origin}/recover?token=${token}`;
+      const rawBase64 = buildRecoveryEmail(email, url);
+
+      if (c.env.SES_ACCESS_KEY_ID && c.env.SES_SECRET_ACCESS_KEY && c.env.SES_REGION) {
+        await sendRaw({
+          accessKeyId: c.env.SES_ACCESS_KEY_ID,
+          secretAccessKey: c.env.SES_SECRET_ACCESS_KEY,
+          region: c.env.SES_REGION
+        }, {
+          from: "HideMyEmail <noreply@hidemyemail.dev>",
+          to: email,
+          rawBase64
+        });
+      }
+      return c.json({ ok: true });
+    }
 
     return c.json({ token });
   });

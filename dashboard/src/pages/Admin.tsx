@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type Domain } from "../api";
-import { useToast, TableSkeleton, EmptyState } from "../ui";
+import { useToast, TableSkeleton, EmptyState, ConfirmDialog, PromptDialog, ChoiceDialog } from "../ui";
 import { Users, Trash2, Globe, Cloud, Edit3, Key } from "lucide-react";
 
 export function Admin() {
@@ -12,6 +12,9 @@ export function Admin() {
   const [domainForm, setDomainForm] = useState("");
   const [submittingDomain, setSubmittingDomain] = useState(false);
   const [awsTab, setAwsTab] = useState<"auto" | "manual">("auto");
+  const [confirmState, setConfirmState] = useState<{ title: string; body: string; confirmLabel?: string; onConfirm: () => void } | null>(null);
+  const [promptState, setPromptState] = useState<{ title: string; body: string; defaultValue?: string; confirmLabel?: string; onConfirm: (val: string) => void } | null>(null);
+  const [choiceState, setChoiceState] = useState<{ title: string; body: string; primaryLabel: string; secondaryLabel: string; onPrimary: () => void; onSecondary: () => void; } | null>(null);
 
   async function load() {
     setLoading(true);
@@ -33,16 +36,22 @@ export function Admin() {
 
   useEffect(() => { load(); }, []);
 
-  async function removeUser(id: number) {
+  function requestRemoveUser(id: number) {
     if (id === 1) return toast("Cannot delete admin user", "error");
-    if (!confirm("Are you sure? This will delete the user and all their aliases, domains, blocks, and events permanently.")) return;
-    try {
-      await api.adminDeleteUser(id);
-      toast("User deleted", "success");
-      await load();
-    } catch (err: any) {
-      toast(err.message || "Failed to delete user", "error");
-    }
+    setConfirmState({
+      title: "Delete User",
+      body: "Are you sure? This will delete the user and all their aliases, domains, blocks, and events permanently.",
+      confirmLabel: "Delete User",
+      onConfirm: async () => {
+        try {
+          await api.adminDeleteUser(id);
+          toast("User deleted", "success");
+          await load();
+        } catch (err: any) {
+          toast(err.message || "Failed to delete user", "error");
+        }
+      }
+    });
   }
 
   async function createGlobalDomain(e: React.FormEvent) {
@@ -243,15 +252,21 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
                       <button 
                         className="btn-icon danger" 
                         title="Delete global domain"
-                        onClick={async () => {
-                          if (!confirm(`Delete ${d.domain} and ALL associated aliases for ALL users?`)) return;
-                          try {
-                            await api.deleteDomain(d.id);
-                            toast("Global domain deleted", "success");
-                            await load();
-                          } catch (err: any) {
-                            toast(err.message || "Failed to delete domain", "error");
-                          }
+                        onClick={() => {
+                          setConfirmState({
+                            title: "Delete Global Domain",
+                            body: `Delete ${d.domain} and ALL associated aliases for ALL users?`,
+                            confirmLabel: "Delete Domain",
+                            onConfirm: async () => {
+                              try {
+                                await api.deleteDomain(d.id);
+                                toast("Global domain deleted", "success");
+                                await load();
+                              } catch (err: any) {
+                                toast(err.message || "Failed to delete domain", "error");
+                              }
+                            }
+                          });
                         }}
                       >
                         <Trash2 size={16} />
@@ -295,15 +310,19 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         {u.name || <span className="text-muted" style={{ fontStyle: "italic" }}>Anonymous</span>}
                         {u.id !== 1 && (
-                          <button className="btn-icon" title="Rename user" onClick={async () => {
-                            const newName = prompt("Enter new name for User #" + u.id, u.name || "");
-                            if (newName !== null) {
-                              try {
-                                await api.adminUpdateUser(u.id, { name: newName });
-                                toast("User renamed", "success");
-                                load();
-                              } catch (e: any) { toast(e.message, "error"); }
-                            }
+                          <button className="btn-icon" title="Rename user" onClick={() => {
+                            setPromptState({
+                              title: "Rename User",
+                              body: "Enter new name for User #" + u.id,
+                              defaultValue: u.name || "",
+                              onConfirm: async (newName) => {
+                                try {
+                                  await api.adminUpdateUser(u.id, { name: newName });
+                                  toast("User renamed", "success");
+                                  load();
+                                } catch (e: any) { toast(e.message, "error"); }
+                              }
+                            });
                           }}>
                             <Edit3 size={14} />
                           </button>
@@ -341,16 +360,36 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
                     <td data-label="Actions" style={{ textAlign: "right" }}>
                       {u.id !== 1 && (
                         <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
-                          <button className="btn-icon" title="Generate Recovery Link" onClick={async () => {
-                            try {
-                              const { token } = await api.adminRecoverUser(u.id);
-                              const url = `${window.location.origin}/recover?token=${token}`;
-                              prompt("Copy this secure 24-hour recovery link and send it to the user:", url);
-                            } catch (err: any) { toast(err.message, "error"); }
+                          <button className="btn-icon" title="Recover User" onClick={() => {
+                            setChoiceState({
+                              title: "Recover User",
+                              body: "How would you like to deliver the recovery link?",
+                              primaryLabel: "Send via Email",
+                              onPrimary: async () => {
+                                try {
+                                  await api.adminRecoverUser(u.id, true);
+                                  toast("Recovery email sent to user", "success");
+                                } catch (err: any) { toast(err.message, "error"); }
+                              },
+                              secondaryLabel: "Copy Link",
+                              onSecondary: async () => {
+                                try {
+                                  const { token } = await api.adminRecoverUser(u.id, false);
+                                  const url = `${window.location.origin}/recover?token=${token}`;
+                                  setPromptState({
+                                    title: "Recovery Link",
+                                    body: "Copy this secure 24-hour recovery link and send it to the user:",
+                                    defaultValue: url,
+                                    confirmLabel: "Done",
+                                    onConfirm: () => {}
+                                  });
+                                } catch (err: any) { toast(err.message, "error"); }
+                              }
+                            });
                           }}>
                             <Key size={16} />
                           </button>
-                          <button className="btn-icon danger" onClick={() => removeUser(u.id)} title="Delete user">
+                          <button className="btn-icon danger" onClick={() => requestRemoveUser(u.id)} title="Delete user">
                             <Trash2 size={16} />
                           </button>
                         </div>
@@ -370,6 +409,37 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
           )}
         </div>
       </div>
+      
+      {confirmState && (
+        <ConfirmDialog
+          title={confirmState.title}
+          body={confirmState.body}
+          confirmLabel={confirmState.confirmLabel}
+          onConfirm={() => { confirmState.onConfirm(); setConfirmState(null); }}
+          onCancel={() => setConfirmState(null)}
+        />
+      )}
+      {promptState && (
+        <PromptDialog
+          title={promptState.title}
+          body={promptState.body}
+          defaultValue={promptState.defaultValue}
+          confirmLabel={promptState.confirmLabel}
+          onConfirm={(val) => { promptState.onConfirm(val); setPromptState(null); }}
+          onCancel={() => setPromptState(null)}
+        />
+      )}
+      {choiceState && (
+        <ChoiceDialog
+          title={choiceState.title}
+          body={choiceState.body}
+          primaryLabel={choiceState.primaryLabel}
+          secondaryLabel={choiceState.secondaryLabel}
+          onPrimary={() => { choiceState.onPrimary(); setChoiceState(null); }}
+          onSecondary={() => { choiceState.onSecondary(); setChoiceState(null); }}
+          onCancel={() => setChoiceState(null)}
+        />
+      )}
     </div>
   );
 }

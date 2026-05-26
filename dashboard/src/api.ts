@@ -111,7 +111,10 @@ export const api = {
   adminUsers: () => req<{ users: { id: number; created_at: number; alias_count: number; active: number; forwarding: number; name: string | null }[] }>("/api/admin/users"),
   adminDeleteUser: (id: number) => req<{ ok: true }>(`/api/admin/users/${id}`, { method: "DELETE" }),
   adminUpdateUser: (id: number, data: { active?: number; forwarding?: number; name?: string }) => req<{ ok: true }>(`/api/admin/users/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
-  adminRecoverUser: (id: number) => req<{ token: string }>(`/api/admin/users/${id}/recovery`, { method: "POST" }),
+  adminRecoverUser: (id: number, sendEmail: boolean) => req<{ token: string; ok?: boolean }>(`/api/admin/users/${id}/recovery`, { method: "POST", body: JSON.stringify({ sendEmail }) }),
   adminCreateDomain: (domain: string) => req<{ ok: true }>("/api/admin/domains", { method: "POST", body: JSON.stringify({ domain }) }),
-  recover: (token: string, password: string) => req<{ ok: true }>("/api/recover", { method: "POST", body: JSON.stringify({ token, password }) }),
+
+  // Recovery endpoints
+  recoverSendCode: (token: string) => req<{ ok: true }>("/api/recover/send-code", { method: "POST", body: JSON.stringify({ token }) }),
+  recoverVerify: (token: string, code: string) => req<{ ok: true; passphrase: string }>("/api/recover/verify", { method: "POST", body: JSON.stringify({ token, code }) }),
 };

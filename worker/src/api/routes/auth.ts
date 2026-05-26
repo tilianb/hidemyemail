@@ -102,37 +102,78 @@ export function authRoutes() {
     return c.json({ ok: true });
   });
 
-  r.post("/recover", async (c) => {
+  r.post("/recover/send-code", async (c) => {
     const ip = c.req.header("cf-connecting-ip") || "unknown";
     if (!(await checkRateLimit(ip, c.env.DB))) {
       return c.json({ error: "too many attempts" }, 429);
     }
 
-    const { token, password } = await c.req.json<{ token: string; password: string }>().catch(() => ({ token: "", password: "" }));
-    if (!token || !password || password.length < 16) {
-      return c.json({ error: "invalid request or weak passphrase" }, 400);
-    }
+    const { token } = await c.req.json<{ token: string }>().catch(() => ({ token: "" }));
+    if (!token) return c.json({ error: "invalid request" }, 400);
 
     const db = c.env.DB;
     const user = await db.prepare(
       "SELECT id FROM users WHERE recovery_token = ? AND recovery_expires_at > ?"
     ).bind(token, Date.now()).first<{ id: number }>();
 
-    if (!user) {
-      return c.json({ error: "Invalid or expired recovery token" }, 400);
+    if (!user) return c.json({ error: "Invalid or expired recovery token" }, 400);
+
+    const dest = await db.prepare("SELECT email FROM destinations WHERE user_id = ? AND is_default = 1").bind(user.id).first<{ email: string }>();
+    if (!dest) return c.json({ error: "User has no default destination email" }, 400);
+
+    const { decryptDestination } = await import("../../lib/crypto");
+    const { sendRaw } = await import("../../lib/ses");
+    const { buildMfaEmail } = await import("../../lib/emails");
+
+    const email = await decryptDestination(dest.email, c.env.DESTINATION_ENCRYPTION_KEY);
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+    await db.prepare("UPDATE users SET recovery_mfa_code = ? WHERE id = ?").bind(code, user.id).run();
+
+    if (c.env.SES_ACCESS_KEY_ID && c.env.SES_SECRET_ACCESS_KEY && c.env.SES_REGION) {
+      await sendRaw({
+        accessKeyId: c.env.SES_ACCESS_KEY_ID,
+        secretAccessKey: c.env.SES_SECRET_ACCESS_KEY,
+        region: c.env.SES_REGION
+      }, {
+        from: "HideMyEmail <noreply@hidemyemail.dev>",
+        to: email,
+        rawBase64: buildMfaEmail(email, code)
+      });
     }
 
-    const hash = await derivePassphraseHash(password, c.env.AUTH_PASSWORD_SALT);
+    return c.json({ ok: true });
+  });
+
+  r.post("/recover/verify", async (c) => {
+    const ip = c.req.header("cf-connecting-ip") || "unknown";
+    if (!(await checkRateLimit(ip, c.env.DB))) {
+      return c.json({ error: "too many attempts" }, 429);
+    }
+
+    const { token, code } = await c.req.json<{ token: string; code: string }>().catch(() => ({ token: "", code: "" }));
+    if (!token || !code) return c.json({ error: "invalid request" }, 400);
+
+    const db = c.env.DB;
+    const user = await db.prepare(
+      "SELECT id FROM users WHERE recovery_token = ? AND recovery_mfa_code = ? AND recovery_expires_at > ?"
+    ).bind(token, code, Date.now()).first<{ id: number }>();
+
+    if (!user) return c.json({ error: "Invalid token or code" }, 400);
+
+    const { generatePassphrase } = await import("../../lib/passphrase");
+    const newPassphrase = generatePassphrase();
+    const hash = await derivePassphraseHash(newPassphrase, c.env.AUTH_PASSWORD_SALT);
     
     await db.prepare(
-      "UPDATE users SET passphrase_hash = ?, recovery_token = NULL, recovery_expires_at = NULL WHERE id = ?"
+      "UPDATE users SET passphrase_hash = ?, recovery_token = NULL, recovery_expires_at = NULL, recovery_mfa_code = NULL WHERE id = ?"
     ).bind(hash, user.id).run();
 
     // Log them in immediately
     const sessionId = await signSession(c.env.SESSION_SECRET, user.id, SESSION_TTL);
     setCookie(c, "__Host-session", sessionId, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
     
-    return c.json({ ok: true });
+    return c.json({ ok: true, passphrase: newPassphrase });
   });
 
   return r;
