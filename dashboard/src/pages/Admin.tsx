@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { api, type Domain } from "../api";
 import { useToast, TableSkeleton, EmptyState } from "../ui";
-import { Users, Trash2, Globe, Cloud } from "lucide-react";
+import { Users, Trash2, Globe, Cloud, Edit3, Key } from "lucide-react";
 
 export function Admin() {
   const { toast } = useToast();
-  const [users, setUsers] = useState<{ id: number; created_at: number; alias_count: number }[]>([]);
+  const [users, setUsers] = useState<{ id: number; created_at: number; alias_count: number; active: number; forwarding: number; name: string | null }[]>([]);
   const [stats, setStats] = useState<{ users: number; aliases: number; active: number } | null>(null);
   const [globalDomains, setGlobalDomains] = useState<Domain[]>([]);
   const [loading, setLoading] = useState(true);
@@ -272,12 +272,15 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
         <div className="table-wrap table-wrap-stack">
           <table className="dossier dossier-stack">
             <thead>
-              <tr>
-                <th>ID</th>
-                <th>Joined</th>
-                <th>Aliases</th>
-                <th style={{ width: 40 }}></th>
-              </tr>
+                <tr>
+                  <th style={{ width: 80 }}>User ID</th>
+                  <th>Name</th>
+                  <th>Joined</th>
+                  <th>Aliases</th>
+                  <th style={{ textAlign: "center" }}>Login</th>
+                  <th style={{ textAlign: "center" }}>Email</th>
+                  <th style={{ textAlign: "right" }}>Actions</th>
+                </tr>
             </thead>
             {loading ? (
               <TableSkeleton cols={4} rows={3} />
@@ -285,22 +288,72 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
               <tbody>
                 {users.map(u => (
                   <tr key={u.id}>
-                    <td data-label="ID">
-                      <span className="font-mono">#{u.id} {u.id === 1 && <span className="badge badge-purple" style={{marginLeft: 8}}>Admin</span>}</span>
+                    <td data-label="ID" className="font-mono text-muted">
+                      #{u.id} {u.id === 1 && <span className="badge badge-amber" style={{marginLeft: 8}}>Admin</span>}
+                    </td>
+                    <td data-label="Name">
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        {u.name || <span className="text-muted" style={{ fontStyle: "italic" }}>Anonymous</span>}
+                        {u.id !== 1 && (
+                          <button className="btn-icon" title="Rename user" onClick={async () => {
+                            const newName = prompt("Enter new name for User #" + u.id, u.name || "");
+                            if (newName !== null) {
+                              try {
+                                await api.adminUpdateUser(u.id, { name: newName });
+                                toast("User renamed", "success");
+                                load();
+                              } catch (e: any) { toast(e.message, "error"); }
+                            }
+                          }}>
+                            <Edit3 size={14} />
+                          </button>
+                        )}
+                      </div>
                     </td>
                     <td data-label="Joined">
                       <span className="text-muted">
                         {new Date(u.created_at > 1e11 ? u.created_at : u.created_at * 1000).toLocaleDateString()}
                       </span>
                     </td>
-                    <td data-label="Aliases">
-                      {u.alias_count}
+                    <td data-label="Aliases">{u.alias_count}</td>
+                    <td data-label="Login" style={{ textAlign: "center" }}>
+                      <label className="switch" style={{ margin: "0 auto", opacity: u.id === 1 ? 0.5 : 1 }}>
+                        <input type="checkbox" checked={u.active === 1} disabled={u.id === 1} onChange={async (e) => {
+                          try {
+                            await api.adminUpdateUser(u.id, { active: e.target.checked ? 1 : 0 });
+                            load();
+                          } catch (err: any) { toast(err.message, "error"); }
+                        }} />
+                        <span className="switch-track"></span>
+                      </label>
                     </td>
-                    <td>
+                    <td data-label="Email" style={{ textAlign: "center" }}>
+                      <label className="switch" style={{ margin: "0 auto", opacity: u.id === 1 ? 0.5 : 1 }}>
+                        <input type="checkbox" checked={u.forwarding === 1} disabled={u.id === 1} onChange={async (e) => {
+                          try {
+                            await api.adminUpdateUser(u.id, { forwarding: e.target.checked ? 1 : 0 });
+                            load();
+                          } catch (err: any) { toast(err.message, "error"); }
+                        }} />
+                        <span className="switch-track"></span>
+                      </label>
+                    </td>
+                    <td data-label="Actions" style={{ textAlign: "right" }}>
                       {u.id !== 1 && (
-                        <button className="btn-icon danger" onClick={() => removeUser(u.id)} title="Delete user">
-                          <Trash2 size={16} />
-                        </button>
+                        <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                          <button className="btn-icon" title="Generate Recovery Link" onClick={async () => {
+                            try {
+                              const { token } = await api.adminRecoverUser(u.id);
+                              const url = `${window.location.origin}/recover?token=${token}`;
+                              prompt("Copy this secure 24-hour recovery link and send it to the user:", url);
+                            } catch (err: any) { toast(err.message, "error"); }
+                          }}>
+                            <Key size={16} />
+                          </button>
+                          <button className="btn-icon danger" onClick={() => removeUser(u.id)} title="Delete user">
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>

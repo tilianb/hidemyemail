@@ -43,10 +43,17 @@ export function authRoutes() {
     } else {
       // Check for a regular user
       const hash = await derivePassphraseHash(password, c.env.AUTH_PASSWORD_SALT);
-      const user = await c.env.DB.prepare("SELECT id FROM users WHERE passphrase_hash = ?").bind(hash).first<{ id: number }>();
-      if (user) {
-        userId = user.id;
-      }
+      const user = await c.env.DB.prepare(
+      "SELECT id, active FROM users WHERE passphrase_hash = ?"
+    ).bind(hash).first<{ id: number; active: number }>();
+
+    if (!user) {
+      return c.json({ error: "Invalid passphrase" }, 401);
+    }
+    if (user.active === 0) {
+      return c.json({ error: "Account is disabled" }, 403);
+    }
+    userId = user.id;
     }
 
     if (!userId) return c.json({ error: "invalid" }, 401);
@@ -92,6 +99,39 @@ export function authRoutes() {
 
   r.post("/logout", (c) => {
     deleteCookie(c, "__Host-session", { path: "/", secure: true });
+    return c.json({ ok: true });
+  });
+
+  r.post("/recover", async (c) => {
+    const ip = c.req.header("cf-connecting-ip") || "unknown";
+    if (!(await checkRateLimit(ip, c.env.DB))) {
+      return c.json({ error: "too many attempts" }, 429);
+    }
+
+    const { token, password } = await c.req.json<{ token: string; password: string }>().catch(() => ({ token: "", password: "" }));
+    if (!token || !password || password.length < 16) {
+      return c.json({ error: "invalid request or weak passphrase" }, 400);
+    }
+
+    const db = c.env.DB;
+    const user = await db.prepare(
+      "SELECT id FROM users WHERE recovery_token = ? AND recovery_expires_at > ?"
+    ).bind(token, Date.now()).first<{ id: number }>();
+
+    if (!user) {
+      return c.json({ error: "Invalid or expired recovery token" }, 400);
+    }
+
+    const hash = await derivePassphraseHash(password, c.env.AUTH_PASSWORD_SALT);
+    
+    await db.prepare(
+      "UPDATE users SET passphrase_hash = ?, recovery_token = NULL, recovery_expires_at = NULL WHERE id = ?"
+    ).bind(hash, user.id).run();
+
+    // Log them in immediately
+    const sessionId = await signSession(c.env.SESSION_SECRET, user.id, SESSION_TTL);
+    setCookie(c, "__Host-session", sessionId, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
+    
     return c.json({ ok: true });
   });
 

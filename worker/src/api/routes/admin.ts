@@ -46,12 +46,51 @@ export function adminRoutes() {
       SELECT 
         u.id, 
         u.created_at,
+        u.active,
+        u.forwarding,
+        u.name,
         (SELECT COUNT(*) FROM aliases a WHERE a.user_id = u.id) as alias_count
       FROM users u
       ORDER BY u.id ASC
     `).all();
     
     return c.json({ users: users.results ?? [] });
+  });
+
+  // Update user
+  r.patch("/users/:id", async (c) => {
+    const db = c.env.DB;
+    const id = parseInt(c.req.param("id"));
+    if (isNaN(id) || id === 1) return c.json({ error: "invalid id" }, 400);
+
+    const { active, forwarding, name } = await c.req.json<{ active?: number, forwarding?: number, name?: string }>().catch(() => ({}));
+    
+    const updates: string[] = [];
+    const values: any[] = [];
+    if (active !== undefined) { updates.push("active = ?"); values.push(active ? 1 : 0); }
+    if (forwarding !== undefined) { updates.push("forwarding = ?"); values.push(forwarding ? 1 : 0); }
+    if (name !== undefined) { updates.push("name = ?"); values.push(name || null); }
+
+    if (updates.length > 0) {
+      values.push(id);
+      await db.prepare(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`).bind(...values).run();
+    }
+    
+    return c.json({ ok: true });
+  });
+
+  // Generate Recovery Token
+  r.post("/users/:id/recovery", async (c) => {
+    const db = c.env.DB;
+    const id = parseInt(c.req.param("id"));
+    if (isNaN(id) || id === 1) return c.json({ error: "invalid id" }, 400);
+
+    const token = crypto.randomUUID();
+    const expiresAt = Date.now() + 24 * 3600 * 1000; // 24 hours
+
+    await db.prepare("UPDATE users SET recovery_token = ?, recovery_expires_at = ? WHERE id = ?").bind(token, expiresAt, id).run();
+
+    return c.json({ token });
   });
 
   // Delete user (cascade delete is assumed in DB schema or logic)

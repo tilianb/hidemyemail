@@ -7,6 +7,7 @@ import { Blocks } from "./pages/Blocks";
 import { Stats } from "./pages/Stats";
 import { Destinations } from "./pages/Destinations";
 import { Admin } from "./pages/Admin";
+import { Recover } from "./pages/Recover";
 import { api } from "./api";
 import { Globe, Mail, Ban, BarChart3, LogOut, Send, Shield } from "lucide-react";
 import { useToast } from "./ui";
@@ -22,7 +23,7 @@ const BASE_NAV = [
 ];
 
 export function App() {
-  const { authed, isAdmin, setAuthed, loading } = useAuth();
+  const { authed, isAdmin, userName, setAuthed, loading } = useAuth();
   const [tab, setTab] = useState<Tab>("domains");
 
   const { toast } = useToast();
@@ -77,6 +78,8 @@ export function App() {
       </div>
     );
   }
+
+  if (window.location.pathname === "/recover") return <Recover />;
 
   if (!authed) return <Login />;
 
@@ -135,7 +138,12 @@ export function App() {
       </aside>
 
       {/* Main content */}
-      <main className="page-main">
+      <main className="page-main" style={{ position: "relative" }}>
+        <div style={{ position: "absolute", top: 32, right: 32, display: "flex", alignItems: "center", gap: 12, zIndex: 10 }}>
+          <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
+            Logged in as <strong style={{ color: "var(--text-primary)", fontWeight: 600 }}>{userName}</strong>
+          </span>
+        </div>
         <div className="page-content">
           {tab === "domains" && <Domains />}
           {tab === "aliases" && <Aliases />}

@@ -32,6 +32,12 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
     return;
   }
 
+  const userRow = await db.prepare("SELECT forwarding FROM users WHERE id = ?").bind(alias.user_id).first<{ forwarding: number }>();
+  if (!userRow || userRow.forwarding === 0) {
+    await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "user_forwarding_disabled", ts: now });
+    return;
+  }
+
   const rules = await q.listBlocks(db, alias.id, alias.user_id);
   if (isBlocked(rules, message.from)) {
     await q.insertEvent(db, { alias_id: alias.id, type: "block", external_sender: message.from, ts: now });
