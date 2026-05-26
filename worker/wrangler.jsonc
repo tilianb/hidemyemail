@@ -19,7 +19,20 @@
       "migrations_dir": "migrations" 
     }
   ],
+  "env": {
+    "preview": {
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "hidemyemail-dev",
+          "database_id": "16892446-d27c-44ac-b9e1-dec80a64c987"
+        }
+      ]
+    }
+  },
   "vars": { "SES_REGION": "ap-southeast-2", "S3_INBOUND_BUCKET": "hidemyemail-inbound-raw" }
   // Secrets (wrangler secret put): SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY,
   // SESSION_SECRET, AUTH_PASSWORD_HASH, AUTH_PASSWORD_SALT, SNS_ALLOWED_TOPIC_ARN
+
+
 }
