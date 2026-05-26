@@ -175,13 +175,12 @@ export function Blocks() {
                     </td>
                     <td>
                       <button
-                        className="btn btn-danger"
+                        className="btn-icon danger"
                         type="button"
                         onClick={() => setDeleteTarget({ id: b.id, pattern: b.pattern })}
-                        title="Remove block"
-                        style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "6px" }}
+                        title="Delete block"
                       >
-                        <Trash2 size={14} />
+                        <Trash2 size={16} />
                       </button>
                     </td>
                   </tr>
