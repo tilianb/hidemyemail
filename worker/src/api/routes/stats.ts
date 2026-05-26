@@ -17,7 +17,7 @@ export function statsRoutes() {
     ).bind(userId).all();
     const last24h: Record<string, number> = { forward: 0, reply: 0, block: 0, reject: 0, error: 0 };
     for (const row of byType.results ?? []) last24h[row.type] = row.n;
-    return c.json({ totals: { aliases: aliases?.n ?? 0, active: active?.n ?? 0 }, last24h, topAliases: top.results ?? [] });
+    return c.json({ totals: { aliases: aliases?.n ?? 0, active: active?.n ?? 0 }, last24h, topAliases: top.results ?? [], isAdmin: userId === 1 });
   });
   return r;
 }

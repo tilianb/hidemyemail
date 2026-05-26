@@ -6,13 +6,14 @@ import { Aliases } from "./pages/Aliases";
 import { Blocks } from "./pages/Blocks";
 import { Stats } from "./pages/Stats";
 import { Destinations } from "./pages/Destinations";
+import { Admin } from "./pages/Admin";
 import { api } from "./api";
-import { Globe, Mail, Ban, BarChart3, LogOut, Send } from "lucide-react";
+import { Globe, Mail, Ban, BarChart3, LogOut, Send, Shield } from "lucide-react";
 import { useToast } from "./ui";
 
-type Tab = "domains" | "aliases" | "destinations" | "blocks" | "stats";
+type Tab = "domains" | "aliases" | "destinations" | "blocks" | "stats" | "admin";
 
-const NAV = [
+const BASE_NAV = [
   { id: "domains" as Tab, label: "Domains", icon: Globe, title: "Managed domains" },
   { id: "aliases" as Tab, label: "Aliases", icon: Mail, title: "Email aliases" },
   { id: "destinations" as Tab, label: "Destinations", icon: Send, title: "Verified destinations" },
@@ -21,10 +22,14 @@ const NAV = [
 ];
 
 export function App() {
-  const { authed, setAuthed, loading } = useAuth();
+  const { authed, isAdmin, setAuthed, loading } = useAuth();
   const [tab, setTab] = useState<Tab>("domains");
 
   const { toast } = useToast();
+
+  const navItems = isAdmin
+    ? [...BASE_NAV, { id: "admin" as Tab, label: "Admin", icon: Shield, title: "System Administration" }]
+    : BASE_NAV;
 
   const logout = async () => {
     try {
@@ -97,7 +102,7 @@ export function App() {
         </div>
 
         <nav className="sidebar-nav">
-          {NAV.map(n => {
+          {navItems.map(n => {
             const Icon = n.icon;
             return (
               <button
@@ -137,6 +142,7 @@ export function App() {
           {tab === "destinations" && <Destinations />}
           {tab === "blocks" && <Blocks />}
           {tab === "stats"  && <Stats />}
+          {tab === "admin" && isAdmin && <Admin />}
         </div>
       </main>
     </div>
