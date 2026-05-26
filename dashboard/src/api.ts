@@ -51,6 +51,8 @@ export interface StatsData {
     reply_count: number;
     blocked_count: number;
   }[];
+  isAdmin?: boolean;
+  userName?: string;
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -103,4 +105,16 @@ export const api = {
   blocks: () => req<Block[]>("/api/blocks"),
   createBlock: (pattern: string, alias_id?: number) => req<Block>("/api/blocks", { method: "POST", body: JSON.stringify({ pattern, alias_id }) }),
   deleteBlock: (id: number) => req<{ ok: true }>(`/api/blocks/${id}`, { method: "DELETE" }),
+
+  // Admin endpoints
+  adminStats: () => req<{ totals: { users: number; aliases: number; active: number }; last24h: Record<string, number> }>("/api/admin/stats"),
+  adminUsers: () => req<{ users: { id: number; created_at: number; alias_count: number; active: number; forwarding: number; name: string | null }[] }>("/api/admin/users"),
+  adminDeleteUser: (id: number) => req<{ ok: true }>(`/api/admin/users/${id}`, { method: "DELETE" }),
+  adminUpdateUser: (id: number, data: { active?: number; forwarding?: number; name?: string }) => req<{ ok: true }>(`/api/admin/users/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  adminRecoverUser: (id: number, sendEmail: boolean) => req<{ token: string; ok?: boolean }>(`/api/admin/users/${id}/recovery`, { method: "POST", body: JSON.stringify({ sendEmail }) }),
+  adminCreateDomain: (domain: string) => req<{ ok: true }>("/api/admin/domains", { method: "POST", body: JSON.stringify({ domain }) }),
+
+  // Recovery endpoints
+  recoverSendCode: (token: string) => req<{ ok: true }>("/api/recover/send-code", { method: "POST", body: JSON.stringify({ token }) }),
+  recoverVerify: (token: string, code: string) => req<{ ok: true; passphrase: string }>("/api/recover/verify", { method: "POST", body: JSON.stringify({ token, code }) }),
 };
