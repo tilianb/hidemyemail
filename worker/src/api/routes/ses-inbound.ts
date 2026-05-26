@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import { routeEmail } from "../../email/router";
 import { fetchS3Object } from "../../lib/s3";
+import { timingSafeEqual } from "../../lib/auth";
 
 export function sesInboundRoutes() {
   const r = new Hono<AppEnv>();
@@ -10,9 +11,9 @@ export function sesInboundRoutes() {
     const body = await c.req.json<any>().catch(() => null);
     if (!body) return c.json({ error: "bad body" }, 400);
 
-    // Secure webhook verification via secret token query parameter
-    const secret = c.req.query("secret");
-    if (c.env.SNS_SECRET && secret !== c.env.SNS_SECRET) {
+    // Webhook authentication — SNS_SECRET must be set
+    const secret = c.req.header("x-webhook-secret") || c.req.query("secret") || "";
+    if (!c.env.SNS_SECRET || !timingSafeEqual(secret, c.env.SNS_SECRET)) {
       return c.json({ error: "unauthorized" }, 401);
     }
 
@@ -27,8 +28,7 @@ export function sesInboundRoutes() {
       if (typeof subscribeUrl !== "string" || !/^https:\/\/sns\.[a-z0-9-]+\.amazonaws\.com\//i.test(subscribeUrl)) {
         return c.json({ error: "invalid subscribe url" }, 400);
       }
-      console.log("SNS inbound SubscribeURL:", subscribeUrl);
-      await fetch(subscribeUrl).catch(console.error);
+      console.log("SNS inbound SubscribeURL (confirm manually):", subscribeUrl);
       return c.json({ ok: true });
     }
 

@@ -1,6 +1,13 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
 
+// Validate email local part (RFC 5321 safe subset)
+function isValidLocalPart(s: string): boolean {
+  if (!s || s.length > 64) return false;
+  // Allow lowercase alphanumeric, dots, hyphens; no leading/trailing dot/hyphen, no consecutive dots
+  return /^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/.test(s) && !s.includes("..");
+}
+
 export function aliasRoutes() {
   const r = new Hono<AppEnv>();
 
@@ -38,6 +45,9 @@ export function aliasRoutes() {
       localPart = Array.from(arr).map(x => chars[x % chars.length]).join("");
     } else {
       if (localPart.startsWith("r.")) return c.json({ error: "reserved prefix" }, 400);
+      if (!isValidLocalPart(localPart)) {
+        return c.json({ error: "invalid local part — use only letters, numbers, dots, hyphens" }, 400);
+      }
     }
     
     const full = `${localPart}@${dom.domain}`;
@@ -67,7 +77,10 @@ export function aliasRoutes() {
     }
 
     const sets: string[] = []; const vals: unknown[] = [];
-    if (b.active !== undefined) { sets.push("active=?"); vals.push(b.active); }
+    if (b.active !== undefined) {
+      if (b.active !== 0 && b.active !== 1) return c.json({ error: "active must be 0 or 1" }, 400);
+      sets.push("active=?"); vals.push(b.active);
+    }
     if (b.destination !== undefined) { sets.push("destination=?"); vals.push(b.destination ? b.destination.toLowerCase() : null); }
     if (b.label !== undefined) { sets.push("label=?"); vals.push(b.label); }
     if (!sets.length) return c.json({ error: "no fields" }, 400);
@@ -93,8 +106,8 @@ export function aliasRoutes() {
       ]);
       return c.json({ ok: true });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "unknown error";
-      return c.json({ error: `delete failed: ${msg}` }, 500);
+      console.error("alias delete failed:", err);
+      return c.json({ error: "delete failed" }, 500);
     }
   });
 

@@ -50,8 +50,22 @@ export function domainRoutes() {
     if (!domainRow) return c.json({ error: "not found" }, 404);
     if (domainRow.is_global) return c.json({ error: "cannot delete global domain" }, 400);
 
-    await c.env.DB.prepare("DELETE FROM aliases WHERE domain_id = ?").bind(id).run();
-    await c.env.DB.prepare("DELETE FROM domains WHERE id = ?").bind(id).run();
+    // Get all alias IDs belonging to this user under this domain for cleanup
+    const aliasRows = await c.env.DB.prepare(
+      "SELECT id FROM aliases WHERE domain_id = ? AND user_id = ?"
+    ).bind(id, userId).all<{ id: number }>();
+    const aliasIds = (aliasRows.results ?? []).map(r => r.id);
+
+    // Batch delete: related data, then aliases, then domain
+    const stmts: D1PreparedStatement[] = [];
+    for (const aid of aliasIds) {
+      stmts.push(c.env.DB.prepare("DELETE FROM reverse_map WHERE alias_id = ?").bind(aid));
+      stmts.push(c.env.DB.prepare("DELETE FROM blocks WHERE alias_id = ?").bind(aid));
+      stmts.push(c.env.DB.prepare("DELETE FROM events WHERE alias_id = ?").bind(aid));
+    }
+    stmts.push(c.env.DB.prepare("DELETE FROM aliases WHERE domain_id = ? AND user_id = ?").bind(id, userId));
+    stmts.push(c.env.DB.prepare("DELETE FROM domains WHERE id = ? AND user_id = ?").bind(id, userId));
+    if (stmts.length > 0) await c.env.DB.batch(stmts);
     
     return c.json({ ok: true });
   });
