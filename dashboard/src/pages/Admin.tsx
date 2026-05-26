@@ -72,7 +72,7 @@ export function Admin() {
       </div>
 
       {stats && (
-        <div className="stats-grid stagger-1" style={{ marginBottom: 24 }}>
+        <div className="stagger-1" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 24 }}>
           <div className="stat-card">
             <div className="stat-label">Total Users</div>
             <div className="stat-value">{stats.users.toLocaleString()}</div>
