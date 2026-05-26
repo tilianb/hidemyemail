@@ -51,6 +51,7 @@ export function App() {
         alignItems: "center",
         justifyContent: "center",
         minHeight: "100dvh",
+        width: "100%",
         background: "#0a0a0f",
         color: "#f3f4f6",
         fontFamily: "Outfit, Inter, system-ui, sans-serif"
