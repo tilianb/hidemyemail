@@ -860,7 +860,7 @@ table.dossier tbody td {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px var(--space-4);
+    padding: calc(10px + env(safe-area-inset-top)) var(--space-4) 10px;
     background: var(--surface-0);
     border-bottom: 1px solid var(--border);
     position: sticky;
