@@ -62,9 +62,10 @@ export function authRoutes() {
     // Resetting would allow an attacker who knows one valid password
     // to get unlimited brute-force attempts on other accounts.
 
+    // Gracefully handle missing mfa table (migration not yet applied)
     const mfa = await c.env.DB.prepare(
       "SELECT totp_enabled FROM mfa WHERE user_id = ?"
-    ).bind(userId).first<{ totp_enabled: number }>();
+    ).bind(userId).first<{ totp_enabled: number }>().catch(() => null);
 
     if (mfa?.totp_enabled === 1) {
       const challenge = await signMfaChallenge(c.env.SESSION_SECRET, userId);
