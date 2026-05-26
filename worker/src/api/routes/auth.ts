@@ -113,7 +113,7 @@ export function authRoutes() {
 
     const db = c.env.DB;
     const user = await db.prepare(
-      "SELECT id FROM users WHERE recovery_token = ? AND recovery_expires_at > ?"
+      "SELECT id FROM users WHERE recovery_token = ? AND recovery_expires_at > ? AND active = 1"
     ).bind(token, Date.now()).first<{ id: number }>();
 
     if (!user) return c.json({ error: "Invalid or expired recovery token" }, 400);
@@ -156,7 +156,7 @@ export function authRoutes() {
 
     const db = c.env.DB;
     const user = await db.prepare(
-      "SELECT id FROM users WHERE recovery_token = ? AND recovery_mfa_code = ? AND recovery_expires_at > ?"
+      "SELECT id FROM users WHERE recovery_token = ? AND recovery_mfa_code = ? AND recovery_expires_at > ? AND active = 1"
     ).bind(token, code, Date.now()).first<{ id: number }>();
 
     if (!user) return c.json({ error: "Invalid token or code" }, 400);
