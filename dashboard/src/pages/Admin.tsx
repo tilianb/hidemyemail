@@ -12,6 +12,7 @@ export function Admin() {
   const [domainForm, setDomainForm] = useState("");
   const [submittingDomain, setSubmittingDomain] = useState(false);
   const [awsTab, setAwsTab] = useState<"auto" | "manual">("auto");
+  const [showAwsSetup, setShowAwsSetup] = useState(false);
   const [confirmState, setConfirmState] = useState<{ title: string; body: string; confirmLabel?: string; onConfirm: () => void } | null>(null);
   const [promptState, setPromptState] = useState<{ title: string; body: string; defaultValue?: string; confirmLabel?: string; onConfirm: (val: string) => void } | null>(null);
   const [choiceState, setChoiceState] = useState<{ title: string; body: string; primaryLabel: string; secondaryLabel: string; onPrimary: () => void; onSecondary: () => void; } | null>(null);
@@ -99,13 +100,17 @@ export function Admin() {
 
       {/* AWS Onboarding Wizard */}
       <div className="card stagger-2" style={{ marginBottom: 24, borderLeft: "3px solid var(--accent-blue)" }}>
-        <div className="card-header">
+        <div className="card-header" style={{ cursor: "pointer", marginBottom: showAwsSetup ? 24 : 0, borderBottom: showAwsSetup ? "1px solid var(--border)" : "none", paddingBottom: showAwsSetup ? 16 : 0 }} onClick={() => setShowAwsSetup(!showAwsSetup)}>
           <span className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Cloud size={18} /> AWS Setup Wizard
           </span>
+          <button className="btn btn-ghost" type="button" onClick={(e) => { e.stopPropagation(); setShowAwsSetup(!showAwsSetup); }}>
+            {showAwsSetup ? "Hide" : "Show"}
+          </button>
         </div>
-        <div className="card-body">
-          <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 16 }}>
+        {showAwsSetup && (
+          <div className="card-body">
+            <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 16 }}>
             Set up the required AWS services (SES, SNS, S3) for inbound and outbound email routing.
             Choose your preferred deployment method below.
           </p>
@@ -206,6 +211,7 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
             </div>
           )}
         </div>
+        )}
       </div>
 
       <div className="card stagger-3" style={{ marginBottom: 24 }}>
