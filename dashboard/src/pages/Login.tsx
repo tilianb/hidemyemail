@@ -4,7 +4,7 @@ import { useAuth } from "../auth";
 import { generatePassphrase } from "../lib/passphrase";
 
 export function Login() {
-  const { setAuthed } = useAuth();
+  const { refreshAuth } = useAuth();
   const [pw, setPw] = useState("");
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
@@ -17,7 +17,7 @@ export function Login() {
     setLoading(true);
     try {
       await api.login(pw);
-      setAuthed(true);
+      await refreshAuth();
     } catch {
       setErr("Access denied — invalid credentials.");
       setPw("");
@@ -210,7 +210,7 @@ export function Login() {
               </div>
               <button
                 className="btn btn-primary"
-                onClick={() => setAuthed(true)}
+                onClick={() => refreshAuth()}
                 style={{ width: "100%", justifyContent: "center", padding: "10px 16px", fontSize: "0.85rem" }}
               >
                 I have saved it, take me to dashboard

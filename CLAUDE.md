@@ -24,12 +24,13 @@ Replaces a self-hosted addy.io (AnonAddy) Docker stack.
 - **Catch-All Auto-Create:** Automatically registers new aliases on their first inbound email, alongside standard dashboard CRUD.
 - **Self-Describing Reverse Addresses:** Outbound replies use an addy.io style reverse address format: `alias+extLocal=extDomain@domain` (e.g., `shop+alice=store.com@hidemyemail.dev`). Senders with plus/equal characters in their emails are fully supported.
 - **Sender Blocks:** Sender blocks are scoped to the individual user to prevent global interference.
-- **Deliverability & Junk Mitigation:** Inbound emails are re-injected with standard, clean headers:
+- **Deliverability & Junk Mitigation**: Inbound emails are re-injected with standard, clean headers:
   - `From` MIME header is rewritten to: `"Sender Name - sender at email" <alias@domain>` (e.g., `Alice - alice at store.com <shop@hidemyemail.dev>`). `@` signs in the display name are sanitized to ` at ` to prevent junk-folder flagging.
   - `Reply-To` MIME header is set to the self-describing reverse address.
   - Envelope sender for outbound SES is set to the reverse address.
   - Unsafe headers (`DKIM-Signature`, `ARC-Seal`, `ARC-Message-Signature`, `ARC-Authentication-Results`, `Return-Path`, `Sender`) are stripped.
   - Traceability headers (`X-Reinjected: 1`, `X-Forwarded-For`, `X-Forwarded-To`, `X-Original-From`) are injected.
+  - `List-Unsubscribe` and `List-Unsubscribe-Post` headers are injected. This provides a 1-click Quick Action in email clients (like Gmail/Apple Mail) to instantly disable the alias and stop future forwarding.
 
 ## Critical Gotchas (Cost Real Time if Forgotten)
 1. **No Cloudflare Forwarding:** We do not use Cloudflare's `message.forward()` because it restricts headers (cannot inject `Reply-To`). Inbound goes through S3 + SES re-inject to control `From` and `Reply-To`.
@@ -63,12 +64,14 @@ Add the following variables in `wrangler.jsonc` or via `wrangler secret put`:
 *Commits must be signed via 1Password SSH agent:*
 `SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock" git commit -S -m "..."`
 
-## PR & Workflow Rules
+## PR & CI/CD Workflow Rules
 - **Pull Requests:** PRs must ALWAYS contain a comprehensive summary of the changes in their body description.
+- **Continuous Integration:** GitHub Actions (`.github/workflows/ci.yml`) automatically run on pushes to `dev` and `main` branches, and on pull requests. The workflow installs dependencies, runs the Vitest suite for the worker, and performs a production build of the dashboard to ensure stability.
 
 ## Dev & Build Commands
 - `cd worker && npm install && npm test` — Run complete Vitest suite (Vitest pool workers)
 - `cd worker && npx wrangler dev` — Run local worker with local SPA assets
 - `cd dashboard && npm run dev` — Run dashboard Vite dev server (targets local API)
 - `cd dashboard && npm run build` — Build dashboard static production assets
+- **Build Caching**: Cloudflare Pages is configured to use build caching for the dashboard, speeding up deployments.
 

@@ -6,12 +6,15 @@ import { Aliases } from "./pages/Aliases";
 import { Blocks } from "./pages/Blocks";
 import { Stats } from "./pages/Stats";
 import { Destinations } from "./pages/Destinations";
+import { Admin } from "./pages/Admin";
+import { Recover } from "./pages/Recover";
 import { api } from "./api";
-import { Globe, Mail, Ban, BarChart3, LogOut, Send } from "lucide-react";
+import { Globe, Mail, Ban, BarChart3, LogOut, Send, Shield } from "lucide-react";
+import { useToast } from "./ui";
 
-type Tab = "domains" | "aliases" | "destinations" | "blocks" | "stats";
+type Tab = "domains" | "aliases" | "destinations" | "blocks" | "stats" | "admin";
 
-const NAV = [
+const BASE_NAV = [
   { id: "domains" as Tab, label: "Domains", icon: Globe, title: "Managed domains" },
   { id: "aliases" as Tab, label: "Aliases", icon: Mail, title: "Email aliases" },
   { id: "destinations" as Tab, label: "Destinations", icon: Send, title: "Verified destinations" },
@@ -20,16 +23,21 @@ const NAV = [
 ];
 
 export function App() {
-  const { authed, setAuthed, loading } = useAuth();
+  const { authed, isAdmin, userName, setAuthed, loading } = useAuth();
   const [tab, setTab] = useState<Tab>("domains");
+
+  const { toast } = useToast();
+
+  const navItems = isAdmin
+    ? [...BASE_NAV, { id: "admin" as Tab, label: "Admin", icon: Shield, title: "System Administration" }]
+    : BASE_NAV;
 
   const logout = async () => {
     try {
       await api.logout();
-    } catch (err) {
-      console.error("Logout API call failed:", err);
-    } finally {
       setAuthed(false);
+    } catch (err: any) {
+      toast(err.message || "Failed to sign out", "error");
     }
   };
 
@@ -71,6 +79,8 @@ export function App() {
     );
   }
 
+  if (window.location.pathname === "/recover") return <Recover />;
+
   if (!authed) return <Login />;
 
   return (
@@ -95,7 +105,7 @@ export function App() {
         </div>
 
         <nav className="sidebar-nav">
-          {NAV.map(n => {
+          {navItems.map(n => {
             const Icon = n.icon;
             return (
               <button
@@ -128,13 +138,19 @@ export function App() {
       </aside>
 
       {/* Main content */}
-      <main className="page-main">
+      <main className="page-main" style={{ position: "relative" }}>
+        <div style={{ position: "absolute", top: 32, right: 32, display: "flex", alignItems: "center", gap: 12, zIndex: 10 }}>
+          <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
+            Logged in as <strong style={{ color: "var(--text-primary)", fontWeight: 600 }}>{userName}</strong>
+          </span>
+        </div>
         <div className="page-content">
           {tab === "domains" && <Domains />}
           {tab === "aliases" && <Aliases />}
           {tab === "destinations" && <Destinations />}
           {tab === "blocks" && <Blocks />}
           {tab === "stats"  && <Stats />}
+          {tab === "admin" && isAdmin && <Admin />}
         </div>
       </main>
     </div>
