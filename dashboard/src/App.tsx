@@ -23,6 +23,8 @@ export function App() {
   const { authed, setAuthed, loading } = useAuth();
   const [tab, setTab] = useState<Tab>("domains");
 
+  const logout = async () => { await api.logout(); setAuthed(false); };
+
   if (loading) {
     return (
       <div style={{
@@ -65,6 +67,16 @@ export function App() {
 
   return (
     <div id="app-shell" style={{ display: "flex", width: "100%", minHeight: "100dvh" }}>
+      {/* Mobile-only top bar (hidden on desktop via CSS) */}
+      <header className="mobile-topbar">
+        <span className="sidebar-logo">
+          hide<span className="brand-redact" style={{ fontSize: "0.85em", padding: "0 4px", verticalAlign: "middle" }}>my</span>email
+        </span>
+        <button className="btn-ghost mobile-signout" onClick={logout} title="Sign out" aria-label="Sign out">
+          <LogOut size={18} />
+        </button>
+      </header>
+
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="sidebar-brand">
@@ -96,7 +108,7 @@ export function App() {
         <div className="sidebar-footer">
           <button
             className="nav-item"
-            onClick={async () => { await api.logout(); setAuthed(false); }}
+            onClick={logout}
             title="Sign out"
           >
             <span className="nav-icon">
