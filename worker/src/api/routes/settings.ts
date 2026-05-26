@@ -175,13 +175,12 @@ export function settingsRoutes() {
     const options = await generateRegistrationOptions({
       rpName: "HideMyEmail",
       rpID,
-      userID: new TextEncoder().encode(String(userId)),
+      userID: Uint8Array.from(new TextEncoder().encode(String(userId))),
       userName,
       userDisplayName: userName,
       attestationType: "none",
       excludeCredentials: (existing.results ?? []).map(cred => ({
-        id: fromBase64url(cred.id),
-        type: "public-key" as const,
+        id: cred.id,
         transports: cred.transports ? JSON.parse(cred.transports) : undefined,
       })),
       authenticatorSelection: {
@@ -228,8 +227,8 @@ export function settingsRoutes() {
       return c.json({ error: "Verification failed" }, 400);
     }
 
-    const { credentialID, credentialPublicKey, counter } = result.registrationInfo;
-    const credId = toBase64url(credentialID);
+    const { credential } = result.registrationInfo;
+    const credId = credential.id;
 
     const dup = await c.env.DB.prepare("SELECT id FROM passkey_credentials WHERE id = ?").bind(credId).first();
     if (dup) return c.json({ error: "Credential already registered" }, 409);
@@ -238,7 +237,7 @@ export function settingsRoutes() {
 
     await c.env.DB.prepare(
       "INSERT INTO passkey_credentials (id, user_id, public_key, sign_count, transports, device_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-    ).bind(credId, sessionUserId, toBase64url(credentialPublicKey), counter, JSON.stringify(transports), deviceName || null, Date.now()).run();
+    ).bind(credId, sessionUserId, toBase64url(credential.publicKey), credential.counter, JSON.stringify(transports), deviceName || null, Date.now()).run();
 
     deleteCookie(c, "__Host-passkey-reg", { path: "/", secure: true });
 

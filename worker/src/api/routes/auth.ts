@@ -223,9 +223,9 @@ export function authRoutes() {
       expectedOrigin,
       expectedRPID: rpID,
       requireUserVerification: true,
-      authenticator: {
-        credentialID: fromBase64url(response.id),
-        credentialPublicKey: fromBase64url(cred.public_key),
+      credential: {
+        id: response.id,
+        publicKey: fromBase64url(cred.public_key),
         counter: cred.sign_count,
         transports: cred.transports ? JSON.parse(cred.transports) : undefined,
       },

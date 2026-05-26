@@ -4,11 +4,12 @@ export function toBase64url(bytes: Uint8Array): string {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
 
-export function fromBase64url(b64url: string): Uint8Array {
+export function fromBase64url(b64url: string): Uint8Array<ArrayBuffer> {
   const padded = b64url.replace(/-/g, "+").replace(/_/g, "/");
   const pad = (4 - (padded.length % 4)) % 4;
   const bin = atob(padded + "=".repeat(pad));
-  const out = new Uint8Array(bin.length);
+  const buf = new ArrayBuffer(bin.length);
+  const out = new Uint8Array(buf);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 }
