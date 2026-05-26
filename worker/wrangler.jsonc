@@ -24,11 +24,18 @@
   // SESSION_SECRET, AUTH_PASSWORD_HASH, AUTH_PASSWORD_SALT, SNS_ALLOWED_TOPIC_ARN
   "env": {
     "preview": {
+      "observability": { "enabled": true },
+      "assets": {
+        "directory": "../dashboard/dist",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": ["/api/*"]
+      },
       "d1_databases": [
         {
           "binding": "DB",
           "database_name": "hidemyemail-env",
-          "database_id": "4afc57ba-5e51-48a0-80ea-98de3855de08"
+          "database_id": "4afc57ba-5e51-48a0-80ea-98de3855de08",
+          "migrations_dir": "migrations"
         }
       ],
       "vars": { "ENVIRONMENT": "preview", "SES_REGION": "ap-southeast-2", "S3_INBOUND_BUCKET": "hidemyemail-inbound-raw" }
