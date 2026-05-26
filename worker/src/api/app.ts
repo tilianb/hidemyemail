@@ -11,6 +11,7 @@ import { statsRoutes } from "./routes/stats";
 import { sesWebhookRoutes } from "./routes/ses-webhook";
 import { sesInboundRoutes } from "./routes/ses-inbound";
 import { destinationRoutes, verificationRoute } from "./routes/destinations";
+import { adminRoutes } from "./routes/admin";
 
 export type AppEnv = {
   Bindings: Env;
@@ -33,11 +34,20 @@ export function createApp() {
 
   app.use("*", cors({
     origin: (origin) => {
-      const allowed = [
-        "https://hidemyemail.dev",
-        "http://localhost:5173",
+      if (!origin) return "";
+      const allowedDomains = [
+        "hidemyemail.dev",
+        "localhost:5173",
+        "pages.dev",
+        "workers.dev"
       ];
-      return allowed.includes(origin) ? origin : "";
+      try {
+        const url = new URL(origin);
+        if (allowedDomains.some(domain => url.host === domain || url.host.endsWith("." + domain))) {
+          return origin;
+        }
+      } catch (e) {}
+      return "";
     },
     allowHeaders: ["Content-Type", "Cookie"],
     credentials: true
@@ -74,6 +84,7 @@ export function createApp() {
   app.route("/api", statsRoutes());
   app.route("/api", blockRoutes());
   app.route("/api", destinationRoutes());
+  app.route("/api/admin", adminRoutes());
 
   return app;
 }
