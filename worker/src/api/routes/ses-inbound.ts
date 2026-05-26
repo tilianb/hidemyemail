@@ -30,7 +30,11 @@ export function sesInboundRoutes() {
       if (typeof subscribeUrl !== "string" || !/^https:\/\/sns\.[a-z0-9-]+\.amazonaws\.com\//i.test(subscribeUrl)) {
         return c.json({ error: "invalid subscribe url" }, 400);
       }
-      console.log("SNS inbound SubscribeURL (confirm manually):", subscribeUrl);
+      console.log("SNS inbound SubscribeURL (auto-confirming):", subscribeUrl);
+      
+      // Auto-confirm the subscription so you don't have to check logs
+      c.executionCtx.waitUntil(fetch(subscribeUrl).catch(err => console.error("Auto-confirm failed:", err)));
+      
       return c.json({ ok: true });
     }
 
