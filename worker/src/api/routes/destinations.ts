@@ -17,10 +17,18 @@ export function destinationRoutes() {
 
   r.get("/destinations", async (c) => {
     const userId = c.get("userId");
-    const rows = await c.env.DB.prepare(
-      "SELECT id, email, is_default, verified_at, created_at FROM destinations WHERE user_id = ? ORDER BY created_at DESC"
-    ).bind(userId).all<{ id: number, email: string, is_default: number, verified_at: number | null, created_at: number }>();
-    
+    let rows;
+    try {
+      rows = await c.env.DB.prepare(
+        "SELECT id, email, is_default, verified_at, created_at FROM destinations WHERE user_id = ? ORDER BY created_at DESC"
+      ).bind(userId).all<{ id: number, email: string, is_default: number, verified_at: number | null, created_at: number }>();
+    } catch {
+      // is_default column may be missing if migration 0002 hasn't been applied yet
+      rows = await c.env.DB.prepare(
+        "SELECT id, email, 0 as is_default, verified_at, created_at FROM destinations WHERE user_id = ? ORDER BY created_at DESC"
+      ).bind(userId).all<{ id: number, email: string, is_default: number, verified_at: number | null, created_at: number }>();
+    }
+
     const results = [];
     for (const row of rows.results ?? []) {
       const email = await decryptDestination(row.email, c.env.DESTINATION_ENCRYPTION_KEY);
