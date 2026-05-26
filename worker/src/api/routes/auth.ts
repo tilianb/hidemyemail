@@ -17,7 +17,7 @@ async function canAttempt(ip: string, db: D1Database): Promise<boolean> {
   const now = Math.floor(Date.now() / 1000);
   const row = await db.prepare("SELECT attempts, reset_at FROM rate_limits WHERE ip = ?").bind(ip).first<{ attempts: number; reset_at: number }>();
   if (!row) return true;
-  if (now > row.reset_at) return true;
+  if (now >= row.reset_at) return true;
   return row.attempts < RATE_LIMIT_MAX;
 }
 
@@ -29,7 +29,7 @@ async function recordFailedAttempt(ip: string, db: D1Database): Promise<void> {
     await db.prepare("INSERT INTO rate_limits (ip, attempts, reset_at) VALUES (?, 1, ?)").bind(ip, now + RATE_LIMIT_WINDOW_SECONDS).run();
     return;
   }
-  if (now > row.reset_at) {
+  if (now >= row.reset_at) {
     await db.prepare("UPDATE rate_limits SET attempts = 1, reset_at = ? WHERE ip = ?").bind(now + RATE_LIMIT_WINDOW_SECONDS, ip).run();
     return;
   }
