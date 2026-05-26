@@ -21,7 +21,7 @@ export async function handleReply(
   // SECURITY: reverse addresses are self-describing and therefore guessable (no random
   // token). The relay gate is: (1) envelope sender ∈ owner destinations, AND (2) SES
   // SPF/DMARC verdict PASS so that owner address cannot be spoofed. Fail closed.
-  const owners = await q.ownerDestinations(db);
+  const owners = await q.ownerDestinations(db, alias.user_id);
   const fromOwner = owners.has(message.from.toLowerCase());
   const authOk = auth?.spf === "PASS" || auth?.dmarc === "PASS";
   if (!fromOwner || !authOk) {

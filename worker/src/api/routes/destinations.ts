@@ -37,15 +37,14 @@ export function destinationRoutes() {
       // Send verification email via SES first
       if (c.env.SES_ACCESS_KEY_ID && c.env.SES_SECRET_ACCESS_KEY && c.env.SES_REGION) {
         const verifyUrl = new URL(`/api/verify?token=${token}`, c.req.url).toString();
-        const rawMsg = `From: noreply@hidemyemail.dev\r\nTo: ${email}\r\nSubject: Verify your email address\r\n\r\nPlease click the following link to verify your email address:\r\n${verifyUrl}\r\n`;
-        const rawBase64 = btoa(unescape(encodeURIComponent(rawMsg)));
-        
+        const rawBase64 = buildVerificationEmail(email, verifyUrl);
+
         await sendRaw({
           accessKeyId: c.env.SES_ACCESS_KEY_ID,
           secretAccessKey: c.env.SES_SECRET_ACCESS_KEY,
           region: c.env.SES_REGION
         }, {
-          from: "noreply@hidemyemail.dev",
+          from: "HideMyEmail <noreply@hidemyemail.dev>",
           to: email,
           rawBase64
         });
@@ -403,4 +402,144 @@ function renderErrorPage(): string {
     <a href="/" class="btn btn-secondary">Go to Dashboard</a>
   `;
   return renderBaseHtml("Verification Failed", content);
+}
+
+// ---------------------------------------------------------------------------
+// Outbound verification email builder
+// ---------------------------------------------------------------------------
+
+function buildVerificationEmail(to: string, verifyUrl: string): string {
+  const boundary = `----=_Part_${Date.now().toString(36)}`;
+
+  const htmlBody = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark light">
+  <!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+  <title>Verify your email address</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+</head>
+<body style="margin:0;padding:0;background-color:#0d0d0f;background-image:url('data:image/svg+xml,%3Csvg viewBox=%270 0 256 256%27 xmlns=%27http://www.w3.org/2000/svg%27%3E%3Cfilter id=%27n%27%3E%3CfeTurbulence type=%27fractalNoise%27 baseFrequency=%270.9%27 numOctaves=%274%27 stitchTiles=%27stitch%27/%3E%3C/filter%3E%3Crect width=%27100%25%27 height=%27100%25%27 filter=%27url(%23n)%27 opacity=%270.028%27/%3E%3C/svg%3E');background-attachment:fixed;font-family:'Inter',Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+
+  <!-- Outer wrapper -->
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="min-height:100vh;">
+    <tr>
+      <td align="center" style="padding:48px 16px;">
+
+        <!-- Card -->
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;">
+          <tr>
+            <td style="background:#18181d;border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:48px 40px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.7);">
+
+              <!-- Brand Logo Wordmark matching website -->
+              <div style="font-size:22px;font-weight:700;color:#e8e8ec;letter-spacing:-0.03em;margin-bottom:28px;font-family:'Bricolage Grotesque','Inter',sans-serif;text-align:center;user-select:none;">
+                hide<span style="background:rgba(255,179,0,0.15);color:#ffb300;border-radius:4px;padding:0 5px;margin:0 2px;border:1px solid rgba(255,179,0,0.2);font-size:0.85em;font-weight:700;vertical-align:middle;display:inline-block;">my</span>email
+              </div>
+
+              <!-- Heading -->
+              <h1 style="margin:0 0 16px;font-size:24px;font-weight:700;line-height:1.2;letter-spacing:-0.02em;color:#e8e8ec;font-family:'Bricolage Grotesque','Inter',sans-serif;">
+                Verify <span style="background:rgba(255,179,0,0.15);color:#ffb300;border-radius:4px;padding:0 5px;margin:0 1px;border:1px solid rgba(255,179,0,0.2);font-weight:700;display:inline-block;">Destination</span>
+              </h1>
+
+              <!-- Body copy -->
+              <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#9898a8;font-family:'Inter',sans-serif;">
+                Confirm that you want to verify this destination email address for forwarding.
+              </p>
+
+              <!-- Email badge styling matching dashboard -->
+              <div style="display:inline-block;background:#111114;border:1px dashed rgba(255,255,255,0.08);padding:8px 16px;border-radius:4px;font-family:'JetBrains Mono','Menlo',monospace;font-size:13px;color:#e8e8ec;margin-bottom:32px;word-break:break-all;text-align:center;">
+                ${escapeHtml(to)}
+              </div>
+
+              <!-- CTA button matching var(--radius-sm) (4px) and primary theme -->
+              <table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:0 auto 32px;width:100%;">
+                <tr>
+                  <td style="border-radius:4px;background:#ffb300;text-align:center;">
+                    <a href="${escapeHtml(verifyUrl)}" target="_blank"
+                       style="display:block;padding:11px 20px;font-size:14px;font-weight:600;letter-spacing:0.02em;color:#0d0d0f;text-decoration:none;border-radius:4px;font-family:'Bricolage Grotesque','Inter',sans-serif;background:#ffb300;border:1px solid #ffb300;">
+                      Confirm Verification
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Divider -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+                <tr>
+                  <td style="border-top:1px solid rgba(255,255,255,0.07);font-size:0;line-height:0;">&nbsp;</td>
+                </tr>
+              </table>
+
+              <!-- Fallback URL section -->
+              <p style="margin:0 0 8px;font-size:12px;color:#55555f;font-family:'Inter',sans-serif;text-align:left;">
+                If the button doesn't work, copy and paste this link into your browser:
+              </p>
+              <p style="margin:0;font-size:11px;font-family:'JetBrains Mono','Menlo',monospace;color:#9898a8;word-break:break-all;background:#111114;border:1px dashed rgba(255,255,255,0.08);border-radius:4px;padding:10px 12px;text-align:left;">
+                ${escapeHtml(verifyUrl)}
+              </p>
+
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:24px 0 0;text-align:center;">
+              <p style="margin:0 0 6px;font-size:11px;color:#55555f;font-family:'Inter',sans-serif;line-height:1.5;">
+                This link was requested for HideMyEmail. If you did not request this, you can safely ignore this email.
+              </p>
+              <p style="margin:0;font-size:11px;color:#55555f;font-family:'Inter',sans-serif;">
+                &copy; ${new Date().getFullYear()} HideMyEmail &middot; <a href="https://hidemyemail.dev" style="color:#ffb300;text-decoration:none;font-weight:500;">hidemyemail.dev</a>
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>`;
+
+  const textBody = `Verify your email address — HideMyEmail
+===========================================
+
+You added ${to} as a destination for email forwarding.
+Click the link below to confirm this address:
+
+${verifyUrl}
+
+This link expires in 24 hours. If you did not request this, you can safely ignore this email.
+
+— HideMyEmail (https://hidemyemail.dev)`;
+
+  // Build a MIME multipart/alternative message
+  const msgLines = [
+    `From: HideMyEmail <noreply@hidemyemail.dev>`,
+    `To: ${to}`,
+    `Subject: Verify your email address`,
+    `MIME-Version: 1.0`,
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    ``,
+    `--${boundary}`,
+    `Content-Type: text/plain; charset=UTF-8`,
+    `Content-Transfer-Encoding: quoted-printable`,
+    ``,
+    textBody,
+    ``,
+    `--${boundary}`,
+    `Content-Type: text/html; charset=UTF-8`,
+    `Content-Transfer-Encoding: base64`,
+    ``,
+    btoa(unescape(encodeURIComponent(htmlBody))),
+    ``,
+    `--${boundary}--`,
+  ];
+
+  const rawMsg = msgLines.join("\r\n");
+  return btoa(unescape(encodeURIComponent(rawMsg)));
 }
