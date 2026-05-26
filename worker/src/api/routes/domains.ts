@@ -64,14 +64,14 @@ export function domainRoutes() {
     const id = parseInt(c.req.param("id"), 10);
     if (isNaN(id)) return c.json({ error: "invalid id" }, 400);
 
-    const domainRow = await c.env.DB.prepare("SELECT is_global FROM domains WHERE id = ? AND user_id = ?").bind(id, userId).first<{ is_global: number }>();
+    const domainRow = await c.env.DB.prepare("SELECT is_global FROM domains WHERE id = ?").bind(id).first<{ is_global: number }>();
     if (!domainRow) return c.json({ error: "not found" }, 404);
-    if (domainRow.is_global) return c.json({ error: "cannot delete global domain" }, 400);
+    if (domainRow.is_global && userId !== 1) return c.json({ error: "cannot delete global domain" }, 400);
 
     // Get all alias IDs belonging to this user under this domain for cleanup
-    const aliasRows = await c.env.DB.prepare(
-      "SELECT id FROM aliases WHERE domain_id = ? AND user_id = ?"
-    ).bind(id, userId).all<{ id: number }>();
+    const aliasRows = userId === 1 
+      ? await c.env.DB.prepare("SELECT id FROM aliases WHERE domain_id = ?").bind(id).all<{ id: number }>()
+      : await c.env.DB.prepare("SELECT id FROM aliases WHERE domain_id = ? AND user_id = ?").bind(id, userId).all<{ id: number }>();
     const aliasIds = (aliasRows.results ?? []).map(r => r.id);
 
     // Batch delete: related data, then aliases, then domain
@@ -81,8 +81,13 @@ export function domainRoutes() {
       stmts.push(c.env.DB.prepare("DELETE FROM blocks WHERE alias_id = ?").bind(aid));
       stmts.push(c.env.DB.prepare("DELETE FROM events WHERE alias_id = ?").bind(aid));
     }
-    stmts.push(c.env.DB.prepare("DELETE FROM aliases WHERE domain_id = ? AND user_id = ?").bind(id, userId));
-    stmts.push(c.env.DB.prepare("DELETE FROM domains WHERE id = ? AND user_id = ?").bind(id, userId));
+    if (userId === 1) {
+      stmts.push(c.env.DB.prepare("DELETE FROM aliases WHERE domain_id = ?").bind(id));
+      stmts.push(c.env.DB.prepare("DELETE FROM domains WHERE id = ?").bind(id));
+    } else {
+      stmts.push(c.env.DB.prepare("DELETE FROM aliases WHERE domain_id = ? AND user_id = ?").bind(id, userId));
+      stmts.push(c.env.DB.prepare("DELETE FROM domains WHERE id = ? AND user_id = ?").bind(id, userId));
+    }
     if (stmts.length > 0) await c.env.DB.batch(stmts);
     
     return c.json({ ok: true });

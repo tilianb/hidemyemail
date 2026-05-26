@@ -119,13 +119,27 @@ export function Admin() {
               <textarea 
                 className="input input-mono" 
                 readOnly 
-                style={{ width: "100%", height: 150, fontSize: "11px", marginBottom: 8 }}
+                style={{ width: "100%", height: 350, fontSize: "11px", marginBottom: 8 }}
                 value={`AWSTemplateFormatVersion: '2010-09-09'
 Resources:
   InboundBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub "hidemyemail-inbound-\${AWS::AccountId}"
+  InboundBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref InboundBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ses.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub "arn:aws:s3:::\${InboundBucket}/*"
+            Condition:
+              StringEquals:
+                "aws:Referer": !Ref AWS::AccountId
   InboundTopic:
     Type: AWS::SNS::Topic
     Properties:
@@ -133,10 +147,26 @@ Resources:
   OutboundTopic:
     Type: AWS::SNS::Topic
     Properties:
-      TopicName: hidemyemail-outbound`}
+      TopicName: hidemyemail-outbound
+  InboundRuleSet:
+    Type: AWS::SES::ReceiptRuleSet
+    Properties:
+      RuleSetName: "hidemyemail-rules"
+  InboundRule:
+    Type: AWS::SES::ReceiptRule
+    Properties:
+      RuleSetName: !Ref InboundRuleSet
+      Rule:
+        Name: "store-and-notify"
+        Enabled: true
+        ScanEnabled: true
+        Actions:
+          - S3Action:
+              BucketName: !Ref InboundBucket
+              TopicArn: !Ref InboundTopic`}
               />
               <p className="text-muted">
-                After deployment, copy the Bucket Name and SNS Topic ARNs to your <code>wrangler.jsonc</code> file.
+                After deployment, copy the Bucket Name and SNS Topic ARNs to your <code>wrangler.jsonc</code> file. Also ensure that the "hidemyemail-rules" SES rule set is marked as active in the AWS console.
               </p>
             </div>
           )}
@@ -148,13 +178,21 @@ Resources:
               </p>
               <pre style={{ overflowX: "auto", background: "#000", padding: 12, borderRadius: 4, color: "#0f0" }}>
 {`# 1. Create S3 Bucket for inbound emails
-aws s3api create-bucket --bucket hidemyemail-inbound-$RANDOM
+BUCKET_NAME="hidemyemail-inbound-$RANDOM"
+aws s3api create-bucket --bucket $BUCKET_NAME
 
-# 2. Create SNS Topics
-aws sns create-topic --name hidemyemail-inbound
+# 2. Attach S3 Policy for SES to write emails
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+aws s3api put-bucket-policy --bucket $BUCKET_NAME --policy "{\\"Statement\\":[{\\"Effect\\":\\"Allow\\",\\"Principal\\":{\\"Service\\":\\"ses.amazonaws.com\\"},\\"Action\\":\\"s3:PutObject\\",\\"Resource\\":\\"arn:aws:s3:::$BUCKET_NAME/*\\",\\"Condition\\":{\\"StringEquals\\":{\\"aws:Referer\\":\\"$ACCOUNT_ID\\"}}}]}"
+
+# 3. Create SNS Topics
+TOPIC_ARN=$(aws sns create-topic --name hidemyemail-inbound --query TopicArn --output text)
 aws sns create-topic --name hidemyemail-outbound
 
-# 3. Save the output ARNs to your wrangler.jsonc secrets`}
+# 4. Create SES Receipt Rule Set and Rule
+aws ses create-receipt-rule-set --rule-set-name hidemyemail-rules
+aws ses create-receipt-rule --rule-set-name hidemyemail-rules --rule "{\\"Name\\":\\"store-and-notify\\",\\"Enabled\\":true,\\"Actions\\":[{\\"S3Action\\":{\\"BucketName\\":\\"$BUCKET_NAME\\",\\"TopicArn\\":\\"$TOPIC_ARN\\"}}]}"
+aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
               </pre>
             </div>
           )}
@@ -197,8 +235,28 @@ aws sns create-topic --name hidemyemail-outbound
               <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
                 {globalDomains.map(d => (
                   <li key={d.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "rgba(255,255,255,0.02)", borderRadius: 4 }}>
-                    <span className="font-mono" style={{ fontSize: "0.85rem" }}>{d.domain}</span>
-                    <span className="text-muted" style={{ fontSize: "0.75rem" }}>Added {new Date(d.created_at > 1e11 ? d.created_at : d.created_at * 1000).toLocaleDateString()}</span>
+                    <div>
+                      <span className="font-mono" style={{ fontSize: "0.85rem", display: "block" }}>{d.domain}</span>
+                      <span className="text-muted" style={{ fontSize: "0.75rem" }}>Added {new Date(d.created_at > 1e11 ? d.created_at : d.created_at * 1000).toLocaleDateString()}</span>
+                    </div>
+                    {d.domain !== "hidemyemail.dev" && (
+                      <button 
+                        className="btn-icon danger" 
+                        title="Delete global domain"
+                        onClick={async () => {
+                          if (!confirm(`Delete ${d.domain} and ALL associated aliases for ALL users?`)) return;
+                          try {
+                            await api.deleteDomain(d.id);
+                            toast("Global domain deleted", "success");
+                            await load();
+                          } catch (err: any) {
+                            toast(err.message || "Failed to delete domain", "error");
+                          }
+                        }}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>
