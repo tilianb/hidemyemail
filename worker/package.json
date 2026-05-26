@@ -10,6 +10,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "deploy": "wrangler deploy --env=\"\"",
+    "deploy:preview": "wrangler deploy --env preview",
+    "migrate:prod": "wrangler d1 migrations apply DB --remote --env=\"\"",
+    "migrate:preview": "wrangler d1 migrations apply DB --remote --env preview",
+    "predeploy:preview": "npm run migrate:preview",
     "typegen": "wrangler types"
   },
   "dependencies": {
