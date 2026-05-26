@@ -8,12 +8,19 @@ let testEnv: any; let cookie: string;
 beforeAll(async () => { testEnv = { ...env, SESSION_SECRET: "sek" }; cookie = "__Host-session=" + (await signSession("sek", 1, 3600)); });
 beforeEach(async () => { await resetDb(env.DB as D1Database); });
 
+import { encryptDestination, hashDestination } from "../src/lib/crypto";
+
 test("create domain, create + list + patch + delete alias", async () => {
   const app = createApp();
   const h = { cookie, "Content-Type": "application/json" };
 
-  await (env.DB as D1Database).prepare("INSERT INTO destinations (user_id, email, token, verified_at, created_at) VALUES (1, 'real@me.com', 'tok1', 123, 123)").run();
-  await (env.DB as D1Database).prepare("INSERT INTO destinations (user_id, email, token, verified_at, created_at) VALUES (1, 'work@me.com', 'tok2', 123, 123)").run();
+  const encReal = await encryptDestination("real@me.com", testEnv.DESTINATION_ENCRYPTION_KEY);
+  const hashReal = await hashDestination("real@me.com", testEnv.DESTINATION_ENCRYPTION_KEY);
+  await (env.DB as D1Database).prepare("INSERT INTO destinations (user_id, email, email_hash, token, verified_at, created_at) VALUES (1, ?, ?, 'tok1', 123, 123)").bind(encReal, hashReal).run();
+
+  const encWork = await encryptDestination("work@me.com", testEnv.DESTINATION_ENCRYPTION_KEY);
+  const hashWork = await hashDestination("work@me.com", testEnv.DESTINATION_ENCRYPTION_KEY);
+  await (env.DB as D1Database).prepare("INSERT INTO destinations (user_id, email, email_hash, token, verified_at, created_at) VALUES (1, ?, ?, 'tok2', 123, 123)").bind(encWork, hashWork).run();
 
   const cd = await app.request("/api/domains", { method: "POST", headers: h, body: JSON.stringify({ domain: "test-sub", default_destination: "real@me.com" }) }, testEnv);
   expect(cd.status).toBe(200);
