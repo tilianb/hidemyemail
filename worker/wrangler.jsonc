@@ -19,7 +19,19 @@
       "migrations_dir": "migrations" 
     }
   ],
-  "vars": { "SES_REGION": "ap-southeast-2", "S3_INBOUND_BUCKET": "hidemyemail-inbound-raw" }
+  "vars": { "ENVIRONMENT": "production", "SES_REGION": "ap-southeast-2", "S3_INBOUND_BUCKET": "hidemyemail-inbound-raw" },
   // Secrets (wrangler secret put): SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY,
   // SESSION_SECRET, AUTH_PASSWORD_HASH, AUTH_PASSWORD_SALT, SNS_ALLOWED_TOPIC_ARN
+  "env": {
+    "preview": {
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "hidemyemail-env",
+          "database_id": "4afc57ba-5e51-48a0-80ea-98de3855de08"
+        }
+      ],
+      "vars": { "ENVIRONMENT": "preview", "SES_REGION": "ap-southeast-2", "S3_INBOUND_BUCKET": "hidemyemail-inbound-raw" }
+    },
+  },
 }

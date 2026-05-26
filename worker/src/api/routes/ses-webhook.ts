@@ -16,6 +16,10 @@ export function sesWebhookRoutes() {
       return c.json({ error: "unauthorized" }, 401);
     }
 
+    // Enforce SNS_ALLOWED_TOPIC_ARN in production
+    if (c.env.ENVIRONMENT === "production" && !c.env.SNS_ALLOWED_TOPIC_ARN) {
+      return c.json({ error: "missing SNS_ALLOWED_TOPIC_ARN configuration in production" }, 500);
+    }
     if (c.env.SNS_ALLOWED_TOPIC_ARN && body.TopicArn !== c.env.SNS_ALLOWED_TOPIC_ARN) {
       return c.json({ error: "forbidden topic" }, 403);
     }

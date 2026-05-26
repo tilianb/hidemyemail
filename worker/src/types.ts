@@ -1,4 +1,5 @@
 export interface Env {
+  ENVIRONMENT: string;
   DB: D1Database;
   SES_REGION: string;
   SES_ACCESS_KEY_ID: string;

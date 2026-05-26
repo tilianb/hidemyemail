@@ -18,6 +18,12 @@ export async function handleReply(
   const alias = await q.getAlias(db, aliasFull);
   if (!alias || alias.active === 0) return;
 
+  const userRow = await db.prepare("SELECT forwarding FROM users WHERE id = ?").bind(alias.user_id).first<{ forwarding: number }>();
+  if (!userRow || userRow.forwarding === 0) {
+    await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: parsed.externalSender, detail: "user_forwarding_disabled", ts: now });
+    return;
+  }
+
   // SECURITY: reverse addresses are self-describing and therefore guessable (no random
   // token). The relay gate is: (1) envelope sender ∈ owner destinations, AND (2) SES
   // SPF/DMARC verdict PASS so that owner address cannot be spoofed. Fail closed.
