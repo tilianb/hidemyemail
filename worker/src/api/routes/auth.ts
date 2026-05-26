@@ -91,7 +91,7 @@ export function authRoutes() {
   });
 
   r.post("/logout", (c) => {
-    deleteCookie(c, "__Host-session", { path: "/" });
+    deleteCookie(c, "__Host-session", { path: "/", secure: true });
     return c.json({ ok: true });
   });
 
