@@ -11,7 +11,12 @@ export default defineConfig({
       return {
         wrangler: { configPath: "./wrangler.jsonc" },
         // test-only binding so a setup file can apply migrations
-        miniflare: { bindings: { TEST_MIGRATIONS: migrations } },
+        miniflare: { 
+          bindings: { 
+            TEST_MIGRATIONS: migrations,
+            DESTINATION_ENCRYPTION_KEY: "MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=" // 32-byte valid base64 key
+          } 
+        },
       };
     }),
   ],
