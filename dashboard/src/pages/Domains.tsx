@@ -156,7 +156,7 @@ export function Domains() {
               <TableSkeleton cols={5} rows={3} />
             ) : (
               <tbody>
-                {rows.map(d => (
+                {rows.filter(d => !d.is_global).map(d => (
                   <tr key={d.id}>
                     <td>
                       <div className="addr-cell">
@@ -204,7 +204,7 @@ export function Domains() {
               </tbody>
             )}
           </table>
-          {!loading && rows.length === 0 && (
+          {!loading && myDomainsCount === 0 && (
             <EmptyState
               icon={<Globe size={40} />}
               title="No domains yet"
