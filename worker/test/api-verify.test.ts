@@ -33,7 +33,8 @@ test("GET and POST /api/verify email verification flow", async () => {
   expect(getRes.headers.get("Content-Type")).toContain("text/html");
   
   const getHtml = await getRes.text();
-  expect(getHtml).toContain("Verify Email");
+  expect(getHtml).toContain("Verify");
+  expect(getHtml).toContain("Destination");
   expect(getHtml).toContain("Confirm Verification");
   expect(getHtml).toContain(email);
   expect(getHtml).toContain(`<input type="hidden" name="token" value="${token}" />`);
