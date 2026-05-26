@@ -19,9 +19,12 @@ test("GET and POST /api/verify email verification flow", async () => {
   // 1. Seed a pending destination
   const email = "test@example.com";
   const token = "pending-token-123";
+  const { encryptDestination, hashDestination } = await import("../src/lib/crypto");
+  const encEmail = await encryptDestination(email, testEnv.DESTINATION_ENCRYPTION_KEY);
+  const hashEmail = await hashDestination(email, testEnv.DESTINATION_ENCRYPTION_KEY);
   await db.prepare(
-    "INSERT INTO destinations (user_id, email, token, created_at) VALUES (1, ?, ?, ?)"
-  ).bind(email, token, Date.now()).run();
+    "INSERT INTO destinations (user_id, email, email_hash, token, created_at) VALUES (1, ?, ?, ?, ?)"
+  ).bind(encEmail, hashEmail, token, Date.now()).run();
 
   // Verify it starts as unverified
   const initial = await db.prepare("SELECT verified_at FROM destinations WHERE token = ?").bind(token).first<{ verified_at: number | null }>();
