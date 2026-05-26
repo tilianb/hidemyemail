@@ -235,6 +235,12 @@ export function authRoutes() {
       return c.json({ error: "verification failed" }, 401);
     }
 
+    if (cred.user_id !== 1) {
+      const user = await c.env.DB.prepare("SELECT active FROM users WHERE id = ?")
+        .bind(cred.user_id).first<{ active: number }>();
+      if (!user || user.active === 0) return c.json({ error: "Account is disabled" }, 403);
+    }
+
     await c.env.DB.prepare("UPDATE passkey_credentials SET sign_count = ? WHERE id = ?")
       .bind(result.authenticationInfo.newCounter, response.id).run();
 
