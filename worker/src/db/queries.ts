@@ -16,6 +16,10 @@ export async function getAlias(db: D1Database, fullAddress: string): Promise<Ali
   return db.prepare("SELECT * FROM aliases WHERE full_address = ?").bind(fullAddress).first<AliasRow>();
 }
 
+export async function getAliasById(db: D1Database, id: number): Promise<AliasRow | null> {
+  return db.prepare("SELECT * FROM aliases WHERE id = ?").bind(id).first<AliasRow>();
+}
+
 export async function autoCreateAlias(
   db: D1Database, domainId: number, localPart: string, fullAddress: string, source = "auto"
 ): Promise<AliasRow | null> {

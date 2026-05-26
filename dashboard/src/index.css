@@ -317,6 +317,45 @@ select.input { cursor: pointer; }
   color: var(--text-secondary);
 }
 
+/* ─── Verification & Recovery UI ─────────────────────────────────────────── */
+.logo-container {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  margin-bottom: 24px;
+  color: var(--text-primary);
+}
+.logo-container svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.icon-accent { color: var(--accent); background: var(--accent-dim); border-color: rgba(255, 179, 0, 0.3); }
+.icon-success { color: var(--green); background: var(--green-dim); border-color: rgba(61, 220, 132, 0.2); }
+.icon-error { color: var(--red); background: var(--red-dim); border-color: rgba(255, 80, 80, 0.2); }
+
+.email-badge {
+  display: inline-block;
+  background: var(--surface-0);
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  margin-bottom: 32px;
+  word-break: break-all;
+}
+
 /* ─── Table ──────────────────────────────────────────────────────────────── */
 .table-wrap {
   overflow-x: auto;
