@@ -34,11 +34,20 @@ export function createApp() {
 
   app.use("*", cors({
     origin: (origin) => {
-      const allowed = [
-        "https://hidemyemail.dev",
-        "http://localhost:5173",
+      if (!origin) return "";
+      const allowedDomains = [
+        "hidemyemail.dev",
+        "localhost:5173",
+        "pages.dev",
+        "workers.dev"
       ];
-      return allowed.includes(origin) ? origin : "";
+      try {
+        const url = new URL(origin);
+        if (allowedDomains.some(domain => url.host === domain || url.host.endsWith("." + domain))) {
+          return origin;
+        }
+      } catch (e) {}
+      return "";
     },
     allowHeaders: ["Content-Type", "Cookie"],
     credentials: true
