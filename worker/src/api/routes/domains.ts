@@ -64,7 +64,10 @@ export function domainRoutes() {
     const id = parseInt(c.req.param("id"), 10);
     if (isNaN(id)) return c.json({ error: "invalid id" }, 400);
 
-    const domainRow = await c.env.DB.prepare("SELECT is_global FROM domains WHERE id = ?").bind(id).first<{ is_global: number }>();
+    // Scope precheck by user_id for non-admins to prevent IDOR leak of other users' domain IDs
+    const domainRow = userId === 1
+      ? await c.env.DB.prepare("SELECT is_global FROM domains WHERE id = ?").bind(id).first<{ is_global: number }>()
+      : await c.env.DB.prepare("SELECT is_global FROM domains WHERE id = ? AND user_id = ?").bind(id, userId).first<{ is_global: number }>();
     if (!domainRow) return c.json({ error: "not found" }, 404);
     if (domainRow.is_global && userId !== 1) return c.json({ error: "cannot delete global domain" }, 400);
 
