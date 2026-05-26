@@ -1,13 +1,22 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import * as q from "../../db/queries";
+import { encryptDestination, decryptDestination, hashDestination } from "../../lib/crypto";
 
 export function domainRoutes() {
   const r = new Hono<AppEnv>();
   r.get("/domains", async (c) => {
     const userId = c.get("userId");
-    const rows = await c.env.DB.prepare("SELECT * FROM domains WHERE is_global = 1 OR user_id = ? ORDER BY domain").bind(userId).all();
-    return c.json(rows.results ?? []);
+    const rows = await c.env.DB.prepare("SELECT * FROM domains WHERE is_global = 1 OR user_id = ? ORDER BY domain").bind(userId).all<any>();
+    
+    const results = [];
+    for (const row of rows.results ?? []) {
+      if (row.default_destination) {
+        row.default_destination = await decryptDestination(row.default_destination, c.env.DESTINATION_ENCRYPTION_KEY);
+      }
+      results.push(row);
+    }
+    return c.json(results);
   });
 
   r.post("/domains", async (c) => {
@@ -26,14 +35,18 @@ export function domainRoutes() {
     }
 
     if (default_destination) {
-      const destVerified = await c.env.DB.prepare("SELECT id FROM destinations WHERE user_id = ? AND email = ? AND verified_at IS NOT NULL").bind(userId, default_destination.toLowerCase()).first();
+      const emailHash = await hashDestination(default_destination.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY);
+      const destVerified = await c.env.DB.prepare("SELECT id FROM destinations WHERE user_id = ? AND email_hash = ? AND verified_at IS NOT NULL").bind(userId, emailHash).first();
       if (!destVerified) return c.json({ error: "destination email not verified" }, 400);
     }
 
     try {
+      const destEnc = default_destination ? await encryptDestination(default_destination.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY) : null;
+      const destHash = default_destination ? await hashDestination(default_destination.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY) : null;
+      
       const res = await c.env.DB.prepare(
-        "INSERT INTO domains (user_id, is_global, domain, default_destination, created_at) VALUES (?, 0, ?, ?, ?)"
-      ).bind(userId, fullDomain, default_destination ? default_destination.toLowerCase() : null, Date.now()).run();
+        "INSERT INTO domains (user_id, is_global, domain, default_destination, default_destination_hash, created_at) VALUES (?, 0, ?, ?, ?, ?)"
+      ).bind(userId, fullDomain, destEnc, destHash, Date.now()).run();
       
       return c.json({ id: res.meta.last_row_id, domain: fullDomain, default_destination });
     } catch (err: any) {

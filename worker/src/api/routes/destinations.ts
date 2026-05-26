@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import { sendRaw } from "../../lib/ses";
+import { hashDestination, encryptDestination, decryptDestination } from "../../lib/crypto";
 
 function escapeHtml(s: string): string {
   return s
@@ -18,8 +19,14 @@ export function destinationRoutes() {
     const userId = c.get("userId");
     const rows = await c.env.DB.prepare(
       "SELECT id, email, verified_at, created_at FROM destinations WHERE user_id = ? ORDER BY created_at DESC"
-    ).bind(userId).all();
-    return c.json(rows.results ?? []);
+    ).bind(userId).all<{ id: number, email: string, verified_at: number | null, created_at: number }>();
+    
+    const results = [];
+    for (const row of rows.results ?? []) {
+      const email = await decryptDestination(row.email, c.env.DESTINATION_ENCRYPTION_KEY);
+      results.push({ ...row, email });
+    }
+    return c.json(results);
   });
 
   r.post("/destinations", async (c) => {
@@ -28,7 +35,8 @@ export function destinationRoutes() {
     if (!email || !email.includes("@")) return c.json({ error: "invalid email" }, 400);
     email = email.toLowerCase();
 
-    const existing = await c.env.DB.prepare("SELECT id FROM destinations WHERE user_id = ? AND email = ?").bind(userId, email).first();
+    const emailHash = await hashDestination(email, c.env.DESTINATION_ENCRYPTION_KEY);
+    const existing = await c.env.DB.prepare("SELECT id FROM destinations WHERE user_id = ? AND email_hash = ?").bind(userId, emailHash).first();
     if (existing) return c.json({ error: "already added" }, 409);
 
     const token = crypto.randomUUID();
@@ -51,9 +59,10 @@ export function destinationRoutes() {
       }
 
       // Save destination to DB after successful send
+      const encryptedEmail = await encryptDestination(email, c.env.DESTINATION_ENCRYPTION_KEY);
       await c.env.DB.prepare(
-        "INSERT INTO destinations (user_id, email, token, created_at) VALUES (?, ?, ?, ?)"
-      ).bind(userId, email, token, Date.now()).run();
+        "INSERT INTO destinations (user_id, email, email_hash, token, created_at) VALUES (?, ?, ?, ?, ?)"
+      ).bind(userId, encryptedEmail, emailHash, token, Date.now()).run();
 
       return c.json({ ok: true });
     } catch (err: any) {
@@ -70,13 +79,13 @@ export function destinationRoutes() {
     if (isNaN(id)) return c.json({ error: "invalid id" }, 400);
 
     // Ensure we don't delete if it's currently in use by an alias or domain
-    const dest = await c.env.DB.prepare("SELECT email FROM destinations WHERE id = ? AND user_id = ?").bind(id, userId).first<{ email: string }>();
+    const dest = await c.env.DB.prepare("SELECT email_hash FROM destinations WHERE id = ? AND user_id = ?").bind(id, userId).first<{ email_hash: string }>();
     if (!dest) return c.json({ ok: true });
 
-    const inUseAlias = await c.env.DB.prepare("SELECT id FROM aliases WHERE destination = ? AND user_id = ?").bind(dest.email, userId).first();
+    const inUseAlias = await c.env.DB.prepare("SELECT id FROM aliases WHERE destination_hash = ? AND user_id = ?").bind(dest.email_hash, userId).first();
     if (inUseAlias) return c.json({ error: "destination in use by aliases" }, 400);
     
-    const inUseDomain = await c.env.DB.prepare("SELECT id FROM domains WHERE default_destination = ? AND user_id = ?").bind(dest.email, userId).first();
+    const inUseDomain = await c.env.DB.prepare("SELECT id FROM domains WHERE default_destination_hash = ? AND user_id = ?").bind(dest.email_hash, userId).first();
     if (inUseDomain) return c.json({ error: "destination in use by domains" }, 400);
 
     await c.env.DB.prepare("DELETE FROM destinations WHERE id = ? AND user_id = ?").bind(id, userId).run();
@@ -101,7 +110,8 @@ export function verificationRoute() {
       return c.html(renderErrorPage(), 400);
     }
 
-    return c.html(renderConfirmationPage(dest.email, token));
+    const email = await decryptDestination(dest.email, c.env.DESTINATION_ENCRYPTION_KEY);
+    return c.html(renderConfirmationPage(email, token));
   });
 
   r.post("/verify", async (c) => {
@@ -123,7 +133,8 @@ export function verificationRoute() {
       .bind(Date.now(), dest.id)
       .run();
 
-    return c.html(renderSuccessPage(dest.email));
+    const email = await decryptDestination(dest.email, c.env.DESTINATION_ENCRYPTION_KEY);
+    return c.html(renderSuccessPage(email));
   });
 
   return r;
