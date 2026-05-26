@@ -8,6 +8,7 @@ import { Stats } from "./pages/Stats";
 import { Destinations } from "./pages/Destinations";
 import { api } from "./api";
 import { Globe, Mail, Ban, BarChart3, LogOut, Send } from "lucide-react";
+import { useToast } from "./ui";
 
 type Tab = "domains" | "aliases" | "destinations" | "blocks" | "stats";
 
@@ -23,13 +24,14 @@ export function App() {
   const { authed, setAuthed, loading } = useAuth();
   const [tab, setTab] = useState<Tab>("domains");
 
+  const { toast } = useToast();
+
   const logout = async () => {
     try {
       await api.logout();
-    } catch (err) {
-      console.error("Logout API call failed:", err);
-    } finally {
       setAuthed(false);
+    } catch (err: any) {
+      toast(err.message || "Failed to sign out", "error");
     }
   };
 
