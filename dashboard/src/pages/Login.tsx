@@ -158,7 +158,7 @@ export function Login() {
       </div>
 
       {/* Right: login form */}
-      <div style={{
+      <div className="login-form-pane" style={{
         flex: 1,
         display: "flex",
         alignItems: "center",
@@ -283,7 +283,8 @@ export function Login() {
           to   { transform: rotate(360deg); }
         }
         @media (max-width: 640px) {
-          .login-panel-left { display: none; }
+          .login-panel-left { display: none !important; }
+          .login-form-pane { padding: 24px !important; }
         }
       `}</style>
     </div>
