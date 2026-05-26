@@ -2,15 +2,25 @@ import { useEffect, useState } from "react";
 import QRCode from "react-qr-code";
 import { api } from "../api";
 import { useToast } from "../ui";
-import { ShieldCheck, ShieldOff, KeyRound, Copy, RefreshCw, Loader2 } from "lucide-react";
+import { ShieldCheck, ShieldOff, KeyRound, Copy, RefreshCw, Loader2, Fingerprint, Trash2, Pencil } from "lucide-react";
 
 type SetupStep = "idle" | "qr" | "verify" | "backup";
+type PasskeyRow = { id: string; device_name: string | null; created_at: number };
 
 export function Security() {
   const { toast } = useToast();
   const [enabled, setEnabled] = useState(false);
   const [backupCodesRemaining, setBackupCodesRemaining] = useState(0);
   const [loading, setLoading] = useState(true);
+
+  // Passkey state
+  const [passkeys, setPasskeys] = useState<PasskeyRow[]>([]);
+  const [passkeysSupported] = useState(() => typeof window !== "undefined" && !!window.PublicKeyCredential);
+  const [addingPasskey, setAddingPasskey] = useState(false);
+  const [newPasskeyName, setNewPasskeyName] = useState("");
+  const [showAddPasskey, setShowAddPasskey] = useState(false);
+  const [editingPasskeyId, setEditingPasskeyId] = useState<string | null>(null);
+  const [editingPasskeyName, setEditingPasskeyName] = useState("");
 
   // Setup wizard state
   const [setupStep, setSetupStep] = useState<SetupStep>("idle");
@@ -34,9 +44,10 @@ export function Security() {
   async function loadStatus() {
     setLoading(true);
     try {
-      const data = await api.mfaStatus();
-      setEnabled(data.enabled);
-      setBackupCodesRemaining(data.backupCodesRemaining);
+      const [mfa, pks] = await Promise.all([api.mfaStatus(), api.passkeyList().catch(() => [])]);
+      setEnabled(mfa.enabled);
+      setBackupCodesRemaining(mfa.backupCodesRemaining);
+      setPasskeys(pks);
     } catch {
       toast("Failed to load security settings", "error");
     } finally {
@@ -45,6 +56,51 @@ export function Security() {
   }
 
   useEffect(() => { loadStatus(); }, []);
+
+  async function addPasskey(e: React.FormEvent) {
+    e.preventDefault();
+    setAddingPasskey(true);
+    try {
+      const options = await api.passkeyChallenge();
+      const { startRegistration } = await import("@simplewebauthn/browser");
+      const response = await startRegistration({ optionsJSON: options as unknown as Parameters<typeof startRegistration>[0]["optionsJSON"] });
+      const result = await api.passkeyRegister({ response, deviceName: newPasskeyName || undefined });
+      setPasskeys(prev => [...prev, { id: result.id, device_name: newPasskeyName || null, created_at: Date.now() }]);
+      setShowAddPasskey(false);
+      setNewPasskeyName("");
+      toast("Passkey added successfully", "success");
+    } catch (err: any) {
+      if (err?.name === "NotAllowedError") {
+        toast("Passkey registration was cancelled", "error");
+      } else {
+        toast(err?.message || "Failed to add passkey", "error");
+      }
+    } finally {
+      setAddingPasskey(false);
+    }
+  }
+
+  async function deletePasskey(id: string) {
+    if (!confirm("Remove this passkey?")) return;
+    try {
+      await api.passkeyDelete(id);
+      setPasskeys(prev => prev.filter(p => p.id !== id));
+      toast("Passkey removed", "success");
+    } catch (err: any) {
+      toast(err?.message || "Failed to remove passkey", "error");
+    }
+  }
+
+  async function renamePasskey(id: string, name: string) {
+    try {
+      await api.passkeyRename(id, name);
+      setPasskeys(prev => prev.map(p => p.id === id ? { ...p, device_name: name } : p));
+      setEditingPasskeyId(null);
+      toast("Passkey renamed", "success");
+    } catch (err: any) {
+      toast(err?.message || "Failed to rename passkey", "error");
+    }
+  }
 
   async function beginSetup() {
     setSetupLoading(true);
@@ -533,6 +589,125 @@ export function Security() {
           </div>
         </div>
       )}
+
+      {/* Passkeys card */}
+      <div className="card stagger-3" style={{ marginTop: 24 }}>
+        <div className="card-header">
+          <span className="card-title">Passkeys</span>
+          <span className="badge badge-muted">{passkeys.length}</span>
+        </div>
+        <div style={{ padding: "20px 24px" }}>
+          <p style={{ margin: "0 0 16px 0", fontSize: "0.85rem", color: "var(--text-muted)", lineHeight: 1.6 }}>
+            Sign in with biometrics or a hardware key — no passphrase needed. Works on any device where you've saved a passkey.
+          </p>
+
+          {passkeys.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+              {passkeys.map(pk => (
+                <div key={pk.id} style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "10px 12px",
+                  background: "var(--canvas)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-sm)",
+                }}>
+                  <Fingerprint size={16} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                  {editingPasskeyId === pk.id ? (
+                    <form
+                      onSubmit={e => { e.preventDefault(); renamePasskey(pk.id, editingPasskeyName); }}
+                      style={{ flex: 1, display: "flex", gap: 6 }}
+                    >
+                      <input
+                        className="input"
+                        value={editingPasskeyName}
+                        onChange={e => setEditingPasskeyName(e.target.value)}
+                        autoFocus
+                        maxLength={64}
+                        style={{ flex: 1, padding: "4px 8px", fontSize: "0.85rem" }}
+                      />
+                      <button type="submit" className="btn btn-primary" style={{ padding: "4px 10px", fontSize: "0.8rem" }}>Save</button>
+                      <button type="button" className="btn" onClick={() => setEditingPasskeyId(null)} style={{ padding: "4px 8px", background: "var(--surface-2)", color: "var(--text-secondary)", fontSize: "0.8rem" }}>Cancel</button>
+                    </form>
+                  ) : (
+                    <>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: "0.85rem", color: "var(--text-primary)", fontWeight: 500 }}>
+                          {pk.device_name || "Unnamed passkey"}
+                        </div>
+                        <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                          Added {new Date(pk.created_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        onClick={() => { setEditingPasskeyId(pk.id); setEditingPasskeyName(pk.device_name || ""); }}
+                        title="Rename"
+                        style={{ padding: "4px 6px" }}
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        onClick={() => deletePasskey(pk.id)}
+                        title="Remove"
+                        style={{ padding: "4px 6px", color: "var(--red)" }}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {passkeysSupported ? (
+            showAddPasskey ? (
+              <form onSubmit={addPasskey} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                  Give this passkey a name so you can recognise it later (optional).
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    className="input"
+                    value={newPasskeyName}
+                    onChange={e => setNewPasskeyName(e.target.value)}
+                    placeholder="e.g. MacBook Touch ID, iPhone Face ID"
+                    maxLength={64}
+                    disabled={addingPasskey}
+                    autoFocus
+                    style={{ flex: 1 }}
+                  />
+                  <button type="submit" className="btn btn-primary" disabled={addingPasskey} style={{ gap: 6, flexShrink: 0 }}>
+                    {addingPasskey ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <Fingerprint size={14} />}
+                    {addingPasskey ? "Registering…" : "Register"}
+                  </button>
+                  <button type="button" className="btn" onClick={() => { setShowAddPasskey(false); setNewPasskeyName(""); }} disabled={addingPasskey} style={{ background: "var(--surface-2)", color: "var(--text-secondary)" }}>
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setShowAddPasskey(true)}
+                style={{ gap: 6 }}
+              >
+                <Fingerprint size={14} /> Add Passkey
+              </button>
+            )
+          ) : (
+            <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>
+              Passkeys are not supported in this browser.
+            </p>
+          )}
+        </div>
+      </div>
 
       <style>{`
         @keyframes spin {

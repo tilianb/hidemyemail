@@ -115,6 +115,15 @@ export const api = {
   adminRecoverUser: (id: number, sendEmail: boolean) => req<{ token: string; ok?: boolean }>(`/api/admin/users/${id}/recovery`, { method: "POST", body: JSON.stringify({ sendEmail }) }),
   adminCreateDomain: (domain: string) => req<{ ok: true }>("/api/admin/domains", { method: "POST", body: JSON.stringify({ domain }) }),
 
+  // Passkey endpoints
+  passkeyList: () => req<{ id: string; device_name: string | null; created_at: number }[]>("/api/settings/passkeys"),
+  passkeyChallenge: () => req<Record<string, unknown>>("/api/settings/passkeys/challenge", { method: "POST" }),
+  passkeyRegister: (body: { response: unknown; deviceName?: string }) => req<{ ok: true; id: string }>("/api/settings/passkeys/register", { method: "POST", body: JSON.stringify(body) }),
+  passkeyRename: (id: string, deviceName: string) => req<{ ok: true }>(`/api/settings/passkeys/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ deviceName }) }),
+  passkeyDelete: (id: string) => req<{ ok: true }>(`/api/settings/passkeys/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  passkeyLoginChallenge: () => req<Record<string, unknown>>("/api/passkey/challenge", { method: "POST" }),
+  passkeyLoginVerify: (response: unknown) => req<{ ok: true; userId: number }>("/api/passkey/verify", { method: "POST", body: JSON.stringify(response) }),
+
   // MFA settings endpoints
   mfaStatus: () => req<{ enabled: boolean; backupCodesRemaining: number }>("/api/settings/mfa"),
   mfaSetup: () => req<{ secret: string; uri: string }>("/api/settings/mfa/setup", { method: "POST" }),
