@@ -17,6 +17,7 @@
     "typegen": "wrangler types"
   },
   "dependencies": {
+    "@simplewebauthn/server": "^13.3.0",
     "aws4fetch": "^1.0.20",
     "hono": "^4.6.0"
   },

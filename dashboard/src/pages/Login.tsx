@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { generatePassphrase } from "../lib/passphrase";
+import { Fingerprint } from "lucide-react";
 
 export function Login() {
   const { refreshAuth } = useAuth();
@@ -26,6 +27,26 @@ export function Login() {
     } catch {
       setErr("Access denied — invalid credentials.");
       setPw("");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loginWithPasskey() {
+    setErr("");
+    setLoading(true);
+    try {
+      const options = await api.passkeyLoginChallenge();
+      const { startAuthentication } = await import("@simplewebauthn/browser");
+      const response = await startAuthentication({ optionsJSON: options as unknown as Parameters<typeof startAuthentication>[0]["optionsJSON"] });
+      await api.passkeyLoginVerify(response);
+      await refreshAuth();
+    } catch (err: any) {
+      if (err?.name === "NotAllowedError") {
+        setErr("Passkey sign-in was cancelled.");
+      } else {
+        setErr(err?.message || "Passkey sign-in failed.");
+      }
     } finally {
       setLoading(false);
     }
@@ -308,6 +329,26 @@ export function Login() {
               </button>
             </div>
           ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              {typeof window !== "undefined" && window.PublicKeyCredential && (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={loginWithPasskey}
+                    disabled={loading}
+                    style={{ width: "100%", justifyContent: "center", padding: "10px 16px", fontSize: "0.85rem", gap: 8 }}
+                  >
+                    <Fingerprint size={16} />
+                    {loading ? "Signing in…" : "Sign in with Passkey"}
+                  </button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                    <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontFamily: "var(--font-display)", letterSpacing: "0.08em" }}>OR</span>
+                    <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                  </div>
+                </>
+              )}
             <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
               <div className="field">
                 <label className="field-label" htmlFor="login-pw">Access passphrase</label>
@@ -364,6 +405,7 @@ export function Login() {
                 </button>
               </div>
             </form>
+            </div>
           )}
         </div>
       </div>

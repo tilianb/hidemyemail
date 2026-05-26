@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { setCookie, deleteCookie, getCookie } from "hono/cookie";
 import type { AppEnv } from "../app";
-import { verifyPassword, signSession, derivePassphraseHash, signMfaChallenge, verifyMfaChallenge } from "../../lib/auth";
+import { verifyPassword, signSession, derivePassphraseHash, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge } from "../../lib/auth";
+import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 
 const SESSION_TTL = 60 * 60 * 24 * 7; // 7 days
 
@@ -62,10 +63,14 @@ export function authRoutes() {
     // Resetting would allow an attacker who knows one valid password
     // to get unlimited brute-force attempts on other accounts.
 
-    // Gracefully handle missing mfa table (migration not yet applied)
+    // Fail open only for missing-table (migration not yet applied); re-throw all other errors
+    // so transient D1 failures never silently bypass MFA on protected accounts.
     const mfa = await c.env.DB.prepare(
       "SELECT totp_enabled FROM mfa WHERE user_id = ?"
-    ).bind(userId).first<{ totp_enabled: number }>().catch(() => null);
+    ).bind(userId).first<{ totp_enabled: number }>().catch((err: unknown) => {
+      if (err instanceof Error && err.message.includes("no such table")) return null;
+      throw err;
+    });
 
     if (mfa?.totp_enabled === 1) {
       const challenge = await signMfaChallenge(c.env.SESSION_SECRET, userId);
@@ -165,6 +170,79 @@ export function authRoutes() {
     const token = await signSession(c.env.SESSION_SECRET, userId, SESSION_TTL);
     setCookie(c, "__Host-session", token, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
     return c.json({ ok: true, userId });
+  });
+
+  // ── Passkey authentication (discoverable credentials, no passphrase needed) ──
+
+  r.post("/passkey/challenge", async (c) => {
+    const { generateAuthenticationOptions } = await import("@simplewebauthn/server");
+    const { getRpFromOrigin } = await import("../../lib/webauthn");
+
+    const { rpID } = getRpFromOrigin(c.req.header("origin"));
+
+    const options = await generateAuthenticationOptions({
+      rpID,
+      userVerification: "required",
+      // Empty allowCredentials → browser shows all resident passkeys for this origin
+    });
+
+    const cookie = await signPasskeyAuthChallenge(c.env.SESSION_SECRET, options.challenge);
+    setCookie(c, "__Host-passkey-challenge", cookie, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: 300 });
+
+    return c.json(options);
+  });
+
+  r.post("/passkey/verify", async (c) => {
+    const ip = c.req.header("cf-connecting-ip") || "unknown";
+    if (!(await checkRateLimit(ip, c.env.DB))) {
+      return c.json({ error: "too many attempts" }, 429);
+    }
+
+    const cookie = getCookie(c, "__Host-passkey-challenge");
+    if (!cookie) return c.json({ error: "no challenge" }, 401);
+
+    const expectedChallenge = await verifyPasskeyAuthChallenge(c.env.SESSION_SECRET, cookie);
+    if (!expectedChallenge) return c.json({ error: "challenge expired" }, 401);
+
+    const response = await c.req.json<AuthenticationResponseJSON>().catch(() => null);
+    if (!response?.id) return c.json({ error: "invalid request" }, 400);
+
+    const cred = await c.env.DB.prepare(
+      "SELECT user_id, public_key, sign_count, transports FROM passkey_credentials WHERE id = ?"
+    ).bind(response.id).first<{ user_id: number; public_key: string; sign_count: number; transports: string | null }>();
+
+    if (!cred) return c.json({ error: "unknown credential" }, 401);
+
+    const { verifyAuthenticationResponse } = await import("@simplewebauthn/server");
+    const { fromBase64url, getRpFromOrigin } = await import("../../lib/webauthn");
+    const { rpID, expectedOrigin } = getRpFromOrigin(c.req.header("origin"));
+
+    const result = await verifyAuthenticationResponse({
+      response,
+      expectedChallenge,
+      expectedOrigin,
+      expectedRPID: rpID,
+      requireUserVerification: true,
+      authenticator: {
+        credentialID: fromBase64url(response.id),
+        credentialPublicKey: fromBase64url(cred.public_key),
+        counter: cred.sign_count,
+        transports: cred.transports ? JSON.parse(cred.transports) : undefined,
+      },
+    }).catch(() => ({ verified: false as const, authenticationInfo: undefined }));
+
+    if (!result.verified || !result.authenticationInfo) {
+      return c.json({ error: "verification failed" }, 401);
+    }
+
+    await c.env.DB.prepare("UPDATE passkey_credentials SET sign_count = ? WHERE id = ?")
+      .bind(result.authenticationInfo.newCounter, response.id).run();
+
+    deleteCookie(c, "__Host-passkey-challenge", { path: "/", secure: true });
+    const sessionToken = await signSession(c.env.SESSION_SECRET, cred.user_id, SESSION_TTL);
+    setCookie(c, "__Host-session", sessionToken, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
+
+    return c.json({ ok: true, userId: cred.user_id });
   });
 
   r.post("/recover/send-code", async (c) => {
