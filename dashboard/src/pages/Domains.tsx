@@ -128,8 +128,8 @@ export function Domains() {
       </div>
 
       <div className="stagger-2">
-        <div className="table-wrap">
-          <table className="dossier">
+        <div className="table-wrap table-wrap-stack">
+          <table className="dossier dossier-stack">
             <thead>
               <tr>
                 <th>Domain</th>
@@ -145,20 +145,20 @@ export function Domains() {
               <tbody>
                 {rows.filter(d => !d.is_global).map(d => (
                   <tr key={d.id}>
-                    <td>
+                    <td data-label="Domain">
                       <div className="addr-cell">
                         <span className="addr-mono">{d.domain}</span>
                         <CopyButton text={d.domain} />
                       </div>
                     </td>
-                    <td>
+                    <td data-label="Type">
                       {d.is_global ? (
                         <span className="badge badge-purple">Global</span>
                       ) : (
                         <span className="badge badge-muted">Personal</span>
                       )}
                     </td>
-                    <td>
+                    <td data-label="Default destination">
                       {d.default_destination ? (
                         <div className="addr-cell">
                           <span
@@ -174,7 +174,7 @@ export function Domains() {
                         <span className="text-muted italic">None (Drop email)</span>
                       )}
                     </td>
-                    <td>
+                    <td data-label="Added">
                       <span className="font-mono text-muted" style={{ fontSize: "0.78rem" }}>
                         {new Date(d.created_at > 1e11 ? d.created_at : d.created_at * 1000).toLocaleDateString()}
                       </span>
