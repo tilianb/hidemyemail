@@ -135,9 +135,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  box-sizing: border-box;
-  min-height: 36px;
-  padding: 0 14px;
+  padding: 7px 14px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
   background: var(--surface-2);
@@ -243,7 +241,8 @@ body {
   font-family: var(--font-body);
   font-size: 0.9rem;
   line-height: 1.2;
-  padding: 8px 12px;
+  height: 36px;
+  padding: 0 12px;
   width: 100%;
   transition: border-color var(--t-fast), box-shadow var(--t-fast);
   outline: none;
