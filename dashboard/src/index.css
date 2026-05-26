@@ -882,4 +882,53 @@ table.dossier tbody td {
     right: var(--space-4);
     max-width: none;
   }
+
+  /* Stacked-card tables: rows become labeled cards (no horizontal scroll) */
+  .table-wrap-stack {
+    border: none;
+    overflow: visible;
+    background: transparent;
+  }
+  table.dossier-stack,
+  table.dossier-stack tbody,
+  table.dossier-stack tr,
+  table.dossier-stack td {
+    display: block;
+    width: 100%;
+  }
+  table.dossier-stack thead { display: none; }
+  table.dossier-stack tbody tr {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 10px 14px;
+    margin-bottom: 10px;
+  }
+  table.dossier-stack tbody tr:hover { background: var(--surface-1); }
+  table.dossier-stack tbody tr:last-child { margin-bottom: 0; }
+  table.dossier-stack tbody td {
+    padding: 6px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+  }
+  table.dossier-stack tbody td::before {
+    content: attr(data-label);
+    font-family: var(--font-display);
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+  table.dossier-stack tbody td .addr-cell {
+    min-width: 0;
+    justify-content: flex-end;
+  }
+  table.dossier-stack tbody td .addr-mono {
+    max-width: 100%;
+  }
 }
