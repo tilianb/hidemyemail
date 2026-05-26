@@ -23,7 +23,15 @@ export function App() {
   const { authed, setAuthed, loading } = useAuth();
   const [tab, setTab] = useState<Tab>("domains");
 
-  const logout = async () => { await api.logout(); setAuthed(false); };
+  const logout = async () => {
+    try {
+      await api.logout();
+    } catch (err) {
+      console.error("Logout API call failed:", err);
+    } finally {
+      setAuthed(false);
+    }
+  };
 
   if (loading) {
     return (
