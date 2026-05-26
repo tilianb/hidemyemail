@@ -76,6 +76,13 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   mime = setHeader(mime, "X-Forwarded-For", message.from);
   mime = setHeader(mime, "X-Forwarded-To", message.to);
   mime = setHeader(mime, "X-Original-From", origFrom);
+  
+  const { signAction } = await import("./action");
+  const disableSig = await signAction("disable", alias.id, env);
+  const actionEmail = `action+disable=${alias.id}_${disableSig}@${domainName}`;
+  mime = setHeader(mime, "List-Unsubscribe", `<mailto:${actionEmail}>`);
+  mime = setHeader(mime, "List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
+
   const rawBase64 = toBase64(serializeMime(mime));
 
   try {

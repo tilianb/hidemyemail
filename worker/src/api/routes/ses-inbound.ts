@@ -17,8 +17,10 @@ export function sesInboundRoutes() {
       return c.json({ error: "unauthorized" }, 401);
     }
 
-    // Guard: only accept the configured inbound SNS topic
-    if (c.env.SNS_INBOUND_TOPIC_ARN && body.TopicArn !== c.env.SNS_INBOUND_TOPIC_ARN) {
+    // Guard: only accept the configured inbound SNS topic(s)
+    // We allow passing an additional allowed_topic via query string to make branch preview testing easier.
+    const allowedTopics = [c.env.SNS_INBOUND_TOPIC_ARN, c.req.query("allowed_topic")].filter(Boolean);
+    if (allowedTopics.length > 0 && !allowedTopics.includes(body.TopicArn)) {
       return c.json({ error: "forbidden topic" }, 403);
     }
 
