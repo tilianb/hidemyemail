@@ -85,3 +85,4 @@ CREATE TABLE rate_limits (
   attempts INTEGER NOT NULL DEFAULT 0,
   reset_at INTEGER NOT NULL
 );
+INSERT OR IGNORE INTO domains (id, user_id, is_global, domain, active, created_at) VALUES (1, 1, 1, 'hidemyemail.dev', 1, unixepoch());
