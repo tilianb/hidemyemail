@@ -22,7 +22,11 @@ export type AppEnv = {
 export function createApp() {
   const app = new Hono<AppEnv>();
 
-  app.use("*", cors({ origin: "*", allowHeaders: ["Content-Type", "Cookie"], credentials: true }));
+  app.use("*", cors({
+    origin: (origin) => origin || "http://localhost:5173",
+    allowHeaders: ["Content-Type", "Cookie"],
+    credentials: true
+  }));
 
   // public routes (no session)
   app.route("/api", authRoutes());
