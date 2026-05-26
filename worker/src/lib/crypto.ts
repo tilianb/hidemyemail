@@ -40,11 +40,16 @@ export async function decryptDestination(encryptedBase64: string, keyBase64: str
   const key = await crypto.subtle.importKey(
     "raw", keyData, "AES-GCM", false, ["decrypt"]
   );
-  const combined = fromBase64(encryptedBase64);
-  const iv = combined.subarray(0, 12);
-  const ciphertext = combined.subarray(12);
-  const plaintextBuf = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv }, key, ciphertext
-  );
-  return new TextDecoder().decode(plaintextBuf);
+  try {
+    const combined = fromBase64(encryptedBase64);
+    const iv = combined.subarray(0, 12);
+    const ciphertext = combined.subarray(12);
+    const plaintextBuf = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv }, key, ciphertext
+    );
+    return new TextDecoder().decode(plaintextBuf);
+  } catch (err) {
+    console.warn("Failed to decrypt destination (might be unmigrated plaintext):", encryptedBase64);
+    return encryptedBase64;
+  }
 }
