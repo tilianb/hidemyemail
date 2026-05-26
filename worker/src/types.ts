@@ -11,6 +11,7 @@ export interface Env {
   S3_INBOUND_BUCKET: string;        // S3 bucket where SES stores raw inbound emails
   SNS_SECRET?: string;              // Optional token for verifying incoming SNS webhooks
   TEST_MIGRATIONS?: unknown;
+  DESTINATION_ENCRYPTION_KEY: string;
 }
 
 export interface DomainRow { id: number; domain: string; default_destination: string; active: number; created_at: number; }

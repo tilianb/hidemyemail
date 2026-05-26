@@ -1,4 +1,5 @@
 import type { AliasRow, DomainRow, EventType, ReverseRow, BlockRow } from "../types";
+import { decryptDestination } from "../lib/crypto";
 
 export async function createDomain(db: D1Database, domain: string, dest: string): Promise<number> {
   const r = await db.prepare(
@@ -31,9 +32,7 @@ export async function autoCreateAlias(
   return await getAlias(db, fullAddress);
 }
 
-export async function setAliasDestination(db: D1Database, id: number, dest: string | null): Promise<void> {
-  await db.prepare("UPDATE aliases SET destination = ? WHERE id = ?").bind(dest, id).run();
-}
+
 
 export async function upsertReverse(
   db: D1Database, aliasId: number, externalSender: string, token: string
@@ -81,8 +80,15 @@ export async function incCounter(db: D1Database, aliasId: number, col: "fwd_coun
   await db.prepare(`UPDATE aliases SET ${col} = ${col} + 1, last_seen_at = ? WHERE id = ?`).bind(Date.now(), aliasId).run();
 }
 
-export async function ownerDestinations(db: D1Database, userId: number): Promise<Set<string>> {
+export async function ownerDestinations(db: D1Database, userId: number, key: string): Promise<Set<string>> {
   const a = await db.prepare("SELECT default_destination AS d FROM domains WHERE user_id = ? OR is_global = 1").bind(userId).all<{ d: string }>();
   const b = await db.prepare("SELECT DISTINCT destination AS d FROM aliases WHERE destination IS NOT NULL AND user_id = ?").bind(userId).all<{ d: string }>();
-  return new Set([...(a.results ?? []), ...(b.results ?? [])].map((x) => x.d.toLowerCase()));
+  
+  const decrypted = new Set<string>();
+  for (const x of [...(a.results ?? []), ...(b.results ?? [])]) {
+    if (x.d) {
+      decrypted.add((await decryptDestination(x.d, key)).toLowerCase());
+    }
+  }
+  return decrypted;
 }
