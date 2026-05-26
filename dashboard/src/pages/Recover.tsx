@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { CopyButton, useToast } from "../ui";
 import { api } from "../api";
-import { Key } from "lucide-react";
 
 export function Recover() {
   const { toast } = useToast();
@@ -14,9 +13,19 @@ export function Recover() {
 
   if (!token) {
     return (
-      <div className="card" style={{ maxWidth: 400, margin: "10vh auto", textAlign: "center" }}>
-        <h1 className="page-title">Invalid Link</h1>
-        <p className="text-muted">This recovery link is missing or malformed.</p>
+      <div className="card" style={{ maxWidth: 440, margin: "10vh auto", textAlign: "center", padding: "40px 32px" }}>
+        <div className="logo-container icon-error">
+          <svg viewBox="0 0 24 24">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+        </div>
+        <h1 style={{ marginBottom: 8 }}>Invalid Link</h1>
+        <p className="text-secondary" style={{ marginBottom: 24, fontSize: "0.9rem" }}>This recovery link is missing, malformed, or expired.</p>
+        <button className="btn btn-secondary" onClick={() => window.location.href = "/"} style={{ width: "100%", justifyContent: "center", padding: "10px 14px", fontSize: "0.9rem", fontWeight: 600 }}>
+          Go to Dashboard
+        </button>
       </div>
     );
   }
@@ -51,32 +60,44 @@ export function Recover() {
   }
 
   return (
-    <div className="card" style={{ maxWidth: 400, margin: "10vh auto" }}>
-      <div className="card-header" style={{ marginBottom: 24, textAlign: "center" }}>
-        <h1 className="page-title" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12 }}>
-          <Key className="text-accent" /> Account Recovery
-        </h1>
-        {step === 1 && <p className="text-muted" style={{ marginTop: 8 }}>Click below to send an authentication code to your email.</p>}
-        {step === 2 && <p className="text-muted" style={{ marginTop: 8 }}>Enter the 6-digit code sent to your email.</p>}
-        {step === 3 && <p className="text-muted" style={{ marginTop: 8 }}>Your account has been recovered!</p>}
-      </div>
-
-      <div className="card-body">
-        {step === 1 && (
-          <form onSubmit={handleSendCode} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <button className="btn btn-primary" type="submit" disabled={loading} style={{ width: "100%" }}>
+    <div className="card" style={{ maxWidth: 440, margin: "10vh auto", textAlign: "center", padding: "40px 32px" }}>
+      {step === 1 && (
+        <>
+          <div className="logo-container icon-accent">
+            <svg viewBox="0 0 24 24">
+              <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+              <path d="M22 6l-10 7L2 6"></path>
+            </svg>
+          </div>
+          <h1 style={{ marginBottom: 8 }}>Account <span className="brand-redact">Recovery</span></h1>
+          <p className="text-secondary" style={{ marginBottom: 32, fontSize: "0.9rem" }}>
+            Click the button below to send a 6-digit authentication code to your default destination email address.
+          </p>
+          <form onSubmit={handleSendCode}>
+            <button className="btn btn-primary" type="submit" disabled={loading} style={{ width: "100%", justifyContent: "center", padding: "11px 20px", fontSize: "0.9rem", fontWeight: 600 }}>
               {loading ? "Sending..." : "Send Auth Code"}
             </button>
           </form>
-        )}
+        </>
+      )}
 
-        {step === 2 && (
+      {step === 2 && (
+        <>
+          <div className="logo-container icon-accent">
+            <svg viewBox="0 0 24 24">
+              <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+              <path d="M22 6l-10 7L2 6"></path>
+            </svg>
+          </div>
+          <h1 style={{ marginBottom: 8 }}>Authentication <span className="brand-redact">Code</span></h1>
+          <p className="text-secondary" style={{ marginBottom: 24, fontSize: "0.9rem" }}>
+            Enter the 6-digit authentication code sent to your email to verify your identity.
+          </p>
           <form onSubmit={handleVerify} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div className="field">
-              <label className="field-label">Authentication Code</label>
               <input
                 className="input input-mono"
-                style={{ textAlign: "center", fontSize: "1.2rem", letterSpacing: "0.2em" }}
+                style={{ textAlign: "center", fontSize: "1.4rem", letterSpacing: "0.3em", padding: "12px 16px" }}
                 type="text"
                 maxLength={6}
                 value={code}
@@ -87,39 +108,36 @@ export function Recover() {
                 placeholder="123456"
               />
             </div>
-            <button className="btn btn-primary" type="submit" disabled={loading || code.length < 6} style={{ width: "100%" }}>
+            <button className="btn btn-primary" type="submit" disabled={loading || code.length < 6} style={{ width: "100%", justifyContent: "center", padding: "11px 20px", fontSize: "0.9rem", fontWeight: 600, marginTop: 8 }}>
               {loading ? "Verifying..." : "Verify Code"}
             </button>
           </form>
-        )}
+        </>
+      )}
 
-        {step === 3 && (
-          <div style={{ textAlign: "center" }}>
-            <p style={{ marginBottom: 16 }}>
-              A new master passphrase has been securely generated for your account. 
-              <strong> You must save this in your password manager immediately.</strong>
-            </p>
-            <div style={{
-              background: "rgba(255, 179, 0, 0.1)",
-              border: "1px dashed var(--accent)",
-              padding: 16,
-              borderRadius: 6,
-              marginBottom: 24,
-              fontFamily: "var(--font-mono)",
-              fontSize: "1.1rem",
-              wordBreak: "break-all"
-            }}>
-              {newPassphrase}
-            </div>
-            <div style={{ display: "flex", gap: 12 }}>
-              <CopyButton text={newPassphrase} />
-              <button className="btn btn-primary" onClick={() => window.location.href = "/"} style={{ flex: 1 }}>
-                Go to Dashboard
-              </button>
-            </div>
+      {step === 3 && (
+        <>
+          <div className="logo-container icon-success">
+            <svg viewBox="0 0 24 24">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
           </div>
-        )}
-      </div>
+          <h1 style={{ marginBottom: 8 }}>Recovery Successful</h1>
+          <p className="text-secondary" style={{ marginBottom: 24, fontSize: "0.9rem" }}>
+            A new master passphrase has been securely generated. 
+            <strong style={{ color: "var(--text-primary)" }}> You must save this in your password manager immediately.</strong>
+          </p>
+          <div className="email-badge" style={{ fontSize: "1.2rem", padding: "12px 20px", letterSpacing: "0.05em" }}>
+            {newPassphrase}
+          </div>
+          <div style={{ display: "flex", gap: 12 }}>
+            <CopyButton text={newPassphrase} />
+            <button className="btn btn-primary" onClick={() => window.location.href = "/"} style={{ flex: 1, justifyContent: "center", padding: "11px 20px", fontSize: "0.9rem", fontWeight: 600 }}>
+              Go to Dashboard
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
