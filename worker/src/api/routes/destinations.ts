@@ -133,7 +133,7 @@ export function verificationRoute() {
 
   r.post("/verify", async (c) => {
     const body = await c.req.parseBody().catch(() => ({}));
-    const token = typeof body.token === "string" ? body.token : undefined;
+    const token = typeof (body as any).token === "string" ? (body as any).token : undefined;
     if (!token) {
       return c.html(renderErrorPage(), 400);
     }
