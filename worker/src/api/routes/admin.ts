@@ -63,7 +63,7 @@ export function adminRoutes() {
     const id = parseInt(c.req.param("id"));
     if (isNaN(id) || id === 1) return c.json({ error: "invalid id" }, 400);
 
-    const { active, forwarding, name } = await c.req.json<{ active?: number, forwarding?: number, name?: string }>().catch(() => ({}));
+    const { active, forwarding, name } = await c.req.json<{ active?: number, forwarding?: number, name?: string }>().catch(() => ({} as any));
     
     const updates: string[] = [];
     const values: any[] = [];
@@ -85,7 +85,7 @@ export function adminRoutes() {
     const id = parseInt(c.req.param("id"));
     if (isNaN(id) || id === 1) return c.json({ error: "invalid id" }, 400);
 
-    const { sendEmail } = await c.req.json<{ sendEmail?: boolean }>().catch(() => ({}));
+    const { sendEmail } = await c.req.json<{ sendEmail?: boolean }>().catch(() => ({} as any));
 
     const token = crypto.randomUUID();
     const expiresAt = Date.now() + 24 * 3600 * 1000; // 24 hours

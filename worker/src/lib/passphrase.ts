@@ -16,7 +16,7 @@ export function generatePassphrase(): string {
   crypto.getRandomValues(array);
   const selected = [];
   for (let i = 0; i < 6; i++) {
-    selected.push(WORDS[array[i] % WORDS.length]);
+    selected.push(WORDS[array[i]! % WORDS.length]);
   }
   return selected.join("-");
 }
