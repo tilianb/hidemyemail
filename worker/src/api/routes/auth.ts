@@ -1,7 +1,7 @@
 import { Hono } from "hono";
-import { setCookie, deleteCookie } from "hono/cookie";
+import { setCookie, deleteCookie, getCookie } from "hono/cookie";
 import type { AppEnv } from "../app";
-import { verifyPassword, signSession, derivePassphraseHash } from "../../lib/auth";
+import { verifyPassword, signSession, derivePassphraseHash, signMfaChallenge, verifyMfaChallenge } from "../../lib/auth";
 
 const SESSION_TTL = 60 * 60 * 24 * 7; // 7 days
 
@@ -57,10 +57,20 @@ export function authRoutes() {
     }
 
     if (!userId) return c.json({ error: "invalid" }, 401);
-    
+
     // NOTE: We intentionally do NOT reset rate limits on success.
     // Resetting would allow an attacker who knows one valid password
     // to get unlimited brute-force attempts on other accounts.
+
+    const mfa = await c.env.DB.prepare(
+      "SELECT totp_enabled FROM mfa WHERE user_id = ?"
+    ).bind(userId).first<{ totp_enabled: number }>();
+
+    if (mfa?.totp_enabled === 1) {
+      const challenge = await signMfaChallenge(c.env.SESSION_SECRET, userId);
+      setCookie(c, "__Host-mfa-challenge", challenge, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: 300 });
+      return c.json({ mfa_required: true });
+    }
 
     const token = await signSession(c.env.SESSION_SECRET, userId, SESSION_TTL);
     setCookie(c, "__Host-session", token, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
@@ -100,6 +110,60 @@ export function authRoutes() {
   r.post("/logout", (c) => {
     deleteCookie(c, "__Host-session", { path: "/", secure: true });
     return c.json({ ok: true });
+  });
+
+  r.post("/mfa/complete", async (c) => {
+    const ip = c.req.header("cf-connecting-ip") || "unknown";
+    if (!(await checkRateLimit(ip, c.env.DB))) {
+      return c.json({ error: "too many attempts" }, 429);
+    }
+
+    const challenge = getCookie(c, "__Host-mfa-challenge");
+    if (!challenge) return c.json({ error: "no challenge" }, 401);
+
+    const userId = await verifyMfaChallenge(c.env.SESSION_SECRET, challenge);
+    if (!userId) return c.json({ error: "challenge expired" }, 401);
+
+    const { code } = await c.req.json<{ code: string }>().catch(() => ({ code: "" }));
+    if (!code) return c.json({ error: "missing code" }, 400);
+
+    const mfa = await c.env.DB.prepare(
+      "SELECT totp_secret, totp_backup_codes FROM mfa WHERE user_id = ? AND totp_enabled = 1"
+    ).bind(userId).first<{ totp_secret: string; totp_backup_codes: string | null }>();
+
+    if (!mfa) return c.json({ error: "MFA not configured" }, 401);
+
+    const { decryptDestination } = await import("../../lib/crypto");
+    const { verifyTOTP, verifyBackupCode } = await import("../../lib/totp");
+
+    const secret = await decryptDestination(mfa.totp_secret, c.env.DESTINATION_ENCRYPTION_KEY);
+
+    let verified = false;
+
+    if (/^\d{6}$/.test(code)) {
+      verified = await verifyTOTP(secret, code);
+    }
+
+    if (!verified) {
+      const normalized = code.replace(/[^A-Z0-9]/gi, "").toUpperCase();
+      if (normalized.length === 8) {
+        const hashedCodes: string[] = mfa.totp_backup_codes ? JSON.parse(mfa.totp_backup_codes) : [];
+        const idx = await verifyBackupCode(normalized, hashedCodes);
+        if (idx !== -1) {
+          hashedCodes.splice(idx, 1);
+          await c.env.DB.prepare("UPDATE mfa SET totp_backup_codes = ? WHERE user_id = ?")
+            .bind(JSON.stringify(hashedCodes), userId).run();
+          verified = true;
+        }
+      }
+    }
+
+    if (!verified) return c.json({ error: "Invalid code" }, 401);
+
+    deleteCookie(c, "__Host-mfa-challenge", { path: "/", secure: true });
+    const token = await signSession(c.env.SESSION_SECRET, userId, SESSION_TTL);
+    setCookie(c, "__Host-session", token, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
+    return c.json({ ok: true, userId });
   });
 
   r.post("/recover/send-code", async (c) => {

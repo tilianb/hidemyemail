@@ -40,6 +40,23 @@ async function hmac(secret: string, data: string): Promise<string> {
   return toHex(await crypto.subtle.sign("HMAC", key, enc.encode(data)));
 }
 
+export async function signMfaChallenge(secret: string, userId: number): Promise<string> {
+  const exp = Math.floor(Date.now() / 1000) + 300; // 5 minutes
+  const payload = `mfa.${userId}.${exp}`;
+  return `${payload}.${await hmac(secret, payload)}`;
+}
+
+export async function verifyMfaChallenge(secret: string, token: string): Promise<number | null> {
+  const parts = token.split(".");
+  if (parts.length !== 4 || parts[0] !== "mfa") return null;
+  const [, userIdStr, expStr, sig] = parts;
+  const payload = `mfa.${userIdStr}.${expStr}`;
+  const expected = await hmac(secret, payload);
+  if (!timingSafeEqual(sig!, expected)) return null;
+  if (Number(expStr) > Math.floor(Date.now() / 1000)) return Number(userIdStr);
+  return null;
+}
+
 export async function signSession(secret: string, userId: number, ttlSeconds: number): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
   const payload = `v2.${userId}.${exp}`;
