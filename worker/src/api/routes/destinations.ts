@@ -18,8 +18,8 @@ export function destinationRoutes() {
   r.get("/destinations", async (c) => {
     const userId = c.get("userId");
     const rows = await c.env.DB.prepare(
-      "SELECT id, email, verified_at, created_at FROM destinations WHERE user_id = ? ORDER BY created_at DESC"
-    ).bind(userId).all<{ id: number, email: string, verified_at: number | null, created_at: number }>();
+      "SELECT id, email, is_default, verified_at, created_at FROM destinations WHERE user_id = ? ORDER BY created_at DESC"
+    ).bind(userId).all<{ id: number, email: string, is_default: number, verified_at: number | null, created_at: number }>();
     
     const results = [];
     for (const row of rows.results ?? []) {
@@ -89,6 +89,23 @@ export function destinationRoutes() {
     if (inUseDomain) return c.json({ error: "destination in use by domains" }, 400);
 
     await c.env.DB.prepare("DELETE FROM destinations WHERE id = ? AND user_id = ?").bind(id, userId).run();
+    return c.json({ ok: true });
+  });
+
+  r.patch("/destinations/:id/default", async (c) => {
+    const userId = c.get("userId");
+    const id = parseInt(c.req.param("id"), 10);
+    if (isNaN(id)) return c.json({ error: "invalid id" }, 400);
+
+    const dest = await c.env.DB.prepare("SELECT verified_at FROM destinations WHERE id = ? AND user_id = ?").bind(id, userId).first<{ verified_at: number | null }>();
+    if (!dest) return c.json({ error: "destination not found" }, 404);
+    if (!dest.verified_at) return c.json({ error: "destination must be verified to be set as default" }, 400);
+
+    await c.env.DB.batch([
+      c.env.DB.prepare("UPDATE destinations SET is_default = 0 WHERE user_id = ?").bind(userId),
+      c.env.DB.prepare("UPDATE destinations SET is_default = 1 WHERE id = ? AND user_id = ?").bind(id, userId)
+    ]);
+
     return c.json({ ok: true });
   });
 

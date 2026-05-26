@@ -41,8 +41,17 @@ export function aliasRoutes() {
       return c.json({ error: "not your domain" }, 403);
     }
 
-    if (b.destination) {
-      const emailHash = await hashDestination(b.destination.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY);
+    let destinationToUse = b.destination;
+    if (!destinationToUse && dom.is_global === 1) {
+      const defaultDest = await c.env.DB.prepare("SELECT email FROM destinations WHERE user_id = ? AND is_default = 1").bind(userId).first<{ email: string }>();
+      if (!defaultDest) {
+        return c.json({ error: "you must select a destination or set a default destination" }, 400);
+      }
+      destinationToUse = await decryptDestination(defaultDest.email, c.env.DESTINATION_ENCRYPTION_KEY);
+    }
+
+    if (destinationToUse) {
+      const emailHash = await hashDestination(destinationToUse.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY);
       const destVerified = await c.env.DB.prepare("SELECT id FROM destinations WHERE user_id = ? AND email_hash = ? AND verified_at IS NOT NULL").bind(userId, emailHash).first();
       if (!destVerified) return c.json({ error: "destination email not verified" }, 400);
     }
@@ -63,8 +72,8 @@ export function aliasRoutes() {
     const full = `${localPart}@${dom.domain}`;
     
     try {
-      const destEnc = b.destination ? await encryptDestination(b.destination.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY) : null;
-      const destHash = b.destination ? await hashDestination(b.destination.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY) : null;
+      const destEnc = destinationToUse ? await encryptDestination(destinationToUse.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY) : null;
+      const destHash = destinationToUse ? await hashDestination(destinationToUse.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY) : null;
 
       const row = await c.env.DB.prepare(
         "INSERT INTO aliases (domain_id, user_id, local_part, full_address, destination, destination_hash, label, active, source, created_at) " +
@@ -100,9 +109,21 @@ export function aliasRoutes() {
       sets.push("active=?"); vals.push(b.active);
     }
     if (b.destination !== undefined) {
-      if (b.destination) {
-        sets.push("destination=?"); vals.push(await encryptDestination(b.destination.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY));
-        sets.push("destination_hash=?"); vals.push(await hashDestination(b.destination.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY));
+      let destinationToUse = b.destination;
+      if (!destinationToUse) {
+        const aliasInfo = await c.env.DB.prepare("SELECT d.is_global FROM aliases a JOIN domains d ON a.domain_id = d.id WHERE a.id = ? AND a.user_id = ?").bind(id, userId).first<{ is_global: number }>();
+        if (aliasInfo?.is_global === 1) {
+          const defaultDest = await c.env.DB.prepare("SELECT email FROM destinations WHERE user_id = ? AND is_default = 1").bind(userId).first<{ email: string }>();
+          if (!defaultDest) {
+            return c.json({ error: "you must select a destination or set a default destination" }, 400);
+          }
+          destinationToUse = await decryptDestination(defaultDest.email, c.env.DESTINATION_ENCRYPTION_KEY);
+        }
+      }
+
+      if (destinationToUse) {
+        sets.push("destination=?"); vals.push(await encryptDestination(destinationToUse.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY));
+        sets.push("destination_hash=?"); vals.push(await hashDestination(destinationToUse.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY));
       } else {
         sets.push("destination=?"); vals.push(null);
         sets.push("destination_hash=?"); vals.push(null);

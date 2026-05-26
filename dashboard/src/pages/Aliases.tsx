@@ -176,7 +176,7 @@ export function Aliases() {
                 onChange={e => setForm(f => ({ ...f, destination: e.target.value }))}
                 disabled={submitting || destinations.length === 0}
               >
-                <option value="">-- Domain Default --</option>
+                <option value="">{isGlobal ? "-- Global Default --" : "-- Domain Default --"}</option>
                 {destinations.map(d => <option key={d.id} value={d.email}>{d.email}</option>)}
               </select>
             </div>
@@ -303,13 +303,12 @@ export function Aliases() {
                     </td>
                     <td>
                       <button
-                        className="btn btn-danger"
+                        className="btn-icon danger"
                         type="button"
                         onClick={() => setDeleteTarget({ id: a.id, full_address: a.full_address })}
                         title="Delete alias"
-                        style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "6px" }}
                       >
-                        <Trash2 size={14} />
+                        <Trash2 size={16} />
                       </button>
                     </td>
                   </tr>
