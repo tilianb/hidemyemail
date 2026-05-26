@@ -18,10 +18,12 @@ Replaces a self-hosted addy.io (AnonAddy) Docker stack.
 - **Stability:** Cascaded deletion of related records (`reverse_map`, `blocks`, `events`) is implemented when an alias is deleted, preventing "Failed to delete alias" errors.
 
 ## Key Design Decisions & Specs
-- **Personal, Single Owner:** Password authentication (PBKDF2) + signed session cookie (HMAC). No users table.
-- **Multi-Domain Support:** Serves N domains (seeded in D1 `domains` table). Each alias can optionally override the default domain destination.
+- **Multi-User Passphrase Authentication:** Passphrase authentication (PBKDF2) with rate limiting + signed session cookie (HMAC). Supports multiple users (`users` table).
+- **Multi-Domain & Domain Isolation:** Serves N domains. Each domain is isolated to specific users (`user_domains` table). Global domains (accessible to all) exist. The root domain is hidden from the domains list but exists in the schema.
+- **Verified Destinations & Encryption:** Users can add verified destination emails (`destinations` table, verified via a secure double-step email verification to prevent auto-scanners). Destination emails are encrypted in the database (scrambled) using AES-GCM to protect PII.
 - **Catch-All Auto-Create:** Automatically registers new aliases on their first inbound email, alongside standard dashboard CRUD.
 - **Self-Describing Reverse Addresses:** Outbound replies use an addy.io style reverse address format: `alias+extLocal=extDomain@domain` (e.g., `shop+alice=store.com@hidemyemail.dev`). Senders with plus/equal characters in their emails are fully supported.
+- **Sender Blocks:** Sender blocks are scoped to the individual user to prevent global interference.
 - **Deliverability & Junk Mitigation:** Inbound emails are re-injected with standard, clean headers:
   - `From` MIME header is rewritten to: `"Sender Name - sender at email" <alias@domain>` (e.g., `Alice - alice at store.com <shop@hidemyemail.dev>`). `@` signs in the display name are sanitized to ` at ` to prevent junk-folder flagging.
   - `Reply-To` MIME header is set to the self-describing reverse address.
@@ -34,15 +36,17 @@ Replaces a self-hosted addy.io (AnonAddy) Docker stack.
 2. **SES SigV4 Service Name:** Must be explicitly overridden to `"ses"` in `aws4fetch` (default parsing for `email.{region}.amazonaws.com` picks `"email"` and fails).
 3. **MIME Surgery on Bytes:** Attachments are binary. Split at the first double CRLF (`\r\n\r\n`), modify only the ASCII header block, leave body bytes verbatim, then base64-encode. Never decode the whole message as a string.
 4. **Security & Anti-Spoofing Relay Gate:** Since reverse addresses are self-describing and guessable, `handleReply()` strictly enforces:
-   - The envelope sender must belong to verified owner destinations (`domains.default_destination` or non-NULL `aliases.destination`).
-   - The SES SPF or DMARC verdict must be `"PASS"`.
+   - The envelope sender must belong to a verified user destination (via the `destinations` table).
+   - The SES SPF or DMARC verdict must be `"PASS"` (reply-path SPF/DMARC protections).
    - Fails closed: if SPF/DMARC verdicts fail or are missing, replies are rejected to prevent open relay.
+   - SNS webhooks are protected with `SNS_SECRET` token verification and auto-confirm AWS SNS subscriptions.
+   - Comprehensive security hardening is in place: CORS, IDOR fixes, XSS mitigations, CSP, cascade deletes, session binding, ReDoS prevention, and data scoping.
 5. **No D1 batch() SQL String Parsing in Code:** A repo security hook flags the bare `exec`-with-paren pattern. In code/docs, avoid multi-statement string executions; use helpers built from `prepare().run()` for SQL statements.
 6. **Transient SES Errors:** If a transient SES error occurs in `/ses/inbound`, the handler throws so the Worker returns a `5xx` status, triggering SNS/MTA retry. Permanent errors are logged and dropped.
 
 ## Env & Ops Configuration
 Add the following variables in `wrangler.jsonc` or via `wrangler secret put`:
-- `DB`: D1 Database binding
+- `DB`: D1 Database binding (Note: Development and production databases are separated. Configure local testing DBs and secrets in `.dev.vars`)
 - `SES_REGION`: AWS region (e.g., `ap-southeast-2`)
 - `S3_INBOUND_BUCKET`: Raw inbound email S3 bucket (e.g., `hidemyemail-inbound-raw`)
 - **Secrets:**
@@ -51,11 +55,16 @@ Add the following variables in `wrangler.jsonc` or via `wrangler secret put`:
   - `SESSION_SECRET`: Session signing secret (HMAC)
   - `AUTH_PASSWORD_HASH`: PBKDF2 password hash (hex)
   - `AUTH_PASSWORD_SALT`: PBKDF2 salt (hex)
+  - `DESTINATION_ENCRYPTION_KEY`: 32-byte hex key for encrypting destination emails in the DB
+  - `SNS_SECRET`: Optional token for verifying incoming SNS webhooks
   - `SNS_ALLOWED_TOPIC_ARN`: Allowed SNS topic for SES outbound notifications (bounces/complaints)
   - `SNS_INBOUND_TOPIC_ARN`: Allowed SNS topic for SES inbound receipt notifications
 
 *Commits must be signed via 1Password SSH agent:*
 `SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock" git commit -S -m "..."`
+
+## PR & Workflow Rules
+- **Pull Requests:** PRs must ALWAYS contain a comprehensive summary of the changes in their body description.
 
 ## Dev & Build Commands
 - `cd worker && npm install && npm test` — Run complete Vitest suite (Vitest pool workers)

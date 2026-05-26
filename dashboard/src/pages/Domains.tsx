@@ -81,11 +81,11 @@ export function Domains() {
           <div className="form-strip" style={{ gap: 12 }}>
             <div className="field" style={{ minWidth: 200, display: "flex", flexDirection: "column" }}>
               <label className="field-label" htmlFor="dom-prefix">Subdomain prefix</label>
-              <div style={{ display: "flex", alignItems: "center" }}>
+              <div className="input-group">
                 <input
                   id="dom-prefix"
                   className="input input-mono"
-                  style={{ borderRight: "none", borderTopRightRadius: 0, borderBottomRightRadius: 0, flex: 1, minWidth: 0 }}
+                  style={{ flex: 1, minWidth: 0 }}
                   type="text"
                   placeholder="name"
                   value={form.prefix}
@@ -93,20 +93,7 @@ export function Domains() {
                   required
                   disabled={submitting || myDomainsCount >= 5}
                 />
-                <div style={{ 
-                  padding: "0 12px", 
-                  background: "var(--bg-card)", 
-                  border: "1px solid var(--border)", 
-                  borderLeft: "none",
-                  height: "36px", 
-                  display: "flex", 
-                  alignItems: "center",
-                  borderTopRightRadius: 6,
-                  borderBottomRightRadius: 6,
-                  color: "var(--text-muted)",
-                  fontFamily: "var(--font-mono)",
-                  fontSize: "0.85rem"
-                }}>
+                <div className="input-suffix">
                   .hidemyemail.dev
                 </div>
               </div>
@@ -156,7 +143,7 @@ export function Domains() {
               <TableSkeleton cols={5} rows={3} />
             ) : (
               <tbody>
-                {rows.map(d => (
+                {rows.filter(d => !d.is_global).map(d => (
                   <tr key={d.id}>
                     <td>
                       <div className="addr-cell">
@@ -194,7 +181,7 @@ export function Domains() {
                     </td>
                     <td>
                       {!d.is_global && (
-                        <button className="btn-icon" onClick={() => remove(d.id)} title="Delete domain">
+                        <button className="btn-icon danger" onClick={() => remove(d.id)} title="Delete domain">
                           <Trash2 size={16} />
                         </button>
                       )}
@@ -204,7 +191,7 @@ export function Domains() {
               </tbody>
             )}
           </table>
-          {!loading && rows.length === 0 && (
+          {!loading && myDomainsCount === 0 && (
             <EmptyState
               icon={<Globe size={40} />}
               title="No domains yet"

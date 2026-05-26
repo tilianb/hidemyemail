@@ -49,6 +49,16 @@ export function Destinations() {
     }
   }
 
+  async function setDefault(id: number) {
+    try {
+      await api.setDefaultDestination(id);
+      setRows(rs => rs.map(r => ({ ...r, is_default: r.id === id ? 1 : 0 })));
+      toast("Default destination updated", "success");
+    } catch (err: any) {
+      toast(err.message || "Failed to set default destination", "error");
+    }
+  }
+
   return (
     <div>
       <div className="page-header">
@@ -123,6 +133,11 @@ export function Destinations() {
                           <Clock size={12} style={{ marginRight: 4 }} /> Pending
                         </span>
                       )}
+                      {d.is_default === 1 && (
+                        <span className="badge badge-accent" style={{ marginLeft: 8 }}>
+                          Default
+                        </span>
+                      )}
                     </td>
                     <td>
                       <span className="font-mono text-muted" style={{ fontSize: "0.78rem" }}>
@@ -130,9 +145,16 @@ export function Destinations() {
                       </span>
                     </td>
                     <td>
-                      <button className="btn-icon" onClick={() => remove(d.id)} title="Remove destination">
-                        <Trash2 size={16} />
-                      </button>
+                      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                        {d.verified_at && d.is_default !== 1 && (
+                          <button className="btn-icon" onClick={() => setDefault(d.id)} title="Set as default">
+                            <CheckCircle2 size={16} />
+                          </button>
+                        )}
+                        <button className="btn-icon danger" onClick={() => remove(d.id)} title="Remove destination">
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
