@@ -9,14 +9,19 @@ export function domainRoutes() {
     const userId = c.get("userId");
     const rows = await c.env.DB.prepare("SELECT * FROM domains WHERE is_global = 1 OR user_id = ? ORDER BY domain").bind(userId).all<any>();
     
-    const results = [];
-    for (const row of rows.results ?? []) {
-      if (row.default_destination) {
-        row.default_destination = await decryptDestination(row.default_destination, c.env.DESTINATION_ENCRYPTION_KEY);
+    try {
+      const results = [];
+      for (const row of rows.results ?? []) {
+        if (row.default_destination) {
+          row.default_destination = await decryptDestination(row.default_destination, c.env.DESTINATION_ENCRYPTION_KEY);
+        }
+        results.push(row);
       }
-      results.push(row);
+      return c.json(results);
+    } catch (e) {
+      console.error("GET /domains Error:", e);
+      return c.json({ error: String(e) }, 500);
     }
-    return c.json(results);
   });
 
   r.post("/domains", async (c) => {
