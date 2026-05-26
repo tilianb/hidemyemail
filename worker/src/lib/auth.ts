@@ -40,6 +40,61 @@ async function hmac(secret: string, data: string): Promise<string> {
   return toHex(await crypto.subtle.sign("HMAC", key, enc.encode(data)));
 }
 
+export async function signMfaChallenge(secret: string, userId: number): Promise<string> {
+  const exp = Math.floor(Date.now() / 1000) + 300; // 5 minutes
+  const payload = `mfa.${userId}.${exp}`;
+  return `${payload}.${await hmac(secret, payload)}`;
+}
+
+export async function verifyMfaChallenge(secret: string, token: string): Promise<number | null> {
+  const parts = token.split(".");
+  if (parts.length !== 4 || parts[0] !== "mfa") return null;
+  const [, userIdStr, expStr, sig] = parts;
+  const payload = `mfa.${userIdStr}.${expStr}`;
+  const expected = await hmac(secret, payload);
+  if (!timingSafeEqual(sig!, expected)) return null;
+  if (Number(expStr) > Math.floor(Date.now() / 1000)) return Number(userIdStr);
+  return null;
+}
+
+// Passkey auth challenge (no userId — discoverable credential flow)
+// Format: pauth.{exp}.{challengeB64url}.{hmac}
+export async function signPasskeyAuthChallenge(secret: string, challenge: string): Promise<string> {
+  const exp = Math.floor(Date.now() / 1000) + 300;
+  const payload = `pauth.${exp}.${challenge}`;
+  return `${payload}.${await hmac(secret, payload)}`;
+}
+
+export async function verifyPasskeyAuthChallenge(secret: string, token: string): Promise<string | null> {
+  const parts = token.split(".");
+  if (parts.length !== 4 || parts[0] !== "pauth") return null;
+  const [, expStr, challenge, sig] = parts;
+  const payload = `pauth.${expStr}.${challenge}`;
+  const expected = await hmac(secret, payload);
+  if (!timingSafeEqual(sig!, expected)) return null;
+  if (Number(expStr) > Math.floor(Date.now() / 1000)) return challenge!;
+  return null;
+}
+
+// Passkey registration challenge (userId included, user already authenticated)
+// Format: preg.{userId}.{exp}.{challengeB64url}.{hmac}
+export async function signPasskeyRegChallenge(secret: string, userId: number, challenge: string): Promise<string> {
+  const exp = Math.floor(Date.now() / 1000) + 300;
+  const payload = `preg.${userId}.${exp}.${challenge}`;
+  return `${payload}.${await hmac(secret, payload)}`;
+}
+
+export async function verifyPasskeyRegChallenge(secret: string, token: string): Promise<{ userId: number; challenge: string } | null> {
+  const parts = token.split(".");
+  if (parts.length !== 5 || parts[0] !== "preg") return null;
+  const [, userIdStr, expStr, challenge, sig] = parts;
+  const payload = `preg.${userIdStr}.${expStr}.${challenge}`;
+  const expected = await hmac(secret, payload);
+  if (!timingSafeEqual(sig!, expected)) return null;
+  if (Number(expStr) > Math.floor(Date.now() / 1000)) return { userId: Number(userIdStr), challenge: challenge! };
+  return null;
+}
+
 export async function signSession(secret: string, userId: number, ttlSeconds: number): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
   const payload = `v2.${userId}.${exp}`;
