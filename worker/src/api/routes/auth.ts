@@ -51,11 +51,12 @@ export function authRoutes() {
 
     if (!userId) return c.json({ error: "invalid" }, 401);
     
-    // Success, reset rate limits for this IP
-    await c.env.DB.prepare("DELETE FROM rate_limits WHERE ip = ?").bind(ip).run();
+    // NOTE: We intentionally do NOT reset rate limits on success.
+    // Resetting would allow an attacker who knows one valid password
+    // to get unlimited brute-force attempts on other accounts.
 
     const token = await signSession(c.env.SESSION_SECRET, userId, SESSION_TTL);
-    setCookie(c, "session", token, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
+    setCookie(c, "__Host-session", token, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
     return c.json({ ok: true, userId });
   });
 
@@ -79,7 +80,7 @@ export function authRoutes() {
       
       const userId = res.meta.last_row_id;
       const token = await signSession(c.env.SESSION_SECRET, userId, SESSION_TTL);
-      setCookie(c, "session", token, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
+      setCookie(c, "__Host-session", token, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
       return c.json({ ok: true, userId });
     } catch (err: any) {
       if (err.message && err.message.includes("UNIQUE constraint failed")) {
@@ -90,7 +91,7 @@ export function authRoutes() {
   });
 
   r.post("/logout", (c) => {
-    deleteCookie(c, "session", { path: "/" });
+    deleteCookie(c, "__Host-session", { path: "/" });
     return c.json({ ok: true });
   });
 

@@ -74,6 +74,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 export interface Destination {
   id: number;
   email: string;
+  is_default: number;
   verified_at: number | null;
   created_at: number;
 }
@@ -87,6 +88,7 @@ export const api = {
   destinations: () => req<Destination[]>("/api/destinations"),
   createDestination: (email: string) => req<{ ok: true }>("/api/destinations", { method: "POST", body: JSON.stringify({ email }) }),
   deleteDestination: (id: number) => req<{ ok: true }>(`/api/destinations/${id}`, { method: "DELETE" }),
+  setDefaultDestination: (id: number) => req<{ ok: true }>(`/api/destinations/${id}/default`, { method: "PATCH" }),
 
   domains: () => req<Domain[]>("/api/domains"),
   createDomain: (domain: string, default_destination: string) => req<Domain>("/api/domains", { method: "POST", body: JSON.stringify({ domain, default_destination }) }),
