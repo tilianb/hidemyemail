@@ -12,6 +12,7 @@ import { sesWebhookRoutes } from "./routes/ses-webhook";
 import { sesInboundRoutes } from "./routes/ses-inbound";
 import { destinationRoutes, verificationRoute } from "./routes/destinations";
 import { adminRoutes } from "./routes/admin";
+import { settingsRoutes } from "./routes/settings";
 
 export type AppEnv = {
   Bindings: Env;
@@ -85,6 +86,7 @@ export function createApp() {
   app.route("/api", blockRoutes());
   app.route("/api", destinationRoutes());
   app.route("/api/admin", adminRoutes());
+  app.route("/api/settings", settingsRoutes());
 
   return app;
 }

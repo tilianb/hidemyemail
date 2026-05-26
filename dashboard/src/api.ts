@@ -82,7 +82,8 @@ export interface Destination {
 }
 
 export const api = {
-  login: (password: string) => req<{ ok: true, userId: number }>("/api/login", { method: "POST", body: JSON.stringify({ password }) }),
+  login: (password: string) => req<{ ok: true; userId: number } | { mfa_required: true }>("/api/login", { method: "POST", body: JSON.stringify({ password }) }),
+  completeMfa: (code: string) => req<{ ok: true; userId: number }>("/api/mfa/complete", { method: "POST", body: JSON.stringify({ code }) }),
   register: (password: string) => req<{ ok: true, userId: number }>("/api/register", { method: "POST", body: JSON.stringify({ password }) }),
   logout: () => req<{ ok: true }>("/api/logout", { method: "POST" }),
   stats: () => req<StatsData>("/api/stats"),
@@ -113,6 +114,13 @@ export const api = {
   adminUpdateUser: (id: number, data: { active?: number; forwarding?: number; name?: string }) => req<{ ok: true }>(`/api/admin/users/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   adminRecoverUser: (id: number, sendEmail: boolean) => req<{ token: string; ok?: boolean }>(`/api/admin/users/${id}/recovery`, { method: "POST", body: JSON.stringify({ sendEmail }) }),
   adminCreateDomain: (domain: string) => req<{ ok: true }>("/api/admin/domains", { method: "POST", body: JSON.stringify({ domain }) }),
+
+  // MFA settings endpoints
+  mfaStatus: () => req<{ enabled: boolean; backupCodesRemaining: number }>("/api/settings/mfa"),
+  mfaSetup: () => req<{ secret: string; uri: string }>("/api/settings/mfa/setup", { method: "POST" }),
+  mfaVerify: (code: string) => req<{ ok: true; backupCodes: string[] }>("/api/settings/mfa/verify", { method: "POST", body: JSON.stringify({ code }) }),
+  mfaDisable: (code: string) => req<{ ok: true }>("/api/settings/mfa/disable", { method: "POST", body: JSON.stringify({ code }) }),
+  mfaRegenerateBackupCodes: (code: string) => req<{ ok: true; backupCodes: string[] }>("/api/settings/mfa/backup-codes", { method: "POST", body: JSON.stringify({ code }) }),
 
   // Recovery endpoints
   recoverSendCode: (token: string) => req<{ ok: true }>("/api/recover/send-code", { method: "POST", body: JSON.stringify({ token }) }),

@@ -7,12 +7,13 @@ import { Blocks } from "./pages/Blocks";
 import { Stats } from "./pages/Stats";
 import { Destinations } from "./pages/Destinations";
 import { Admin } from "./pages/Admin";
+import { Security } from "./pages/Security";
 import { Recover } from "./pages/Recover";
 import { api } from "./api";
-import { Globe, Mail, Ban, BarChart3, LogOut, Send, Shield } from "lucide-react";
+import { Globe, Mail, Ban, BarChart3, LogOut, Send, Shield, ShieldCheck } from "lucide-react";
 import { useToast } from "./ui";
 
-type Tab = "domains" | "aliases" | "destinations" | "blocks" | "stats" | "admin";
+type Tab = "domains" | "aliases" | "destinations" | "blocks" | "stats" | "security" | "admin";
 
 const BASE_NAV = [
   { id: "domains" as Tab, label: "Domains", icon: Globe, title: "Managed domains" },
@@ -20,6 +21,7 @@ const BASE_NAV = [
   { id: "destinations" as Tab, label: "Destinations", icon: Send, title: "Verified destinations" },
   { id: "blocks" as Tab, label: "Blocks", icon: Ban, title: "Blocked senders" },
   { id: "stats" as Tab, label: "Stats", icon: BarChart3, title: "Activity & stats" },
+  { id: "security" as Tab, label: "Security", icon: ShieldCheck, title: "Account security & 2FA" },
 ];
 
 export function App() {
@@ -150,6 +152,7 @@ export function App() {
           {tab === "destinations" && <Destinations />}
           {tab === "blocks" && <Blocks />}
           {tab === "stats"  && <Stats />}
+          {tab === "security" && <Security />}
           {tab === "admin" && isAdmin && <Admin />}
         </div>
       </main>
