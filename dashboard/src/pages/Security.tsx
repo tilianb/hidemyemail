@@ -273,7 +273,7 @@ export function Security() {
               </div>
             </div>
 
-            <div style={{ display: "flex", gap: 10, paddingTop: 4 }}>
+            <div style={{ display: "flex", gap: 10, paddingTop: 4, alignItems: "center" }}>
               <button type="button" className="btn" onClick={cancelSetup} style={{ flex: 1, background: "var(--surface-2)", color: "var(--text-secondary)", justifyContent: "center" }}>
                 Cancel
               </button>
@@ -319,7 +319,7 @@ export function Security() {
                 style={{ fontFamily: "var(--font-mono)", fontSize: "1.2rem", letterSpacing: "0.2em", textAlign: "center" }}
               />
             </div>
-            <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
               <button type="button" className="btn" onClick={() => setSetupStep("qr")} disabled={setupLoading} style={{ flex: 1, background: "var(--surface-2)", color: "var(--text-secondary)", justifyContent: "center" }}>
                 ← Back
               </button>
@@ -484,7 +484,7 @@ export function Security() {
                   maxLength={20}
                 />
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <button type="button" className="btn" onClick={() => setShowDisable(false)} disabled={disableLoading} style={{ background: "var(--surface-2)", color: "var(--text-secondary)" }}>
                   Cancel
                 </button>
@@ -527,7 +527,7 @@ export function Security() {
                     </div>
                   ))}
                 </div>
-                <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <button
                     type="button"
                     className="btn"
@@ -553,7 +553,7 @@ export function Security() {
                 <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
                   Enter your current authentication code to generate 8 new backup codes.
                 </div>
-                <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <input
                     className="input"
                     type="text"
@@ -617,7 +617,7 @@ export function Security() {
                   {editingPasskeyId === pk.id ? (
                     <form
                       onSubmit={e => { e.preventDefault(); renamePasskey(pk.id, editingPasskeyName); }}
-                      style={{ flex: 1, display: "flex", gap: 6 }}
+                      style={{ flex: 1, display: "flex", gap: 6, alignItems: "center" }}
                     >
                       <input
                         className="input"
@@ -671,7 +671,7 @@ export function Security() {
                 <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
                   Give this passkey a name so you can recognise it later (optional).
                 </div>
-                <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <input
                     className="input"
                     value={newPasskeyName}

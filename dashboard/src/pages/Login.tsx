@@ -269,7 +269,7 @@ export function Login() {
                   {err}
                 </div>
               )}
-              <div style={{ display: "flex", gap: "10px" }}>
+              <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
                 <button
                   type="button"
                   className="btn"
@@ -380,7 +380,7 @@ export function Login() {
                 </div>
               )}
 
-              <div style={{ display: "flex", gap: "10px" }}>
+              <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
                 <button
                   type="submit"
                   className="btn btn-primary"

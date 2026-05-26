@@ -237,11 +237,9 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
                 disabled={submittingDomain}
               />
             </div>
-            <div style={{ paddingTop: 20 }}>
-              <button className="btn btn-primary" type="submit" disabled={submittingDomain}>
-                {submittingDomain ? "Adding..." : "Add Global Domain"}
-              </button>
-            </div>
+            <button className="btn btn-primary" type="submit" disabled={submittingDomain} style={{ alignSelf: "flex-end" }}>
+              {submittingDomain ? "Adding..." : "Add Global Domain"}
+            </button>
           </form>
           
           {globalDomains.length > 0 && (

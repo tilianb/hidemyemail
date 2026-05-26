@@ -126,15 +126,14 @@ export function Blocks() {
                 disabled={submitting}
               />
             </div>
-            <div style={{ paddingTop: 20 }}>
-              <button
-                className="btn btn-primary"
-                type="submit"
-                disabled={submitting || !pattern.trim()}
-              >
-                {submitting ? "Blocking…" : "Block sender"}
-              </button>
-            </div>
+            <button
+              className="btn btn-primary"
+              type="submit"
+              disabled={submitting || !pattern.trim()}
+              style={{ alignSelf: "flex-end" }}
+            >
+              {submitting ? "Blocking…" : "Block sender"}
+            </button>
           </div>
         </form>
       </div>

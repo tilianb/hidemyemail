@@ -94,11 +94,9 @@ export function Destinations() {
                 disabled={submitting}
               />
             </div>
-            <div style={{ paddingTop: 20 }}>
-              <button className="btn btn-primary" type="submit" disabled={submitting}>
-                {submitting ? "Sending..." : "Send Verification"}
-              </button>
-            </div>
+            <button className="btn btn-primary" type="submit" disabled={submitting} style={{ alignSelf: "flex-end" }}>
+              {submitting ? "Sending..." : "Send Verification"}
+            </button>
           </div>
         </form>
       </div>

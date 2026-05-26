@@ -113,11 +113,9 @@ export function Domains() {
                 ))}
               </select>
             </div>
-            <div style={{ paddingTop: 20 }}>
-              <button className="btn btn-primary" type="submit" disabled={submitting || destinations.length === 0 || myDomainsCount >= 5}>
-                {submitting ? "Adding…" : "Add"}
-              </button>
-            </div>
+            <button className="btn btn-primary" type="submit" disabled={submitting || destinations.length === 0 || myDomainsCount >= 5} style={{ alignSelf: "flex-end" }}>
+              {submitting ? "Adding…" : "Add"}
+            </button>
           </div>
           {destinations.length === 0 && (
             <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: 8 }}>

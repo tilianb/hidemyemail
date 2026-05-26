@@ -192,11 +192,9 @@ export function Aliases() {
                 disabled={submitting}
               />
             </div>
-            <div style={{ paddingTop: 20 }}>
-              <button className="btn btn-primary" type="submit" disabled={submitting || (!isGlobal && !form.local_part)}>
-                {submitting ? "Creating…" : "Create"}
-              </button>
-            </div>
+            <button className="btn btn-primary" type="submit" disabled={submitting || (!isGlobal && !form.local_part)} style={{ alignSelf: "flex-end" }}>
+              {submitting ? "Creating…" : "Create"}
+            </button>
           </div>
           {destinations.length === 0 && (
             <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: 8 }}>
