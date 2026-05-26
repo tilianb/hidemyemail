@@ -79,10 +79,10 @@ export function Blocks() {
     <div>
       {/* Page header */}
       <div className="page-header">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
           <h1 className="page-title">Blocks</h1>
           {!loading && (
-            <span className="badge badge-muted" style={{ position: "relative", top: -2 }}>
+            <span className="badge badge-muted">
               {rows.length}
             </span>
           )}

@@ -62,10 +62,10 @@ export function Destinations() {
   return (
     <div>
       <div className="page-header">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
           <h1 className="page-title">Destinations</h1>
           {!loading && (
-            <span className="badge badge-muted" style={{ position: "relative", top: -2 }}>
+            <span className="badge badge-muted">
               {rows.length}
             </span>
           )}

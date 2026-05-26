@@ -73,7 +73,7 @@ export function Admin() {
   return (
     <div>
       <div className="page-header">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
           <h1 className="page-title">System Administration</h1>
         </div>
         <p className="page-subtitle">
