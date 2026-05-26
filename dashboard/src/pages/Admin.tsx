@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
+import { api, type Domain } from "../api";
 import { useToast, TableSkeleton, EmptyState } from "../ui";
 import { Users, Trash2, Globe, Cloud } from "lucide-react";
 
@@ -7,6 +7,7 @@ export function Admin() {
   const { toast } = useToast();
   const [users, setUsers] = useState<{ id: number; created_at: number; alias_count: number }[]>([]);
   const [stats, setStats] = useState<{ users: number; aliases: number; active: number } | null>(null);
+  const [globalDomains, setGlobalDomains] = useState<Domain[]>([]);
   const [loading, setLoading] = useState(true);
   const [domainForm, setDomainForm] = useState("");
   const [submittingDomain, setSubmittingDomain] = useState(false);
@@ -15,12 +16,14 @@ export function Admin() {
   async function load() {
     setLoading(true);
     try {
-      const [uRes, sRes] = await Promise.all([
+      const [uRes, sRes, doms] = await Promise.all([
         api.adminUsers(),
         api.adminStats(),
+        api.domains()
       ]);
       setUsers(uRes.users);
       setStats(sRes.totals);
+      setGlobalDomains(doms.filter(d => d.is_global === 1));
     } catch {
       toast("Failed to load admin data", "error");
     } finally {
@@ -49,6 +52,7 @@ export function Admin() {
       await api.adminCreateDomain(domainForm);
       setDomainForm("");
       toast("Global domain created", "success");
+      await load();
     } catch (err: any) {
       toast(err.message || "Failed to create domain", "error");
     } finally {
@@ -186,6 +190,20 @@ aws sns create-topic --name hidemyemail-outbound
               </button>
             </div>
           </form>
+          
+          {globalDomains.length > 0 && (
+            <div style={{ marginTop: 24, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 16 }}>
+              <h3 style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-muted)", marginBottom: 12 }}>Active Global Domains</h3>
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+                {globalDomains.map(d => (
+                  <li key={d.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "rgba(255,255,255,0.02)", borderRadius: 4 }}>
+                    <span className="font-mono" style={{ fontSize: "0.85rem" }}>{d.domain}</span>
+                    <span className="text-muted" style={{ fontSize: "0.75rem" }}>Added {new Date(d.created_at > 1e11 ? d.created_at : d.created_at * 1000).toLocaleDateString()}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       </div>
 
