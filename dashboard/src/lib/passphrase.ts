@@ -12,10 +12,10 @@ const WORDS = [
 ];
 
 export function generatePassphrase(): string {
-  const array = new Uint32Array(4);
+  const array = new Uint32Array(6);
   window.crypto.getRandomValues(array);
   const selected = [];
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 6; i++) {
     selected.push(WORDS[array[i] % WORDS.length]);
   }
   return selected.join("-");
