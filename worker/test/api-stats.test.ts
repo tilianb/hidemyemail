@@ -13,7 +13,7 @@ test("stats returns totals and 24h breakdown", async () => {
   const app = createApp();
   const d = await q.createDomain(env.DB as D1Database, "hidemyemail.dev", "real@me.com");
   const a = await q.autoCreateAlias(env.DB as D1Database, d, "shop", "shop@hidemyemail.dev");
-  await q.insertEvent(env.DB as D1Database, { alias_id: a.id, type: "forward", ts: Date.now() });
+  await q.insertEvent(env.DB as D1Database, { alias_id: a!.id, type: "forward", ts: Date.now() });
   const res = await app.request("/api/stats", { headers: { cookie } }, testEnv);
   const stats = await res.json<any>();
   expect(stats.totals.aliases).toBe(1);

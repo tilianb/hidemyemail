@@ -42,7 +42,7 @@ test("blocked sender → no SES, block event", async () => {
 test("disabled alias → no SES", async () => {
   const sentinel = { sent: [] as any[] };
   const a = await q.autoCreateAlias(DB(), 1, "shop", "shop@hidemyemail.dev");
-  await DB().prepare("UPDATE aliases SET active = 0 WHERE id = ?").bind(a.id).run();
+  await DB().prepare("UPDATE aliases SET active = 0 WHERE id = ?").bind(a!.id).run();
   await handleInbound(mkMessage("alice@store.com", "shop@hidemyemail.dev", RAW), testEnv(sentinel));
   expect(sentinel.sent.length).toBe(0);
 });
