@@ -81,8 +81,8 @@ export async function incCounter(db: D1Database, aliasId: number, col: "fwd_coun
   await db.prepare(`UPDATE aliases SET ${col} = ${col} + 1, last_seen_at = ? WHERE id = ?`).bind(Date.now(), aliasId).run();
 }
 
-export async function ownerDestinations(db: D1Database): Promise<Set<string>> {
-  const a = await db.prepare("SELECT default_destination AS d FROM domains").all<{ d: string }>();
-  const b = await db.prepare("SELECT DISTINCT destination AS d FROM aliases WHERE destination IS NOT NULL").all<{ d: string }>();
+export async function ownerDestinations(db: D1Database, userId: number): Promise<Set<string>> {
+  const a = await db.prepare("SELECT default_destination AS d FROM domains WHERE user_id = ? OR is_global = 1").bind(userId).all<{ d: string }>();
+  const b = await db.prepare("SELECT DISTINCT destination AS d FROM aliases WHERE destination IS NOT NULL AND user_id = ?").bind(userId).all<{ d: string }>();
   return new Set([...(a.results ?? []), ...(b.results ?? [])].map((x) => x.d.toLowerCase()));
 }

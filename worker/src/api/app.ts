@@ -22,8 +22,23 @@ export type AppEnv = {
 export function createApp() {
   const app = new Hono<AppEnv>();
 
+  // Security headers
+  app.use("*", async (c, next) => {
+    await next();
+    c.header("X-Content-Type-Options", "nosniff");
+    c.header("X-Frame-Options", "DENY");
+    c.header("Referrer-Policy", "strict-origin-when-cross-origin");
+    c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  });
+
   app.use("*", cors({
-    origin: (origin) => origin || "http://localhost:5173",
+    origin: (origin) => {
+      const allowed = [
+        "https://hidemyemail.dev",
+        "http://localhost:5173",
+      ];
+      return allowed.includes(origin) ? origin : "";
+    },
     allowHeaders: ["Content-Type", "Cookie"],
     credentials: true
   }));
@@ -45,7 +60,7 @@ export function createApp() {
       p === "/api/ses/notification" ||
       p === "/api/ses/inbound"
     ) return next();
-    const token = getCookie(c, "session");
+    const token = getCookie(c, "__Host-session");
     if (!token) return c.json({ error: "unauthorized" }, 401);
     const userId = await verifySession(c.env.SESSION_SECRET, token);
     if (userId === null) return c.json({ error: "unauthorized" }, 401);
