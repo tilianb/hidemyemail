@@ -1,0 +1,1 @@
+ALTER TABLE destinations ADD COLUMN is_default INTEGER DEFAULT 0;
