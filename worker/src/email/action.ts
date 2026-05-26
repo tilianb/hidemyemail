@@ -26,8 +26,9 @@ export async function handleAction(message: ForwardableEmailMessage, env: Env, a
 
   // Payload format for disable: <alias_id>_<signature>
   const parts = payload.split("_");
-  if (parts.length !== 2) return;
   const [idStr, sig] = parts;
+  if (!idStr || !sig) return;
+
   const aliasId = parseInt(idStr, 10);
   if (isNaN(aliasId)) return;
 
@@ -43,7 +44,7 @@ export async function handleAction(message: ForwardableEmailMessage, env: Env, a
     return;
   }
 
-  const alias = await q.getAlias(db, aliasId);
+  const alias = await q.getAliasById(db, aliasId);
   if (!alias) return;
 
   if (alias.active === 1) {
