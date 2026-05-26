@@ -81,7 +81,7 @@ export function Domains() {
           <div className="form-strip" style={{ gap: 12 }}>
             <div className="field" style={{ minWidth: 200, display: "flex", flexDirection: "column" }}>
               <label className="field-label" htmlFor="dom-prefix">Subdomain prefix</label>
-              <div style={{ display: "flex", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "stretch" }}>
                 <input
                   id="dom-prefix"
                   className="input input-mono"
@@ -95,14 +95,13 @@ export function Domains() {
                 />
                 <div style={{ 
                   padding: "0 12px", 
-                  background: "var(--bg-card)", 
-                  border: "1px solid var(--border)", 
+                  background: "var(--surface-2)", 
+                  border: "1px solid var(--border-strong)", 
                   borderLeft: "none",
-                  height: "36px", 
                   display: "flex", 
                   alignItems: "center",
-                  borderTopRightRadius: 6,
-                  borderBottomRightRadius: 6,
+                  borderTopRightRadius: "var(--radius-sm)",
+                  borderBottomRightRadius: "var(--radius-sm)",
                   color: "var(--text-muted)",
                   fontFamily: "var(--font-mono)",
                   fontSize: "0.85rem"
