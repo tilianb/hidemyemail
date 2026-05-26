@@ -10,17 +10,22 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "deploy": "wrangler deploy --env=\"\"",
+    "deploy:preview": "wrangler deploy --env preview",
+    "migrate:prod": "wrangler d1 migrations apply DB --remote --env=\"\"",
+    "migrate:preview": "wrangler d1 migrations apply DB --remote --env preview",
+    "predeploy:preview": "npm run migrate:preview",
     "typegen": "wrangler types"
   },
   "dependencies": {
+    "@simplewebauthn/server": "^13.3.0",
     "aws4fetch": "^1.0.20",
     "hono": "^4.6.0"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.16.9",
-    "@cloudflare/workers-types": "^4.20240909.0",
-    "@types/node": "^22.0.0",
-    "typescript": "^5.6.0",
+    "@cloudflare/workers-types": "^4.20260526.1",
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3",
     "vitest": "^4.1.0",
     "wrangler": "^4.94.0"
   }
