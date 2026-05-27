@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type Domain } from "../api";
 import { useToast, TableSkeleton, EmptyState, ConfirmDialog, PromptDialog, ChoiceDialog } from "../ui";
-import { Users, Trash2, Globe, Cloud, Edit3, Key } from "lucide-react";
+import { Users, Trash2, Globe, Cloud, Edit3, Key, Server, Settings } from "lucide-react";
 
 export function Admin() {
   const { toast } = useToast();
@@ -17,17 +17,33 @@ export function Admin() {
   const [promptState, setPromptState] = useState<{ title: string; body: string; defaultValue?: string; confirmLabel?: string; onConfirm: (val: string) => void } | null>(null);
   const [choiceState, setChoiceState] = useState<{ title: string; body: string; primaryLabel: string; secondaryLabel: string; onPrimary: () => void; onSecondary: () => void; } | null>(null);
 
+  const [envData, setEnvData] = useState<{ vars: Record<string, { value: string; secret: false }>; secrets: Record<string, { configured: boolean; preview?: string }> } | null>(null);
+  const [settingsData, setSettingsData] = useState<Record<string, { value: string; updated_at: number }> | null>(null);
+  const [editedSettings, setEditedSettings] = useState<Record<string, string>>({});
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [showEnvVars, setShowEnvVars] = useState(false);
+
   async function load() {
     setLoading(true);
     try {
-      const [uRes, sRes, doms] = await Promise.all([
+      const [uRes, sRes, doms, envRes, setRes] = await Promise.all([
         api.adminUsers(),
         api.adminStats(),
-        api.domains()
+        api.domains(),
+        api.adminEnv(),
+        api.adminSettings()
       ]);
       setUsers(uRes.users);
       setStats(sRes.totals);
       setGlobalDomains(doms.filter(d => d.is_global === 1));
+      setEnvData(envRes);
+      setSettingsData(setRes.settings);
+      
+      const newEdited: Record<string, string> = {};
+      for (const [k, v] of Object.entries(setRes.settings)) {
+        newEdited[k] = v.value;
+      }
+      setEditedSettings(newEdited);
     } catch {
       toast("Failed to load admin data", "error");
     } finally {
@@ -69,6 +85,31 @@ export function Admin() {
       setSubmittingDomain(false);
     }
   }
+
+  async function saveSettings() {
+    setSavingSettings(true);
+    try {
+      const changed: Record<string, string> = {};
+      if (settingsData) {
+        for (const [k, v] of Object.entries(editedSettings)) {
+          if (settingsData[k]?.value !== v) changed[k] = v;
+        }
+      }
+      if (Object.keys(changed).length > 0) {
+        await api.adminUpdateSettings(changed);
+        toast("Settings saved", "success");
+        await load();
+      } else {
+        toast("No changes to save", "success");
+      }
+    } catch (err: any) {
+      toast(err.message || "Failed to save settings", "error");
+    } finally {
+      setSavingSettings(false);
+    }
+  }
+
+  const isSettingsDirty = settingsData && Object.keys(editedSettings).some(k => settingsData[k]?.value !== editedSettings[k]);
 
   return (
     <div>
@@ -214,7 +255,218 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
         )}
       </div>
 
-      <div className="card stagger-3" style={{ marginBottom: 24 }}>
+      {envData && (
+        <div className="card stagger-3" style={{ marginBottom: 24 }}>
+          <div className="card-header" style={{ cursor: "pointer", marginBottom: showEnvVars ? 24 : 0, borderBottom: showEnvVars ? "1px solid var(--border)" : "none", paddingBottom: showEnvVars ? 16 : 0 }} onClick={() => setShowEnvVars(!showEnvVars)}>
+            <span className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Server size={18} /> Environment Variables
+            </span>
+            <button className="btn btn-ghost" type="button" onClick={(e) => { e.stopPropagation(); setShowEnvVars(!showEnvVars); }}>
+              {showEnvVars ? "Hide" : "Show"}
+            </button>
+          </div>
+          {showEnvVars && (
+            <div className="card-body">
+              <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 16 }}>
+                Read-only view of Cloudflare Worker environment variables and secrets. Note that secrets cannot be modified here.
+              </p>
+              <div className="table-wrap">
+                <table className="dossier">
+                  <thead>
+                    <tr>
+                      <th>Variable</th>
+                      <th>Value / Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(envData.vars).map(([k, v]) => (
+                      <tr key={k}>
+                        <td className="font-mono" style={{ fontSize: "0.85rem" }}>{k}</td>
+                        <td className="font-mono" style={{ fontSize: "0.85rem" }}>{v.value}</td>
+                      </tr>
+                    ))}
+                    {Object.entries(envData.secrets).map(([k, v]) => (
+                      <tr key={k}>
+                        <td className="font-mono" style={{ fontSize: "0.85rem" }}>{k}</td>
+                        <td>
+                          {v.configured ? (
+                            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                              <span className="badge badge-green">Configured</span>
+                              {v.preview && <span className="font-mono text-muted" style={{ fontSize: "0.85rem" }}>{v.preview}</span>}
+                            </div>
+                          ) : (
+                            <span className="badge badge-amber">Not Set</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {settingsData && (
+        <div className="card stagger-4" style={{ marginBottom: 24 }}>
+          <div className="card-header">
+            <span className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Settings size={18} /> Runtime Settings
+            </span>
+          </div>
+          <div className="card-body">
+            <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 24 }}>
+              These settings are stored in the database and can be modified at runtime without redeploying the worker.
+            </p>
+            
+            <div className="settings-grid" style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-rate-alias" className="setting-label">Per-Alias Rate Limit (emails/hr)</label>
+                  <div className="setting-desc">Max forwards per alias per hour</div>
+                  <div className="setting-updated">Last updated: {settingsData.rate_limit_per_alias?.updated_at ? new Date(settingsData.rate_limit_per_alias.updated_at).toLocaleString() : "Never"}</div>
+                </div>
+                <div className="setting-control">
+                  <input
+                    id="setting-rate-alias"
+                    className="input"
+                    type="number"
+                    min="1"
+                    value={editedSettings.rate_limit_per_alias || ""}
+                    onChange={e => setEditedSettings({...editedSettings, rate_limit_per_alias: e.target.value})}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-rate-global" className="setting-label">Global Rate Limit (emails/hr)</label>
+                  <div className="setting-desc">Max total forwards per hour across all aliases</div>
+                  <div className="setting-updated">Last updated: {settingsData.rate_limit_global?.updated_at ? new Date(settingsData.rate_limit_global.updated_at).toLocaleString() : "Never"}</div>
+                </div>
+                <div className="setting-control">
+                  <input
+                    id="setting-rate-global"
+                    className="input"
+                    type="number"
+                    min="1"
+                    value={editedSettings.rate_limit_global || ""}
+                    onChange={e => setEditedSettings({...editedSettings, rate_limit_global: e.target.value})}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-max-bytes" className="setting-label">Max Inbound Email Size</label>
+                  <div className="setting-desc">Maximum email size accepted (in MB)</div>
+                  <div className="setting-updated">Last updated: {settingsData.max_inbound_bytes?.updated_at ? new Date(settingsData.max_inbound_bytes.updated_at).toLocaleString() : "Never"}</div>
+                </div>
+                <div className="setting-control">
+                  <input
+                    id="setting-max-bytes"
+                    className="input"
+                    type="number"
+                    min="1"
+                    value={editedSettings.max_inbound_bytes ? (parseInt(editedSettings.max_inbound_bytes, 10) / 1024 / 1024).toString() : ""}
+                    onChange={e => {
+                      const mb = parseInt(e.target.value, 10);
+                      if (!isNaN(mb)) {
+                        setEditedSettings({...editedSettings, max_inbound_bytes: (mb * 1024 * 1024).toString()});
+                      }
+                    }}
+                    style={{ width: 100 }}
+                  />
+                  <span className="text-muted font-mono" style={{ marginLeft: 8 }}>MB</span>
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <div className="setting-label">Catch-All Auto-Create</div>
+                  <div className="setting-desc">Automatically create aliases when receiving emails to unknown addresses</div>
+                  <div className="setting-updated">Last updated: {settingsData.catch_all_auto_create?.updated_at ? new Date(settingsData.catch_all_auto_create.updated_at).toLocaleString() : "Never"}</div>
+                </div>
+                <div className="setting-control">
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={editedSettings.catch_all_auto_create === "true"}
+                      onChange={e => setEditedSettings({...editedSettings, catch_all_auto_create: e.target.checked ? "true" : "false"})}
+                    />
+                    <span className="switch-track"></span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <div className="setting-label">User Registration</div>
+                  <div className="setting-desc">Allow new users to register accounts</div>
+                  <div className="setting-updated">Last updated: {settingsData.registration_enabled?.updated_at ? new Date(settingsData.registration_enabled.updated_at).toLocaleString() : "Never"}</div>
+                </div>
+                <div className="setting-control">
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={editedSettings.registration_enabled === "true"}
+                      onChange={e => setEditedSettings({...editedSettings, registration_enabled: e.target.checked ? "true" : "false"})}
+                    />
+                    <span className="switch-track"></span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-cors" className="setting-label">CORS Allowed Domains</label>
+                  <div className="setting-desc">Comma-separated list of domains allowed to access the API</div>
+                  <div className="setting-updated">Last updated: {settingsData.cors_allowed_domains?.updated_at ? new Date(settingsData.cors_allowed_domains.updated_at).toLocaleString() : "Never"}</div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <input
+                    id="setting-cors"
+                    className="input input-mono"
+                    type="text"
+                    value={editedSettings.cors_allowed_domains || ""}
+                    onChange={e => setEditedSettings({...editedSettings, cors_allowed_domains: e.target.value})}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+              </div>
+            </div>
+            
+            <div style={{ marginTop: 32, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.05)", display: "flex", justifyContent: "flex-end", gap: 12 }}>
+              <button 
+                className="btn btn-ghost"
+                onClick={() => {
+                  setEditedSettings({
+                    rate_limit_per_alias: "200",
+                    rate_limit_global: "1000",
+                    max_inbound_bytes: "26214400",
+                    catch_all_auto_create: "true",
+                    registration_enabled: "true",
+                    cors_allowed_domains: "hidemyemail.dev,localhost:5173,pages.dev,workers.dev"
+                  });
+                }}
+                type="button"
+              >
+                Reset to Defaults
+              </button>
+              <button 
+                className="btn btn-primary"
+                onClick={saveSettings}
+                disabled={!isSettingsDirty || savingSettings}
+              >
+                {savingSettings ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="card stagger-5" style={{ marginBottom: 24 }}>
         <div className="card-header">
           <span className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Globe size={18} /> Global Domains
@@ -284,7 +536,7 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
         </div>
       </div>
 
-      <div className="stagger-4">
+      <div className="stagger-6">
         <h2 className="section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <Users size={18} /> Users
         </h2>

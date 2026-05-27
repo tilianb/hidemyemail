@@ -1,5 +1,13 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
+import { getAllSettings } from "../../lib/settings";
+import { VALID_SETTING_KEYS, SETTING_DEFAULTS } from "../../config";
+
+/** Mask a secret: show first 3 + "•••" + last 3, or just "•••" if too short */
+function maskSecret(val: string): string {
+  if (val.length <= 8) return "•••";
+  return `${val.slice(0, 3)}•••${val.slice(-3)}`;
+}
 
 export function adminRoutes() {
   const r = new Hono<AppEnv>();
@@ -166,6 +174,111 @@ export function adminRoutes() {
       }
       return c.json({ error: "internal error" }, 500);
     }
+  });
+
+  // ── Environment Variables (read-only) ──────────────────────────────────────
+  r.get("/env", async (c) => {
+    const env = c.env;
+
+    // Non-secret vars: expose full value
+    const vars: Record<string, { value: string; secret: false }> = {
+      ENVIRONMENT: { value: env.ENVIRONMENT || "", secret: false },
+      SES_REGION: { value: env.SES_REGION || "", secret: false },
+      S3_INBOUND_BUCKET: { value: env.S3_INBOUND_BUCKET || "", secret: false },
+    };
+
+    // Secrets: only expose configured status + masked preview
+    const secretKeys = [
+      "SES_ACCESS_KEY_ID",
+      "SES_SECRET_ACCESS_KEY",
+      "SESSION_SECRET",
+      "AUTH_PASSWORD_HASH",
+      "AUTH_PASSWORD_SALT",
+      "DESTINATION_ENCRYPTION_KEY",
+      "SNS_SECRET",
+      "SNS_ALLOWED_TOPIC_ARN",
+      "SNS_INBOUND_TOPIC_ARN",
+    ] as const;
+
+    const secrets: Record<string, { configured: boolean; preview?: string }> = {};
+    for (const key of secretKeys) {
+      const val = (env as any)[key] as string | undefined;
+      const configured = !!val && val.length > 0;
+      secrets[key] = { configured };
+      // Show masked preview for AWS/ARN-related keys only (less sensitive to preview)
+      if (configured && (key.startsWith("SES_") || key.startsWith("SNS_"))) {
+        secrets[key].preview = maskSecret(val!);
+      }
+    }
+
+    return c.json({ vars, secrets });
+  });
+
+  // ── Runtime Settings (DB-backed, editable) ─────────────────────────────────
+  r.get("/settings", async (c) => {
+    const settings = await getAllSettings(c.env.DB);
+    return c.json({ settings });
+  });
+
+  r.patch("/settings", async (c) => {
+    const body = await c.req.json<Record<string, string>>().catch(() => ({}));
+    const db = c.env.DB;
+    const now = Date.now();
+
+    const errors: string[] = [];
+    const updates: { key: string; value: string }[] = [];
+
+    for (const [key, value] of Object.entries(body)) {
+      if (!VALID_SETTING_KEYS.includes(key)) {
+        errors.push(`Unknown setting: ${key}`);
+        continue;
+      }
+
+      // Validate value types
+      if (key === "rate_limit_per_alias" || key === "rate_limit_global") {
+        const n = parseInt(value, 10);
+        if (isNaN(n) || n < 1 || n > 100000) {
+          errors.push(`${key}: must be a number between 1 and 100,000`);
+          continue;
+        }
+      }
+
+      if (key === "max_inbound_bytes") {
+        const n = parseInt(value, 10);
+        if (isNaN(n) || n < 1024 || n > 100 * 1024 * 1024) {
+          errors.push(`${key}: must be between 1KB and 100MB`);
+          continue;
+        }
+      }
+
+      if (key === "catch_all_auto_create" || key === "registration_enabled") {
+        if (value !== "true" && value !== "false") {
+          errors.push(`${key}: must be "true" or "false"`);
+          continue;
+        }
+      }
+
+      if (key === "cors_allowed_domains") {
+        if (!value || value.trim().length === 0) {
+          errors.push(`${key}: cannot be empty`);
+          continue;
+        }
+      }
+
+      updates.push({ key, value });
+    }
+
+    if (errors.length > 0) {
+      return c.json({ error: errors.join("; ") }, 400);
+    }
+
+    for (const { key, value } of updates) {
+      await db.prepare(
+        "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+      ).bind(key, value, now).run();
+    }
+
+    return c.json({ ok: true, updated: updates.length });
   });
 
   return r;

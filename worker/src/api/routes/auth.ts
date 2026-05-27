@@ -100,6 +100,13 @@ export function authRoutes() {
       return c.json({ error: "too many attempts" }, 429);
     }
 
+    // Check if registration is enabled
+    const { getBoolSetting } = await import("../../lib/settings");
+    const registrationEnabled = await getBoolSetting(c.env.DB, "registration_enabled");
+    if (!registrationEnabled) {
+      return c.json({ error: "Registration is currently disabled" }, 403);
+    }
+
     const { password } = await c.req.json<{ password: string }>().catch(() => ({ password: "" }));
     if (!password || password.length < 16) {
       return c.json({ error: "passphrase too weak" }, 400);
