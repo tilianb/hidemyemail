@@ -108,7 +108,7 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
     const sesRegion = await getEnvWithOverride(db, env, "ses_region");
     await ses(
       { accessKeyId: sesAccessKeyId, secretAccessKey: sesSecretAccessKey, region: sesRegion },
-      { from: reverseAddr, to: dest, rawBase64 }
+      { from: alias.full_address, to: dest, rawBase64 }
     );
   } catch (err) {
     await q.insertEvent(db, { alias_id: alias.id, type: "error", external_sender: message.from, detail: String(err), ts: now });

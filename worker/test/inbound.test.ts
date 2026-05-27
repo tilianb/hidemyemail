@@ -23,6 +23,7 @@ test("clean mail to new alias → SES re-inject with rewritten headers", async (
   const sentinel = { sent: [] as any[] };
   await handleInbound(mkMessage("alice@store.com", "shop@hidemyemail.dev", RAW), testEnv(sentinel));
   expect(sentinel.sent.length).toBe(1);
+  expect(sentinel.sent[0].from).toBe("shop@hidemyemail.dev");
   const decoded = atob(sentinel.sent[0].rawBase64);
   expect(decoded).toContain(`From: "Alice - alice at store.com" <shop@hidemyemail.dev>`);
   expect(decoded).toContain("Reply-To: shop+alice=store.com@hidemyemail.dev");
