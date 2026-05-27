@@ -343,6 +343,10 @@ export function authRoutes() {
       "UPDATE users SET passphrase_hash = ?, recovery_token = NULL, recovery_expires_at = NULL, recovery_mfa_code = NULL WHERE id = ?"
     ).bind(hash, user.id).run();
 
+    await db.prepare(
+      "UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL WHERE user_id = ?"
+    ).bind(user.id).run();
+
     // Log them in immediately
     const sessionId = await signSession(c.env.SESSION_SECRET, user.id, SESSION_TTL);
     setCookie(c, "__Host-session", sessionId, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
