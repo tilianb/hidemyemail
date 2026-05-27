@@ -1,7 +1,9 @@
 import { env } from "cloudflare:test";
 import { beforeAll, beforeEach, expect, test } from "vitest";
 import { createApp } from "../src/api/app";
-import { signSession, derivePassphraseHash } from "../src/lib/auth";
+import { signFreshAuth, signSession, derivePassphraseHash } from "../src/lib/auth";
+import { encryptDestination } from "../src/lib/crypto";
+import { generatePassphrase } from "../src/lib/passphrase";
 
 let testEnv: any;
 
@@ -27,6 +29,7 @@ beforeEach(async () => {
   await db.prepare("DELETE FROM aliases").run();
   await db.prepare("DELETE FROM domains").run();
   await db.prepare("DELETE FROM users WHERE id > 1").run();
+  await db.prepare("UPDATE users SET active = 1 WHERE id = 1").run();
   await db.prepare("DELETE FROM rate_limits").run();
 });
 
@@ -133,9 +136,10 @@ test("P3: /api/settings/mfa/setup refuses to overwrite enabled MFA (re-enrol byp
   ).bind(userId).run();
 
   const cookie = "__Host-session=" + (await signSession("sek", userId, 3600));
+  const freshCookie = "__Host-fresh-auth=" + (await signFreshAuth("sek", userId, 300));
   const res = await app.request("/api/settings/mfa/setup", {
     method: "POST",
-    headers: { cookie, "Content-Type": "application/json" },
+    headers: { cookie: `${cookie}; ${freshCookie}`, "Content-Type": "application/json" },
     body: "{}"
   }, testEnv);
 
@@ -155,9 +159,10 @@ test("P3: /api/settings/mfa/setup still works when MFA not yet enabled", async (
   const userId = await makeUser(1);
 
   const cookie = "__Host-session=" + (await signSession("sek", userId, 3600));
+  const freshCookie = "__Host-fresh-auth=" + (await signFreshAuth("sek", userId, 300));
   const res = await app.request("/api/settings/mfa/setup", {
     method: "POST",
-    headers: { cookie, "Content-Type": "application/json" },
+    headers: { cookie: `${cookie}; ${freshCookie}`, "Content-Type": "application/json" },
     body: "{}"
   }, testEnv);
 
@@ -182,4 +187,81 @@ test("P2: recovery /recover/send-code rejects inactive users", async () => {
     body: JSON.stringify({ token })
   }, testEnv);
   expect(res.status).toBe(400);
+});
+
+test("P4: generated recovery passphrases have at least 100 bits of entropy from current word list", () => {
+  const passphrase = generatePassphrase();
+  expect(passphrase.split("-")).toHaveLength(16);
+});
+
+test("P4: inactive users cannot use existing session cookies", async () => {
+  const app = createApp();
+  const userId = await makeUser(0);
+  const cookie = "__Host-session=" + (await signSession("sek", userId, 3600));
+
+  const res = await app.request("/api/stats", { headers: { cookie } }, testEnv);
+
+  expect(res.status).toBe(403);
+});
+
+test("P4: inactive admin cannot use existing session cookies", async () => {
+  const app = createApp();
+  await (env.DB as D1Database).prepare("UPDATE users SET active = 0 WHERE id = 1").run();
+  const cookie = "__Host-session=" + (await signSession("sek", 1, 3600));
+
+  const res = await app.request("/api/stats", { headers: { cookie } }, testEnv);
+
+  expect(res.status).toBe(403);
+  await (env.DB as D1Database).prepare("UPDATE users SET active = 1 WHERE id = 1").run();
+});
+
+test("P4: credentialed CORS only allows exact configured origins", async () => {
+  const app = createApp();
+
+  const evil = await app.request("/api/aliases", { headers: { Origin: "https://foo.pages.dev" } }, testEnv);
+  expect(evil.headers.get("access-control-allow-origin")).toBeNull();
+
+  const allowed = await app.request("/api/aliases", { headers: { Origin: "https://hidemyemail.dev" } }, testEnv);
+  expect(allowed.headers.get("access-control-allow-origin")).toBe("https://hidemyemail.dev");
+});
+
+test("P4: MFA setup requires fresh auth", async () => {
+  const app = createApp();
+  const userId = await makeUser(1);
+  const cookie = "__Host-session=" + (await signSession("sek", userId, 3600));
+
+  const res = await app.request("/api/settings/mfa/setup", {
+    method: "POST",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: "{}"
+  }, testEnv);
+
+  expect(res.status).toBe(401);
+});
+
+test("P4: MFA disable failures are rate limited", async () => {
+  const app = createApp();
+  const userId = await makeUser(1);
+  const cookie = "__Host-session=" + (await signSession("sek", userId, 3600));
+  const freshCookie = "__Host-fresh-auth=" + (await signFreshAuth("sek", userId, 300));
+  const secret = await encryptDestination("JBSWY3DPEHPK3PXP", testEnv.DESTINATION_ENCRYPTION_KEY);
+  await (env.DB as D1Database).prepare(
+    "INSERT INTO mfa (user_id, totp_secret, totp_enabled, totp_backup_codes) VALUES (?, ?, 1, '[]')"
+  ).bind(userId, secret).run();
+
+  for (let i = 0; i < 10; i++) {
+    const res = await app.request("/api/settings/mfa/disable", {
+      method: "POST",
+      headers: { cookie: `${cookie}; ${freshCookie}`, "Content-Type": "application/json", "cf-connecting-ip": "203.0.113.7" },
+      body: JSON.stringify({ code: "000000" })
+    }, testEnv);
+    expect(res.status).toBe(401);
+  }
+
+  const limited = await app.request("/api/settings/mfa/disable", {
+    method: "POST",
+    headers: { cookie: `${cookie}; ${freshCookie}`, "Content-Type": "application/json", "cf-connecting-ip": "203.0.113.7" },
+    body: JSON.stringify({ code: "000000" })
+  }, testEnv);
+  expect(limited.status).toBe(429);
 });

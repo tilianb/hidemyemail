@@ -38,6 +38,8 @@ export function getHeader(m: Mime, name: string): string | undefined {
 }
 
 export function setHeader(m: Mime, name: string, value: string): Mime {
+  if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name)) throw new Error("Invalid header name");
+  if (value.includes("\r") || value.includes("\n")) throw new Error("Invalid header value");
   const lower = name.toLowerCase();
   const kept = m.headers.filter((h) => h.name.toLowerCase() !== lower);
   return { headers: [...kept, { name, value }], body: m.body };

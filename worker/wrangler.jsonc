@@ -19,7 +19,12 @@
       "migrations_dir": "migrations" 
     }
   ],
-  "vars": { "ENVIRONMENT": "production", "SES_REGION": "ap-southeast-2", "S3_INBOUND_BUCKET": "hidemyemail-inbound-raw" },
+  "vars": {
+    "ENVIRONMENT": "production",
+    "SES_REGION": "ap-southeast-2",
+    "S3_INBOUND_BUCKET": "hidemyemail-inbound-raw",
+    "SNS_INBOUND_TOPIC_ARN": "arn:aws:sns:ap-southeast-2:200526305070:hidemyemail-inbound-notifications"
+  },
   // Secrets (wrangler secret put): SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY,
   // SESSION_SECRET, AUTH_PASSWORD_HASH, AUTH_PASSWORD_SALT, SNS_ALLOWED_TOPIC_ARN
   "env": {
@@ -38,7 +43,12 @@
           "migrations_dir": "migrations"
         }
       ],
-      "vars": { "ENVIRONMENT": "preview", "SES_REGION": "ap-southeast-2", "S3_INBOUND_BUCKET": "hidemyemail-inbound-raw" }
+      "vars": {
+        "ENVIRONMENT": "preview",
+        "SES_REGION": "ap-southeast-2",
+        "S3_INBOUND_BUCKET": "hidemyemail-inbound-raw",
+        "SNS_INBOUND_TOPIC_ARN": "arn:aws:sns:ap-southeast-2:200526305070:hidemyemail-inbound-dev"
+      }
     },
   },
 }

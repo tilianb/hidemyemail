@@ -1,6 +1,6 @@
 # HideMyEmail
 
-A personal, serverless email-alias service built with **Cloudflare Email Routing**, **Cloudflare Workers**, **Amazon SES**, and **Cloudflare D1**. It includes a modern React dashboard hosted on Cloudflare Pages and fully supports two-way reply-from-alias functionality.
+A personal, serverless email-alias service built with **Cloudflare Workers**, **Amazon SES/SNS/S3**, and **Cloudflare D1**. It includes a modern React dashboard hosted on Cloudflare Pages and fully supports two-way reply-from-alias functionality.
 
 ## Features
 - **Serverless Architecture**: Extremely cheap and scalable, running entirely on Cloudflare Workers and Amazon SES.
@@ -11,11 +11,11 @@ A personal, serverless email-alias service built with **Cloudflare Email Routing
 
 ## Architecture
 The system consists of two main components:
-1. `worker/`: A Cloudflare Worker that handles incoming emails via Cloudflare Email Routing, processes them, stores metadata in D1, and forwards them. It also provides the REST API for the dashboard.
+1. `worker/`: A Cloudflare Worker that handles SES/SNS webhooks, processes inbound MIME fetched from S3, stores metadata in D1, and forwards mail through SES. It also provides the REST API for the dashboard.
 2. `dashboard/`: A React (Vite) Single Page Application hosted on Cloudflare Pages.
 
 ### How it works
-- **Inbound Email**: Cloudflare Email Routing catches emails to your domains and triggers the Worker. The Worker looks up the alias, rewrites headers, and forwards it to your real email.
+- **Inbound Email**: AWS SES receives emails for your domains, stores raw MIME in S3, and sends a signed SNS notification to the Worker. The Worker verifies the SNS signature and exact topic ARN, fetches the raw MIME, rewrites headers, and forwards it to your real email.
 - **Outbound (Reply)**: When you reply to a forwarded email, it goes through Amazon SES. A webhook catches the SES bounce/delivery, or the Worker intercepts the outbound send, rewriting the `From` address back to your alias before it reaches the recipient.
 
 ## AWS SES & SNS Setup
@@ -27,11 +27,11 @@ To support outbound replies and monitor email health, you need an Amazon SES acc
    - Configure SES to publish bounce and delivery events to an Amazon SNS topic.
    - (Optional) Request production access if you are in the SES sandbox to send emails to unverified addresses.
 
-2. **Amazon SNS Webhook**:
-   - Create an HTTPS subscription for your SNS topic pointing to your worker's webhook:
-     `https://<worker-domain>/api/ses/notification?secret=<your_sns_secret>`
-     *(Note: adjust `/api/ses/notification` if your routes are mounted differently. By default, it may be `/api/ses/notification` or `/ses/notification` depending on your worker router).*
-   - Set a secure random string for `SNS_SECRET` in your worker's `.dev.vars` and Cloudflare environment secrets.
+2. **Amazon SNS Webhooks**:
+   - Create HTTPS subscriptions for your SNS topics pointing to your worker webhooks:
+     - `https://<worker-domain>/api/ses/inbound`
+     - `https://<worker-domain>/api/ses/notification`
+   - Do not add shared-secret query parameters. The Worker verifies AWS SNS signatures and the exact configured topic ARNs.
 
 3. **Confirm Subscription**:
    - When you create the SNS subscription, SNS will send a `SubscriptionConfirmation` message.
@@ -39,7 +39,7 @@ To support outbound replies and monitor email health, you need an Amazon SES acc
    - Open that URL in your browser to manually confirm the SNS subscription.
 
 4. **Security & Validation**:
-   - For extra security, set `SNS_ALLOWED_TOPIC_ARN` in your worker's environment variables to the exact ARN of your SNS topic. The webhook will reject payloads from other topics.
+   - Set `SNS_INBOUND_TOPIC_ARN` and `SNS_ALLOWED_TOPIC_ARN` in each Worker environment to the exact ARNs for that environment. Preview/dev should use their own topic ARNs rather than an `allowed_topic` URL override.
 
 ## Documentation
 - [Service Design & Architecture Spec](docs/superpowers/specs/2026-05-24-hidemyemail-alias-service-design.md)

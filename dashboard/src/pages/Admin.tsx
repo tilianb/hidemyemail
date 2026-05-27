@@ -23,6 +23,7 @@ export function Admin() {
   const [savingSettings, setSavingSettings] = useState(false);
   const [showEnvVars, setShowEnvVars] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const workerOrigin = window.location.origin;
 
   async function load() {
     setLoading(true);
@@ -154,7 +155,8 @@ export function Admin() {
           <div className="card-body">
             <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 16 }}>
             Set up the required AWS services (SES, SNS, S3) for inbound and outbound email routing.
-            Choose your preferred deployment method below.
+            SNS requests are authenticated by AWS signature verification, so webhook URLs do not need shared secrets.
+            Configure each environment with its own exact SNS topic ARNs.
           </p>
           
           <div className="tabs" style={{ display: "flex", gap: 16, marginBottom: 16 }}>
@@ -170,13 +172,19 @@ export function Admin() {
             <div style={{ padding: 16, background: "rgba(255,255,255,0.02)", borderRadius: 6, fontSize: "0.85rem" }}>
               <p style={{ marginBottom: 12 }}>
                 We recommend using AWS CloudFormation to automatically provision all required resources securely.
-                Save the template below as <code>template.yaml</code> and deploy it in the AWS Console.
+                Save the template below as <code>template.yaml</code> and deploy it in the AWS Console. For preview/dev,
+                use the preview Worker URL and copy the generated preview topic ARNs into that environment.
               </p>
               <textarea 
                 className="input input-mono" 
                 readOnly 
                 style={{ width: "100%", height: 350, fontSize: "11px", marginBottom: 8 }}
                 value={`AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  WorkerBaseUrl:
+    Type: String
+    Default: "${workerOrigin}"
+    Description: Worker origin, for example https://hidemyemail-preview.example.workers.dev
 Resources:
   InboundBucket:
     Type: AWS::S3::Bucket
@@ -204,6 +212,18 @@ Resources:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: hidemyemail-outbound
+  InboundWorkerSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: https
+      TopicArn: !Ref InboundTopic
+      Endpoint: !Sub "\${WorkerBaseUrl}/api/ses/inbound"
+  OutboundWorkerSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: https
+      TopicArn: !Ref OutboundTopic
+      Endpoint: !Sub "\${WorkerBaseUrl}/api/ses/notification"
   InboundRuleSet:
     Type: AWS::SES::ReceiptRuleSet
     Properties:
@@ -219,10 +239,17 @@ Resources:
         Actions:
           - S3Action:
               BucketName: !Ref InboundBucket
-              TopicArn: !Ref InboundTopic`}
+              TopicArn: !Ref InboundTopic
+Outputs:
+  InboundBucketName:
+    Value: !Ref InboundBucket
+  SnsInboundTopicArn:
+    Value: !Ref InboundTopic
+  SnsAllowedTopicArn:
+    Value: !Ref OutboundTopic`}
               />
               <p className="text-muted">
-                After deployment, copy the Bucket Name and SNS Topic ARNs to your <code>wrangler.jsonc</code> file. Also ensure that the "hidemyemail-rules" SES rule set is marked as active in the AWS console.
+                After deployment, copy <code>InboundBucketName</code>, <code>SnsInboundTopicArn</code>, and <code>SnsAllowedTopicArn</code> to your Worker environment. Confirm the SNS subscriptions in AWS if they are still pending. Also ensure that the "hidemyemail-rules" SES rule set is marked as active in the AWS console.
               </p>
             </div>
           )}
@@ -230,7 +257,7 @@ Resources:
           {awsTab === "manual" && (
             <div style={{ padding: 16, background: "rgba(255,255,255,0.02)", borderRadius: 6, fontSize: "0.85rem" }}>
               <p style={{ marginBottom: 12 }}>
-                Run the following AWS CLI commands to provision the resources manually:
+                Run the following AWS CLI commands to provision the resources manually. The subscription endpoints intentionally have no <code>secret</code> or <code>allowed_topic</code> query parameters.
               </p>
               <pre style={{ overflowX: "auto", background: "#000", padding: 12, borderRadius: 4, color: "#0f0" }}>
 {`# 1. Create S3 Bucket for inbound emails
@@ -242,13 +269,23 @@ ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 aws s3api put-bucket-policy --bucket $BUCKET_NAME --policy "{\\"Statement\\":[{\\"Effect\\":\\"Allow\\",\\"Principal\\":{\\"Service\\":\\"ses.amazonaws.com\\"},\\"Action\\":\\"s3:PutObject\\",\\"Resource\\":\\"arn:aws:s3:::$BUCKET_NAME/*\\",\\"Condition\\":{\\"StringEquals\\":{\\"aws:Referer\\":\\"$ACCOUNT_ID\\"}}}]}"
 
 # 3. Create SNS Topics
-TOPIC_ARN=$(aws sns create-topic --name hidemyemail-inbound --query TopicArn --output text)
-aws sns create-topic --name hidemyemail-outbound
+WORKER_ORIGIN="${workerOrigin}"
+INBOUND_TOPIC_ARN=$(aws sns create-topic --name hidemyemail-inbound --query TopicArn --output text)
+OUTBOUND_TOPIC_ARN=$(aws sns create-topic --name hidemyemail-outbound --query TopicArn --output text)
 
-# 4. Create SES Receipt Rule Set and Rule
+# 4. Subscribe Worker webhooks. SNS signatures authenticate requests.
+aws sns subscribe --topic-arn $INBOUND_TOPIC_ARN --protocol https --notification-endpoint "$WORKER_ORIGIN/api/ses/inbound"
+aws sns subscribe --topic-arn $OUTBOUND_TOPIC_ARN --protocol https --notification-endpoint "$WORKER_ORIGIN/api/ses/notification"
+
+# 5. Create SES Receipt Rule Set and Rule
 aws ses create-receipt-rule-set --rule-set-name hidemyemail-rules
-aws ses create-receipt-rule --rule-set-name hidemyemail-rules --rule "{\\"Name\\":\\"store-and-notify\\",\\"Enabled\\":true,\\"Actions\\":[{\\"S3Action\\":{\\"BucketName\\":\\"$BUCKET_NAME\\",\\"TopicArn\\":\\"$TOPIC_ARN\\"}}]}"
-aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
+aws ses create-receipt-rule --rule-set-name hidemyemail-rules --rule "{\\"Name\\":\\"store-and-notify\\",\\"Enabled\\":true,\\"Actions\\":[{\\"S3Action\\":{\\"BucketName\\":\\"$BUCKET_NAME\\",\\"TopicArn\\":\\"$INBOUND_TOPIC_ARN\\"}}]}"
+aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules
+
+# 6. Configure Worker environment
+echo "S3_INBOUND_BUCKET=$BUCKET_NAME"
+echo "SNS_INBOUND_TOPIC_ARN=$INBOUND_TOPIC_ARN"
+echo "SNS_ALLOWED_TOPIC_ARN=$OUTBOUND_TOPIC_ARN"`}
               </pre>
             </div>
           )}
@@ -420,8 +457,8 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
 
               <div className="setting-row">
                 <div className="setting-info">
-                  <label htmlFor="setting-cors" className="setting-label">CORS Allowed Domains</label>
-                  <div className="setting-desc">Comma-separated list of domains allowed to access the API</div>
+                  <label htmlFor="setting-cors" className="setting-label">CORS Allowed Origins</label>
+                  <div className="setting-desc">Comma-separated exact origins allowed to access the API</div>
                 </div>
                 <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
                   <input
@@ -510,7 +547,7 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
               <div className="setting-row">
                 <div className="setting-info">
                   <label htmlFor="setting-sns-topic" className="setting-label">SNS Inbound Topic ARN (Override)</label>
-                  <div className="setting-desc">The ARN of the SNS topic receiving SES inbound notifications</div>
+                  <div className="setting-desc">Exact ARN of the SNS topic receiving SES inbound notifications</div>
                 </div>
                 <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
                   <input
@@ -520,6 +557,24 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
                     placeholder="Fallback to ENV if empty"
                     value={editedSettings.sns_inbound_topic_arn || ""}
                     onChange={e => setEditedSettings({...editedSettings, sns_inbound_topic_arn: e.target.value})}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-sns-outbound-topic" className="setting-label">SNS Outbound Topic ARN (Override)</label>
+                  <div className="setting-desc">Exact ARN of the SNS topic sending SES bounce/complaint notifications</div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <input
+                    id="setting-sns-outbound-topic"
+                    className="input input-mono"
+                    type="text"
+                    placeholder="Fallback to ENV if empty"
+                    value={editedSettings.sns_allowed_topic_arn || ""}
+                    onChange={e => setEditedSettings({...editedSettings, sns_allowed_topic_arn: e.target.value})}
                     style={{ width: "100%" }}
                   />
                 </div>
@@ -537,7 +592,7 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
                     max_inbound_bytes: "26214400",
                     catch_all_auto_create: "true",
                     registration_enabled: "true",
-                    cors_allowed_domains: "hidemyemail.dev,localhost:5173,pages.dev,workers.dev"
+                    cors_allowed_domains: "https://hidemyemail.dev,http://localhost:5173"
                   });
                 }}
                 type="button"

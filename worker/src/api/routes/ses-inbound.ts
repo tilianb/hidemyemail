@@ -2,8 +2,8 @@ import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import { routeEmail } from "../../email/router";
 import { fetchS3Object } from "../../lib/s3";
-import { timingSafeEqual } from "../../lib/auth";
 import { getEnvWithOverride } from "../../lib/settings";
+import { verifySnsMessage } from "../../lib/sns";
 
 export function sesInboundRoutes() {
   const r = new Hono<AppEnv>();
@@ -12,18 +12,17 @@ export function sesInboundRoutes() {
     const body = await c.req.json<any>().catch(() => null);
     if (!body) return c.json({ error: "bad body" }, 400);
 
-    // Webhook authentication — SNS_SECRET must be set
-    const secret = c.req.header("x-webhook-secret") || c.req.query("secret") || "";
-    const snsSecret = await getEnvWithOverride(c.env.DB, c.env, "sns_secret");
-    if (!snsSecret || !timingSafeEqual(secret, snsSecret)) {
-      return c.json({ error: "unauthorized" }, 401);
-    }
+    const sesRegion = await getEnvWithOverride(c.env.DB, c.env, "ses_region");
+    const verified = await verifySnsMessage(body, {
+      region: sesRegion,
+      fetchCert: (c.env as any).__snsCertFetch ?? fetch,
+    });
+    if (!verified.ok) return c.json({ error: "invalid sns signature" }, 401);
 
-    // Guard: only accept the configured inbound SNS topic(s)
-    // We allow passing an additional allowed_topic via query string to make branch preview testing easier.
+    // Guard: only accept the configured inbound SNS topic.
     const snsInboundTopic = await getEnvWithOverride(c.env.DB, c.env, "sns_inbound_topic_arn");
-    const allowedTopics = [snsInboundTopic, c.req.query("allowed_topic")].filter(Boolean);
-    if (allowedTopics.length > 0 && !allowedTopics.includes(body.TopicArn)) {
+    if (!snsInboundTopic) return c.json({ error: "missing SNS_INBOUND_TOPIC_ARN configuration" }, 500);
+    if (body.TopicArn !== snsInboundTopic) {
       return c.json({ error: "forbidden topic" }, 403);
     }
 
@@ -74,7 +73,6 @@ export function sesInboundRoutes() {
     // Fetch full raw MIME from S3 (supports emails of any size, no SNS 256KB truncation risk)
     const sesAccessKeyId = await getEnvWithOverride(c.env.DB, c.env, "ses_access_key_id");
     const sesSecretAccessKey = await getEnvWithOverride(c.env.DB, c.env, "ses_secret_access_key");
-    const sesRegion = await getEnvWithOverride(c.env.DB, c.env, "ses_region");
     const s3InboundBucket = await getEnvWithOverride(c.env.DB, c.env, "s3_inbound_bucket");
     
     const creds = {

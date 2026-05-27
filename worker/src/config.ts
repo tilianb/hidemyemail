@@ -6,12 +6,11 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   max_inbound_bytes: String(25 * 1024 * 1024),
   catch_all_auto_create: "true",
   registration_enabled: "true",
-  cors_allowed_domains: "hidemyemail.dev,localhost:5173,pages.dev,workers.dev",
+  cors_allowed_domains: "https://hidemyemail.dev,http://localhost:5173",
   ses_region: "",
   ses_access_key_id: "",
   ses_secret_access_key: "",
   s3_inbound_bucket: "",
-  sns_secret: "",
   sns_allowed_topic_arn: "",
   sns_inbound_topic_arn: "",
 };
