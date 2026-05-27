@@ -8,6 +8,33 @@ A personal, serverless email-alias service built with **Cloudflare Workers**, **
 - **Modern Dashboard**: A clean React-based dashboard to manage aliases, domains, and view statistics.
 - **Blocks & Rules**: Block unwanted senders instantly from the dashboard.
 - **1-Click Unsubscribe**: Disable aliases instantly directly from your email client using `List-Unsubscribe` Quick Actions.
+- **Self-Hostable**: One-command Docker container for `linux/amd64` and `linux/arm64` (see below).
+
+## Self-host in 60 seconds
+
+Pre-built multi-arch images live on GHCR. You still need AWS SES for the mail
+pipeline (no mail server included) — everything else runs locally.
+
+```bash
+git clone https://github.com/tilianb/hidemyemail.git
+cd hidemyemail/docker
+cp .env.example .env
+
+# Generate the four secrets and paste them into .env
+echo "SESSION_SECRET=$(openssl rand -hex 32)"
+echo "DESTINATION_ENCRYPTION_KEY=$(openssl rand -base64 32)"
+node ../worker/scripts/hash-password.mjs '<choose-a-password>'  # prints SALT + HASH
+
+# Add your AWS SES creds (SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY, etc.)
+$EDITOR .env
+
+docker compose pull
+docker compose up -d
+```
+
+Open <http://localhost:8787>. Put Caddy/nginx/Cloudflare Tunnel in front for
+TLS. See [`docker/README.md`](docker/README.md) for AWS setup, upgrades,
+volumes, and troubleshooting.
 
 ## Architecture
 The system consists of two main components:

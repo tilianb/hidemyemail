@@ -1,0 +1,10 @@
+{
+  "name": "hidemyemail-docker-host",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Miniflare host that runs the hidemyemail Worker in a container.",
+  "dependencies": {
+    "miniflare": "4.20260521.0"
+  }
+}
