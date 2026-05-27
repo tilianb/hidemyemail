@@ -13,6 +13,7 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   s3_inbound_bucket: "",
   sns_allowed_topic_arn: "",
   sns_inbound_topic_arn: "",
+  forwarded_from_format: "name_address_parens",
 };
 
 // Kept for backward-compat with any imports (tests, etc.)

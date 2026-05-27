@@ -271,6 +271,23 @@ export function adminRoutes() {
         }
       }
 
+      if (key === "forwarded_from_format") {
+        const allowed = new Set([
+          "name_address_parens",
+          "name_address_parens_at",
+          "name_address_dash",
+          "name_address_dash_at",
+          "name_only",
+          "address_only",
+          "address_only_at",
+          "via_hidemyemail",
+        ]);
+        if (!allowed.has(value)) {
+          errors.push(`${key}: invalid format`);
+          continue;
+        }
+      }
+
       if (key === "cors_allowed_domains") {
         if (!value || value.trim().length === 0) {
           errors.push(`${key}: cannot be empty`);

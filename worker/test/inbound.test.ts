@@ -23,12 +23,23 @@ test("clean mail to new alias → SES re-inject with rewritten headers", async (
   const sentinel = { sent: [] as any[] };
   await handleInbound(mkMessage("alice@store.com", "shop@hidemyemail.dev", RAW), testEnv(sentinel));
   expect(sentinel.sent.length).toBe(1);
-  expect(sentinel.sent[0].from).toBe("shop@hidemyemail.dev");
+  expect(sentinel.sent[0].from).toBe(`"Alice (alice at store.com)" <shop@hidemyemail.dev>`);
   const decoded = atob(sentinel.sent[0].rawBase64);
-  expect(decoded).toContain(`From: "Alice - alice at store.com" <shop@hidemyemail.dev>`);
+  expect(decoded).toContain(`From: "Alice (alice at store.com)" <shop@hidemyemail.dev>`);
   expect(decoded).toContain("Reply-To: shop+alice=store.com@hidemyemail.dev");
   expect(decoded).not.toContain("DKIM-Signature");
   expect((await q.getAlias(DB(), "shop@hidemyemail.dev"))?.fwd_count).toBe(1);
+});
+
+test("admin-selected From format can include raw sender email", async () => {
+  const sentinel = { sent: [] as any[] };
+  await DB().prepare(
+    "INSERT INTO settings (key, value, updated_at) VALUES ('forwarded_from_format', 'name_address_parens_at', 0) " +
+    "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+  ).run();
+  await handleInbound(mkMessage("alice@store.com", "shop@hidemyemail.dev", RAW), testEnv(sentinel));
+  expect(sentinel.sent[0].from).toBe(`"Alice (alice@store.com)" <shop@hidemyemail.dev>`);
+  expect(atob(sentinel.sent[0].rawBase64)).toContain(`From: "Alice (alice@store.com)" <shop@hidemyemail.dev>`);
 });
 
 test("blocked sender → no SES, block event", async () => {

@@ -3,6 +3,17 @@ import { api, type Domain } from "../api";
 import { useToast, TableSkeleton, EmptyState, ConfirmDialog, PromptDialog, ChoiceDialog } from "../ui";
 import { Users, Trash2, Globe, Cloud, Edit3, Key, Server, Settings } from "lucide-react";
 
+const FORWARDED_FROM_FORMATS = [
+  { value: "name_address_parens", label: "Name (email at domain)", example: '"Alice (alice at store.com)" <alias@domain>' },
+  { value: "name_address_parens_at", label: "Name (email@domain)", example: '"Alice (alice@store.com)" <alias@domain>' },
+  { value: "name_address_dash", label: "Name - email at domain", example: '"Alice - alice at store.com" <alias@domain>' },
+  { value: "name_address_dash_at", label: "Name - email@domain", example: '"Alice - alice@store.com" <alias@domain>' },
+  { value: "name_only", label: "Name only", example: '"Alice" <alias@domain>' },
+  { value: "address_only", label: "Email at domain only", example: '"alice at store.com" <alias@domain>' },
+  { value: "address_only_at", label: "Email@domain only", example: '"alice@store.com" <alias@domain>' },
+  { value: "via_hidemyemail", label: "Name via HideMyEmail", example: '"Alice via HideMyEmail" <alias@domain>' },
+];
+
 export function Admin() {
   const { toast } = useToast();
   const [users, setUsers] = useState<{ id: number; created_at: number; alias_count: number; active: number; forwarding: number; name: string | null }[]>([]);
@@ -472,6 +483,31 @@ echo "SNS_ALLOWED_TOPIC_ARN=$OUTBOUND_TOPIC_ARN"`}
                 </div>
               </div>
 
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-forwarded-from-format" className="setting-label">Forwarded Sender Display</label>
+                  <div className="setting-desc">
+                    How forwarded emails appear in your inbox. Default avoids raw @ signs for deliverability.
+                  </div>
+                  <div className="setting-desc input-mono" style={{ marginTop: 6 }}>
+                    {FORWARDED_FROM_FORMATS.find(f => f.value === editedSettings.forwarded_from_format)?.example || FORWARDED_FROM_FORMATS[0].example}
+                  </div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <select
+                    id="setting-forwarded-from-format"
+                    className="input"
+                    value={editedSettings.forwarded_from_format || "name_address_parens"}
+                    onChange={e => setEditedSettings({...editedSettings, forwarded_from_format: e.target.value})}
+                    style={{ width: "100%" }}
+                  >
+                    {FORWARDED_FROM_FORMATS.map(format => (
+                      <option key={format.value} value={format.value}>{format.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               {/* AWS Config Overrides */}
               <div className="setting-row">
                 <div className="setting-info">
@@ -592,7 +628,8 @@ echo "SNS_ALLOWED_TOPIC_ARN=$OUTBOUND_TOPIC_ARN"`}
                     max_inbound_bytes: "26214400",
                     catch_all_auto_create: "true",
                     registration_enabled: "true",
-                    cors_allowed_domains: "https://hidemyemail.dev,http://localhost:5173"
+                    cors_allowed_domains: "https://hidemyemail.dev,http://localhost:5173",
+                    forwarded_from_format: "name_address_parens"
                   });
                 }}
                 type="button"

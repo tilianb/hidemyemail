@@ -5,7 +5,7 @@ import { streamToBytes, toBase64 } from "../lib/bytes";
 import { parseMime, setHeader, removeHeaders, getHeader, serializeMime } from "../lib/mime";
 import { reverseAddress } from "../lib/reverse";
 import { sendRaw, SesTransientError } from "../lib/ses";
-import { getNumericSetting, getBoolSetting, getEnvWithOverride } from "../lib/settings";
+import { getNumericSetting, getBoolSetting, getEnvWithOverride, getSetting } from "../lib/settings";
 import { decryptDestination } from "../lib/crypto";
 
 type SesSend = typeof sendRaw;
@@ -83,10 +83,10 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   // Reply-To is the reverse address so hitting Reply routes back through the alias.
   // e.g. From: "Alice 'alice@store.com'" <shop@domain>  Reply-To: shop+alice=store.com@domain
   const senderName = extractDisplayName(origFrom);
-  const safeSenderName = senderName.replace(/@/g, " at ");
-  const safeFrom = message.from.replace(/@/g, " at ");
-  const display = safeSenderName ? `${safeSenderName} - ${safeFrom}` : safeFrom;
-  mime = setHeader(mime, "From", `"${sanitize(display)}" <${alias.full_address}>`);
+  const format = await getSetting(db, "forwarded_from_format");
+  const display = buildForwardedFromDisplay(senderName, message.from, format);
+  const fromHeader = `"${sanitize(display)}" <${alias.full_address}>`;
+  mime = setHeader(mime, "From", fromHeader);
   mime = setHeader(mime, "Reply-To", reverseAddr);
   mime = removeHeaders(mime, ["DKIM-Signature", "ARC-Seal", "ARC-Message-Signature", "ARC-Authentication-Results", "Return-Path", "Sender"]);
   mime = setHeader(mime, "X-Reinjected", "1");
@@ -108,7 +108,7 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
     const sesRegion = await getEnvWithOverride(db, env, "ses_region");
     await ses(
       { accessKeyId: sesAccessKeyId, secretAccessKey: sesSecretAccessKey, region: sesRegion },
-      { from: alias.full_address, to: dest, rawBase64 }
+      { from: fromHeader, to: dest, rawBase64 }
     );
   } catch (err) {
     await q.insertEvent(db, { alias_id: alias.id, type: "error", external_sender: message.from, detail: String(err), ts: now });
@@ -130,4 +130,30 @@ function extractDisplayName(from: string): string {
 }
 function sanitize(s: string): string {
   return s.replace(/["\r\n]/g, "").slice(0, 100);
+}
+
+function buildForwardedFromDisplay(senderName: string, senderEmail: string, format: string): string {
+  const safeName = senderName.replace(/@/g, " at ");
+  const safeEmail = senderEmail.replace(/@/g, " at ");
+  const name = safeName || safeEmail;
+
+  switch (format) {
+    case "name_address_parens_at":
+      return safeName ? `${safeName} (${senderEmail})` : senderEmail;
+    case "name_address_dash":
+      return safeName ? `${safeName} - ${safeEmail}` : safeEmail;
+    case "name_address_dash_at":
+      return safeName ? `${safeName} - ${senderEmail}` : senderEmail;
+    case "name_only":
+      return name;
+    case "address_only":
+      return safeEmail;
+    case "address_only_at":
+      return senderEmail;
+    case "via_hidemyemail":
+      return `${name} via HideMyEmail`;
+    case "name_address_parens":
+    default:
+      return safeName ? `${safeName} (${safeEmail})` : safeEmail;
+  }
 }
