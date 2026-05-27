@@ -3,6 +3,7 @@ import { setCookie, deleteCookie, getCookie } from "hono/cookie";
 import type { AppEnv } from "../app";
 import { verifyPassword, signSession, derivePassphraseHash, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge } from "../../lib/auth";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
+import { getEnvWithOverride } from "../../lib/settings";
 
 const SESSION_TTL = 60 * 60 * 24 * 7; // 7 days
 
@@ -98,6 +99,13 @@ export function authRoutes() {
     const ip = c.req.header("cf-connecting-ip") || "unknown";
     if (!(await canAttempt(ip, c.env.DB))) {
       return c.json({ error: "too many attempts" }, 429);
+    }
+
+    // Check if registration is enabled
+    const { getBoolSetting } = await import("../../lib/settings");
+    const registrationEnabled = await getBoolSetting(c.env.DB, "registration_enabled");
+    if (!registrationEnabled) {
+      return c.json({ error: "Registration is currently disabled" }, 403);
     }
 
     const { password } = await c.req.json<{ password: string }>().catch(() => ({ password: "" }));
@@ -301,11 +309,15 @@ export function authRoutes() {
 
     await db.prepare("UPDATE users SET recovery_mfa_code = ? WHERE id = ?").bind(code, user.id).run();
 
-    if (c.env.SES_ACCESS_KEY_ID && c.env.SES_SECRET_ACCESS_KEY && c.env.SES_REGION) {
+    const sesAccessKeyId = await getEnvWithOverride(db, c.env, "ses_access_key_id");
+    const sesSecretAccessKey = await getEnvWithOverride(db, c.env, "ses_secret_access_key");
+    const sesRegion = await getEnvWithOverride(db, c.env, "ses_region");
+
+    if (sesAccessKeyId && sesSecretAccessKey && sesRegion) {
       await sendRaw({
-        accessKeyId: c.env.SES_ACCESS_KEY_ID,
-        secretAccessKey: c.env.SES_SECRET_ACCESS_KEY,
-        region: c.env.SES_REGION
+        accessKeyId: sesAccessKeyId,
+        secretAccessKey: sesSecretAccessKey,
+        region: sesRegion
       }, {
         from: "HideMyEmail <noreply@hidemyemail.dev>",
         to: email,
