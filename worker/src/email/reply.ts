@@ -9,10 +9,23 @@ type SesSend = typeof sendRaw;
 
 // Pull the bare "user@host" out of an RFC 5322 From header. Handles "Name <a@b>",
 // '"Quoted Name" <a@b>', and bare "a@b". Returns "" if no '@' is present.
+//
+// SECURITY: RFC 5322 lets a quoted-string display-name (and parenthesised
+// comments) contain arbitrary characters, including '<', '>', and '@'. SES
+// parses the real addr-spec out of the From header for DMARC alignment, so a
+// naïve "first <addr> wins" regex disagrees with SES when the display-name
+// embeds an angle-bracketed string — e.g. `From: "spoof <owner@me.com>"
+// <attacker@evil.com>` makes SES report DMARC=PASS for evil.com while a
+// naïve parser returns owner@me.com, opening the relay gate to anyone with a
+// DMARC-aligned attacker domain. Strip quoted-strings and comments first, then
+// take the *last* <addr-spec> (RFC 5322 places it after the display-name).
 function extractEmailAddress(value: string): string {
-  const angle = value.match(/<\s*([^>\s]+@[^>\s]+)\s*>/);
-  if (angle) return angle[1]!.trim();
-  const bare = value.match(/[^\s<>"',;]+@[^\s<>"',;]+/);
+  const stripped = value
+    .replace(/"(?:\\.|[^"\\])*"/g, "")  // RFC 5322 quoted-string display-name
+    .replace(/\([^()]*\)/g, "");         // RFC 5322 comment (non-nested)
+  const matches = [...stripped.matchAll(/<\s*([^<>\s]+@[^<>\s]+)\s*>/g)];
+  if (matches.length > 0) return matches[matches.length - 1]![1]!.trim();
+  const bare = stripped.match(/[^\s<>"',;]+@[^\s<>"',;]+/);
   return bare ? bare[0].trim() : "";
 }
 

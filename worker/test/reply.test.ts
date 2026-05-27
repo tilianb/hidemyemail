@@ -76,3 +76,31 @@ test('DMARC-pass reply with quoted display name "Real Name" <owner> → relayed'
   await handleReply(mkMessage("anything@somewhere", TO, quoted), testEnv(sentinel), PARSED, { dmarc: "PASS" });
   expect(sentinel.sent.length).toBe(1);
 });
+
+// SECURITY (regression): RFC 5322 quoted-string display-name may contain '<' / '>' / '@'.
+// SES will DMARC-align against the real addr-spec (attacker@evil.com); the worker must
+// agree. A naïve regex that grabs the first `<addr>` would return the owner address
+// embedded inside the quoted display-name and open the alias up as an open relay.
+test("SECURITY: quoted display-name embedding <owner> with attacker addr-spec → rejected", async () => {
+  const sentinel = { sent: [] as any[] };
+  const spoof = `From: "spoof <real@me.com>" <attacker@evil.com>\r\nTo: ${TO}\r\nSubject: spoof\r\n\r\nbody\r\n`;
+  await handleReply(mkMessage("attacker@evil.com", TO, spoof), testEnv(sentinel), PARSED, { spf: "PASS", dmarc: "PASS" });
+  expect(sentinel.sent.length).toBe(0);
+});
+
+// SECURITY (regression): RFC 5322 comment in parentheses may embed an address that
+// must NOT be treated as the addr-spec.
+test("SECURITY: parenthesised comment embedding <owner> with attacker addr-spec → rejected", async () => {
+  const sentinel = { sent: [] as any[] };
+  const spoof = `From: (real@me.com legit) <attacker@evil.com>\r\nTo: ${TO}\r\nSubject: spoof\r\n\r\nbody\r\n`;
+  await handleReply(mkMessage("attacker@evil.com", TO, spoof), testEnv(sentinel), PARSED, { spf: "PASS", dmarc: "PASS" });
+  expect(sentinel.sent.length).toBe(0);
+});
+
+// SECURITY (regression): trailing addr-spec is the canonical one per RFC 5322.
+test("SECURITY: multiple <addr> tokens → last one wins (rejected when last is attacker)", async () => {
+  const sentinel = { sent: [] as any[] };
+  const spoof = `From: <real@me.com> spoof <attacker@evil.com>\r\nTo: ${TO}\r\nSubject: spoof\r\n\r\nbody\r\n`;
+  await handleReply(mkMessage("attacker@evil.com", TO, spoof), testEnv(sentinel), PARSED, { spf: "PASS", dmarc: "PASS" });
+  expect(sentinel.sent.length).toBe(0);
+});
