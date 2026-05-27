@@ -5,7 +5,7 @@ import { streamToBytes, toBase64 } from "../lib/bytes";
 import { parseMime, setHeader, removeHeaders, getHeader, serializeMime } from "../lib/mime";
 import { reverseAddress } from "../lib/reverse";
 import { sendRaw, SesTransientError } from "../lib/ses";
-import { getNumericSetting, getBoolSetting } from "../lib/settings";
+import { getNumericSetting, getBoolSetting, getEnvWithOverride } from "../lib/settings";
 import { decryptDestination } from "../lib/crypto";
 
 type SesSend = typeof sendRaw;
@@ -103,8 +103,11 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   const rawBase64 = toBase64(serializeMime(mime));
 
   try {
+    const sesAccessKeyId = await getEnvWithOverride(db, env, "ses_access_key_id");
+    const sesSecretAccessKey = await getEnvWithOverride(db, env, "ses_secret_access_key");
+    const sesRegion = await getEnvWithOverride(db, env, "ses_region");
     await ses(
-      { accessKeyId: env.SES_ACCESS_KEY_ID, secretAccessKey: env.SES_SECRET_ACCESS_KEY, region: env.SES_REGION },
+      { accessKeyId: sesAccessKeyId, secretAccessKey: sesSecretAccessKey, region: sesRegion },
       { from: reverseAddr, to: dest, rawBase64 }
     );
   } catch (err) {

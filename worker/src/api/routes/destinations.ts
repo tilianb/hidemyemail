@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import { sendRaw } from "../../lib/ses";
 import { hashDestination, encryptDestination, decryptDestination } from "../../lib/crypto";
+import { getEnvWithOverride } from "../../lib/settings";
 
 function escapeHtml(s: string): string {
   return s
@@ -51,14 +52,18 @@ export function destinationRoutes() {
     
     try {
       // Send verification email via SES first
-      if (c.env.SES_ACCESS_KEY_ID && c.env.SES_SECRET_ACCESS_KEY && c.env.SES_REGION) {
+      const sesAccessKeyId = await getEnvWithOverride(c.env.DB, c.env, "ses_access_key_id");
+      const sesSecretAccessKey = await getEnvWithOverride(c.env.DB, c.env, "ses_secret_access_key");
+      const sesRegion = await getEnvWithOverride(c.env.DB, c.env, "ses_region");
+
+      if (sesAccessKeyId && sesSecretAccessKey && sesRegion) {
         const verifyUrl = new URL(`/api/verify?token=${token}`, c.req.url).toString();
         const rawBase64 = buildVerificationEmail(email, verifyUrl);
 
         await sendRaw({
-          accessKeyId: c.env.SES_ACCESS_KEY_ID,
-          secretAccessKey: c.env.SES_SECRET_ACCESS_KEY,
-          region: c.env.SES_REGION
+          accessKeyId: sesAccessKeyId,
+          secretAccessKey: sesSecretAccessKey,
+          region: sesRegion
         }, {
           from: "HideMyEmail <noreply@hidemyemail.dev>",
           to: email,

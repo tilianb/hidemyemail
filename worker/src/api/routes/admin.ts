@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
-import { getAllSettings } from "../../lib/settings";
+import { getAllSettings, getEnvWithOverride } from "../../lib/settings";
 import { VALID_SETTING_KEYS, SETTING_DEFAULTS } from "../../config";
 
 /** Mask a secret: show first 3 + "•••" + last 3, or just "•••" if too short */
@@ -112,11 +112,15 @@ export function adminRoutes() {
       const url = `${new URL(c.req.url).origin}/recover?token=${token}`;
       const rawBase64 = buildRecoveryEmail(email, url);
 
-      if (c.env.SES_ACCESS_KEY_ID && c.env.SES_SECRET_ACCESS_KEY && c.env.SES_REGION) {
+      const sesAccessKeyId = await getEnvWithOverride(db, c.env, "ses_access_key_id");
+      const sesSecretAccessKey = await getEnvWithOverride(db, c.env, "ses_secret_access_key");
+      const sesRegion = await getEnvWithOverride(db, c.env, "ses_region");
+
+      if (sesAccessKeyId && sesSecretAccessKey && sesRegion) {
         await sendRaw({
-          accessKeyId: c.env.SES_ACCESS_KEY_ID,
-          secretAccessKey: c.env.SES_SECRET_ACCESS_KEY,
-          region: c.env.SES_REGION
+          accessKeyId: sesAccessKeyId,
+          secretAccessKey: sesSecretAccessKey,
+          region: sesRegion
         }, {
           from: "HideMyEmail <noreply@hidemyemail.dev>",
           to: email,

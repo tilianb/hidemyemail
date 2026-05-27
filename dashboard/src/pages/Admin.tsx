@@ -22,6 +22,7 @@ export function Admin() {
   const [editedSettings, setEditedSettings] = useState<Record<string, string>>({});
   const [savingSettings, setSavingSettings] = useState(false);
   const [showEnvVars, setShowEnvVars] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -310,11 +311,15 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
 
       {settingsData && (
         <div className="card stagger-4" style={{ marginBottom: 24 }}>
-          <div className="card-header">
+          <div className="card-header" style={{ cursor: "pointer", marginBottom: showSettings ? 24 : 0, borderBottom: showSettings ? "1px solid var(--border)" : "none", paddingBottom: showSettings ? 16 : 0 }} onClick={() => setShowSettings(!showSettings)}>
             <span className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <Settings size={18} /> Runtime Settings
             </span>
+            <button className="btn btn-ghost" type="button" onClick={(e) => { e.stopPropagation(); setShowSettings(!showSettings); }}>
+              {showSettings ? "Hide" : "Show"}
+            </button>
           </div>
+          {showSettings && (
           <div className="card-body">
             <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 24 }}>
               These settings are stored in the database and can be modified at runtime without redeploying the worker.
@@ -435,6 +440,102 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
                   />
                 </div>
               </div>
+
+              {/* AWS Config Overrides */}
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-ses-region" className="setting-label">SES Region (Override)</label>
+                  <div className="setting-desc">e.g. us-east-1</div>
+                  <div className="setting-updated">Last updated: {settingsData.ses_region?.updated_at ? new Date(settingsData.ses_region.updated_at).toLocaleString() : "Never"}</div>
+                </div>
+                <div className="setting-control">
+                  <input
+                    id="setting-ses-region"
+                    className="input input-mono"
+                    type="text"
+                    placeholder="Fallback to ENV if empty"
+                    value={editedSettings.ses_region || ""}
+                    onChange={e => setEditedSettings({...editedSettings, ses_region: e.target.value})}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-ses-key" className="setting-label">SES Access Key ID (Override)</label>
+                  <div className="setting-desc">AWS access key with SES permissions</div>
+                  <div className="setting-updated">Last updated: {settingsData.ses_access_key_id?.updated_at ? new Date(settingsData.ses_access_key_id.updated_at).toLocaleString() : "Never"}</div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <input
+                    id="setting-ses-key"
+                    className="input input-mono"
+                    type="text"
+                    placeholder="Fallback to ENV if empty"
+                    value={editedSettings.ses_access_key_id || ""}
+                    onChange={e => setEditedSettings({...editedSettings, ses_access_key_id: e.target.value})}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-ses-secret" className="setting-label">SES Secret Access Key (Override)</label>
+                  <div className="setting-desc">AWS secret key with SES permissions</div>
+                  <div className="setting-updated">Last updated: {settingsData.ses_secret_access_key?.updated_at ? new Date(settingsData.ses_secret_access_key.updated_at).toLocaleString() : "Never"}</div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <input
+                    id="setting-ses-secret"
+                    className="input input-mono"
+                    type="password"
+                    placeholder="Fallback to ENV if empty"
+                    value={editedSettings.ses_secret_access_key || ""}
+                    onChange={e => setEditedSettings({...editedSettings, ses_secret_access_key: e.target.value})}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-s3-bucket" className="setting-label">S3 Inbound Bucket (Override)</label>
+                  <div className="setting-desc">Bucket name where SES stores inbound emails</div>
+                  <div className="setting-updated">Last updated: {settingsData.s3_inbound_bucket?.updated_at ? new Date(settingsData.s3_inbound_bucket.updated_at).toLocaleString() : "Never"}</div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <input
+                    id="setting-s3-bucket"
+                    className="input input-mono"
+                    type="text"
+                    placeholder="Fallback to ENV if empty"
+                    value={editedSettings.s3_inbound_bucket || ""}
+                    onChange={e => setEditedSettings({...editedSettings, s3_inbound_bucket: e.target.value})}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-sns-topic" className="setting-label">SNS Inbound Topic ARN (Override)</label>
+                  <div className="setting-desc">The ARN of the SNS topic receiving SES inbound notifications</div>
+                  <div className="setting-updated">Last updated: {settingsData.sns_inbound_topic_arn?.updated_at ? new Date(settingsData.sns_inbound_topic_arn.updated_at).toLocaleString() : "Never"}</div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <input
+                    id="setting-sns-topic"
+                    className="input input-mono"
+                    type="text"
+                    placeholder="Fallback to ENV if empty"
+                    value={editedSettings.sns_inbound_topic_arn || ""}
+                    onChange={e => setEditedSettings({...editedSettings, sns_inbound_topic_arn: e.target.value})}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+              </div>
+
             </div>
             
             <div style={{ marginTop: 32, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.05)", display: "flex", justifyContent: "flex-end", gap: 12 }}>
@@ -463,6 +564,7 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
               </button>
             </div>
           </div>
+          )}
         </div>
       )}
 

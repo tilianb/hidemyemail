@@ -3,6 +3,7 @@ import * as q from "../db/queries";
 import { streamToBytes, toBase64 } from "../lib/bytes";
 import { parseMime, setHeader, removeHeaders, getHeader, serializeMime } from "../lib/mime";
 import { sendRaw, SesTransientError } from "../lib/ses";
+import { getEnvWithOverride } from "../lib/settings";
 
 type SesSend = typeof sendRaw;
 
@@ -64,8 +65,11 @@ export async function handleReply(
 
   const rawBase64 = toBase64(serializeMime(mime));
   try {
+    const sesAccessKeyId = await getEnvWithOverride(db, env, "ses_access_key_id");
+    const sesSecretAccessKey = await getEnvWithOverride(db, env, "ses_secret_access_key");
+    const sesRegion = await getEnvWithOverride(db, env, "ses_region");
     await ses(
-      { accessKeyId: env.SES_ACCESS_KEY_ID, secretAccessKey: env.SES_SECRET_ACCESS_KEY, region: env.SES_REGION },
+      { accessKeyId: sesAccessKeyId, secretAccessKey: sesSecretAccessKey, region: sesRegion },
       { from: alias.full_address, to: parsed.externalSender, rawBase64 }
     );
   } catch (err) {

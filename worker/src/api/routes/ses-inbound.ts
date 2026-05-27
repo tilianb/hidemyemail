@@ -3,6 +3,7 @@ import type { AppEnv } from "../app";
 import { routeEmail } from "../../email/router";
 import { fetchS3Object } from "../../lib/s3";
 import { timingSafeEqual } from "../../lib/auth";
+import { getEnvWithOverride } from "../../lib/settings";
 
 export function sesInboundRoutes() {
   const r = new Hono<AppEnv>();
@@ -13,13 +14,15 @@ export function sesInboundRoutes() {
 
     // Webhook authentication — SNS_SECRET must be set
     const secret = c.req.header("x-webhook-secret") || c.req.query("secret") || "";
-    if (!c.env.SNS_SECRET || !timingSafeEqual(secret, c.env.SNS_SECRET)) {
+    const snsSecret = await getEnvWithOverride(c.env.DB, c.env, "sns_secret");
+    if (!snsSecret || !timingSafeEqual(secret, snsSecret)) {
       return c.json({ error: "unauthorized" }, 401);
     }
 
     // Guard: only accept the configured inbound SNS topic(s)
     // We allow passing an additional allowed_topic via query string to make branch preview testing easier.
-    const allowedTopics = [c.env.SNS_INBOUND_TOPIC_ARN, c.req.query("allowed_topic")].filter(Boolean);
+    const snsInboundTopic = await getEnvWithOverride(c.env.DB, c.env, "sns_inbound_topic_arn");
+    const allowedTopics = [snsInboundTopic, c.req.query("allowed_topic")].filter(Boolean);
     if (allowedTopics.length > 0 && !allowedTopics.includes(body.TopicArn)) {
       return c.json({ error: "forbidden topic" }, 403);
     }
@@ -69,15 +72,20 @@ export function sesInboundRoutes() {
     };
 
     // Fetch full raw MIME from S3 (supports emails of any size, no SNS 256KB truncation risk)
+    const sesAccessKeyId = await getEnvWithOverride(c.env.DB, c.env, "ses_access_key_id");
+    const sesSecretAccessKey = await getEnvWithOverride(c.env.DB, c.env, "ses_secret_access_key");
+    const sesRegion = await getEnvWithOverride(c.env.DB, c.env, "ses_region");
+    const s3InboundBucket = await getEnvWithOverride(c.env.DB, c.env, "s3_inbound_bucket");
+    
     const creds = {
-      accessKeyId: c.env.SES_ACCESS_KEY_ID,
-      secretAccessKey: c.env.SES_SECRET_ACCESS_KEY,
-      region: c.env.SES_REGION,
+      accessKeyId: sesAccessKeyId,
+      secretAccessKey: sesSecretAccessKey,
+      region: sesRegion,
     };
     const s3Fetch = (c.env as any).__s3Fetch ?? fetchS3Object;
     let raw: Uint8Array;
     try {
-      raw = await s3Fetch(creds, c.env.S3_INBOUND_BUCKET, messageId);
+      raw = await s3Fetch(creds, s3InboundBucket, messageId);
     } catch (err) {
       console.error("S3 fetch failed for", messageId, String(err));
       return c.json({ error: "s3 unavailable" }, 500); // 5xx → SNS retries for up to 23 days

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import { timingSafeEqual } from "../../lib/auth";
+import { getEnvWithOverride } from "../../lib/settings";
 
 // SNS posts JSON (often Content-Type text/plain). We validate TopicArn and (prod TODO)
 // the SNS signature. SubscriptionConfirmation logs SubscribeURL for one-time manual confirm.
@@ -12,15 +13,17 @@ export function sesWebhookRoutes() {
 
     // Webhook authentication — SNS_SECRET must be set
     const secret = c.req.header("x-webhook-secret") || c.req.query("secret") || "";
-    if (!c.env.SNS_SECRET || !timingSafeEqual(secret, c.env.SNS_SECRET)) {
+    const snsSecret = await getEnvWithOverride(c.env.DB, c.env, "sns_secret");
+    if (!snsSecret || !timingSafeEqual(secret, snsSecret)) {
       return c.json({ error: "unauthorized" }, 401);
     }
 
     // Enforce SNS_ALLOWED_TOPIC_ARN in production
-    if (c.env.ENVIRONMENT === "production" && !c.env.SNS_ALLOWED_TOPIC_ARN) {
+    const snsAllowedTopicArn = await getEnvWithOverride(c.env.DB, c.env, "sns_allowed_topic_arn");
+    if (c.env.ENVIRONMENT === "production" && !snsAllowedTopicArn) {
       return c.json({ error: "missing SNS_ALLOWED_TOPIC_ARN configuration in production" }, 500);
     }
-    if (c.env.SNS_ALLOWED_TOPIC_ARN && body.TopicArn !== c.env.SNS_ALLOWED_TOPIC_ARN) {
+    if (snsAllowedTopicArn && body.TopicArn !== snsAllowedTopicArn) {
       return c.json({ error: "forbidden topic" }, 403);
     }
 

@@ -7,6 +7,13 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   catch_all_auto_create: "true",
   registration_enabled: "true",
   cors_allowed_domains: "hidemyemail.dev,localhost:5173,pages.dev,workers.dev",
+  ses_region: "",
+  ses_access_key_id: "",
+  ses_secret_access_key: "",
+  s3_inbound_bucket: "",
+  sns_secret: "",
+  sns_allowed_topic_arn: "",
+  sns_inbound_topic_arn: "",
 };
 
 // Kept for backward-compat with any imports (tests, etc.)

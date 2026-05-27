@@ -27,6 +27,18 @@ export async function getBoolSetting(db: D1Database, key: string): Promise<boole
   return val === "true" || val === "1";
 }
 
+/** 
+ * Resolve a sensitive value, preferring DB override, then falling back to environment variable.
+ * Used for AWS settings that might be dynamically updated from the UI.
+ */
+export async function getEnvWithOverride(db: D1Database, env: any, key: string): Promise<string> {
+  // Try DB first
+  const dbVal = await getSetting(db, key.toLowerCase());
+  if (dbVal) return dbVal;
+  // Fall back to environment variable
+  return (env[key.toUpperCase()] as string) || "";
+}
+
 /** Read all settings as a key-value map. */
 export async function getAllSettings(db: D1Database): Promise<Record<string, { value: string; updated_at: number }>> {
   const result: Record<string, { value: string; updated_at: number }> = {};
