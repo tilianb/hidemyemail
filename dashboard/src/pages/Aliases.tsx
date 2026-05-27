@@ -108,10 +108,10 @@ export function Aliases() {
     <div>
       {/* Page header */}
       <div className="page-header">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
           <h1 className="page-title">Aliases</h1>
           {!loading && (
-            <span className="badge badge-muted" style={{ position: "relative", top: -2 }}>
+            <span className="badge badge-muted">
               {rows.length}
             </span>
           )}
@@ -192,11 +192,9 @@ export function Aliases() {
                 disabled={submitting}
               />
             </div>
-            <div style={{ paddingTop: 20 }}>
-              <button className="btn btn-primary" type="submit" disabled={submitting || (!isGlobal && !form.local_part)}>
-                {submitting ? "Creating…" : "Create"}
-              </button>
-            </div>
+            <button className="btn btn-primary" type="submit" disabled={submitting || (!isGlobal && !form.local_part)} style={{ alignSelf: "flex-end" }}>
+              {submitting ? "Creating…" : "Create"}
+            </button>
           </div>
           {destinations.length === 0 && (
             <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: 8 }}>

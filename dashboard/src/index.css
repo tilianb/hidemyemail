@@ -133,6 +133,7 @@ body {
 .btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: var(--space-2);
   padding: 7px 14px;
   border-radius: var(--radius-sm);
@@ -141,6 +142,7 @@ body {
   color: var(--text-primary);
   font-family: var(--font-display);
   font-size: 0.8rem;
+  line-height: 1;
   font-weight: 500;
   letter-spacing: 0.02em;
   cursor: pointer;
@@ -238,7 +240,9 @@ body {
   color: var(--text-primary);
   font-family: var(--font-body);
   font-size: 0.9rem;
-  padding: 8px 12px;
+  line-height: 1.2;
+  height: 36px;
+  padding: 0 12px;
   width: 100%;
   transition: border-color var(--t-fast), box-shadow var(--t-fast);
   outline: none;
@@ -831,6 +835,7 @@ table.dossier tbody td {
 }
 .dialog-actions {
   display: flex;
+  align-items: center;
   gap: var(--space-2);
   justify-content: flex-end;
 }
@@ -869,6 +874,7 @@ table.dossier tbody td {
 }
 .form-strip .field { min-width: 140px; }
 .form-strip .field.grow { flex: 1; min-width: 160px; }
+.form-strip > .btn { margin-bottom: 4px; }
 
 /* ─── Reply hint callout ─────────────────────────────────────────────────── */
 .callout {
