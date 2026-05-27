@@ -62,10 +62,10 @@ export function Destinations() {
   return (
     <div>
       <div className="page-header">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
           <h1 className="page-title">Destinations</h1>
           {!loading && (
-            <span className="badge badge-muted" style={{ position: "relative", top: -2 }}>
+            <span className="badge badge-muted">
               {rows.length}
             </span>
           )}
@@ -94,11 +94,9 @@ export function Destinations() {
                 disabled={submitting}
               />
             </div>
-            <div style={{ paddingTop: 20 }}>
-              <button className="btn btn-primary" type="submit" disabled={submitting}>
-                {submitting ? "Sending..." : "Send Verification"}
-              </button>
-            </div>
+            <button className="btn btn-primary" type="submit" disabled={submitting} style={{ alignSelf: "flex-end" }}>
+              {submitting ? "Sending..." : "Send Verification"}
+            </button>
           </div>
         </form>
       </div>
