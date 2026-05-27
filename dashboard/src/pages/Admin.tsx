@@ -292,7 +292,7 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
           <table className="dossier dossier-stack">
             <thead>
                 <tr>
-                  <th style={{ width: 80 }}>User ID</th>
+                  <th style={{ width: 120 }}>User ID</th>
                   <th>Name</th>
                   <th>Joined</th>
                   <th>Aliases</th>
@@ -308,7 +308,10 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
                 {users.map(u => (
                   <tr key={u.id}>
                     <td data-label="ID" className="font-mono text-muted">
-                      #{u.id} {u.id === 1 && <span className="badge badge-amber" style={{marginLeft: 8}}>Admin</span>}
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span>#{u.id}</span>
+                        {u.id === 1 && <span className="badge badge-amber">Admin</span>}
+                      </div>
                     </td>
                     <td data-label="Name">
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
