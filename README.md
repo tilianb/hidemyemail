@@ -12,6 +12,32 @@ A self-hosted, serverless email-alias service for your own domains. HideMyEmail 
 - Add one-click `List-Unsubscribe` headers so mail clients can disable aliases.
 - Support multiple users, verified destinations, TOTP MFA, passkeys, and admin controls.
 
+## Self-host in 60 seconds
+
+Pre-built multi-arch images live on GHCR. You still need AWS SES for the mail
+pipeline (no mail server included) — everything else runs locally.
+
+```bash
+git clone https://github.com/tilianb/hidemyemail.git
+cd hidemyemail/docker
+cp .env.example .env
+
+# Generate the four secrets and paste them into .env
+echo "SESSION_SECRET=$(openssl rand -hex 32)"
+echo "DESTINATION_ENCRYPTION_KEY=$(openssl rand -hex 32)"
+node ../worker/scripts/hash-password.mjs '<choose-a-password>'  # prints SALT + HASH
+
+# Add your AWS SES creds (SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY, etc.)
+$EDITOR .env
+
+docker compose pull
+docker compose up -d
+```
+
+Open <http://localhost:8787>. Put Caddy/nginx/Cloudflare Tunnel in front for
+TLS. See [`docker/README.md`](docker/README.md) for AWS setup, upgrades,
+volumes, and troubleshooting.
+
 ## Architecture
 
 ```diagram
