@@ -30,12 +30,28 @@ export function settingsRoutes() {
     const { generateTOTPSecret, makeTOTPUri } = await import("../../lib/totp");
     const { encryptDestination } = await import("../../lib/crypto");
 
+    // SECURITY: refuse to overwrite an already-enabled MFA enrolment. /mfa/disable
+    // requires a fresh TOTP/backup code; allowing /mfa/setup to silently flip
+    // totp_enabled back to 0 (and wipe backup codes) would bypass that gate and
+    // let an attacker with a stolen session pivot the account onto their own TOTP.
+    const current = await c.env.DB.prepare(
+      "SELECT totp_enabled FROM mfa WHERE user_id = ?"
+    ).bind(userId).first<{ totp_enabled: number }>().catch((err: unknown) => {
+      if (err instanceof Error && err.message.includes("no such table")) return null;
+      throw err;
+    });
+    if (current?.totp_enabled === 1) {
+      return c.json({ error: "MFA already enabled — disable it first to re-enroll" }, 409);
+    }
+
     const secret = generateTOTPSecret();
     const encryptedSecret = await encryptDestination(secret, c.env.DESTINATION_ENCRYPTION_KEY);
 
-    // Store pending (not yet enabled) secret
+    // Store pending (not yet enabled) secret. Conditional ON CONFLICT keeps an
+    // enabled row immutable as a second line of defence against races between
+    // the check above and the write.
     await c.env.DB.prepare(
-      "INSERT INTO mfa (user_id, totp_secret, totp_enabled) VALUES (?, ?, 0) ON CONFLICT(user_id) DO UPDATE SET totp_secret = excluded.totp_secret, totp_enabled = 0, totp_backup_codes = NULL"
+      "INSERT INTO mfa (user_id, totp_secret, totp_enabled) VALUES (?, ?, 0) ON CONFLICT(user_id) DO UPDATE SET totp_secret = excluded.totp_secret, totp_enabled = 0, totp_backup_codes = NULL WHERE totp_enabled = 0"
     ).bind(userId, encryptedSecret).run();
 
     const user = await c.env.DB.prepare("SELECT name FROM users WHERE id = ?").bind(userId).first<{ name: string | null }>();

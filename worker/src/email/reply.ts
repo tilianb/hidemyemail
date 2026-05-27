@@ -6,6 +6,15 @@ import { sendRaw, SesTransientError } from "../lib/ses";
 
 type SesSend = typeof sendRaw;
 
+// Pull the bare "user@host" out of an RFC 5322 From header. Handles "Name <a@b>",
+// '"Quoted Name" <a@b>', and bare "a@b". Returns "" if no '@' is present.
+function extractEmailAddress(value: string): string {
+  const angle = value.match(/<\s*([^>\s]+@[^>\s]+)\s*>/);
+  if (angle) return angle[1]!.trim();
+  const bare = value.match(/[^\s<>"',;]+@[^\s<>"',;]+/);
+  return bare ? bare[0].trim() : "";
+}
+
 export async function handleReply(
   message: ForwardableEmailMessage, env: Env, parsed: ParsedReverse, auth?: ReplyAuth,
 ): Promise<void> {
@@ -25,22 +34,29 @@ export async function handleReply(
   }
 
   // SECURITY: reverse addresses are self-describing and therefore guessable (no random
-  // token). The relay gate is: (1) envelope sender ∈ owner destinations, AND (2) SES
-  // SPF/DMARC verdict PASS so that owner address cannot be spoofed. Fail closed.
+  // token). The relay gate must bind the *authenticated* principal to a verified owner
+  // destination. Each SES verdict authenticates a different RFC5322 field:
+  //   - spfVerdict PASS ⇒ envelope MAIL FROM (message.from) is authentic.
+  //   - dmarcVerdict PASS ⇒ header-From (after alignment) is authentic.
+  // Accepting `spf || dmarc` while only matching the envelope lets an attacker spoof
+  // MAIL FROM=owner and DKIM-sign with their own header-From to slip past. Match each
+  // signal against the principal it actually authenticates. Fail closed.
+  const raw = await streamToBytes(message.raw);
+  let mime = parseMime(raw);
+  const subject = getHeader(mime, "Subject") ?? "";
+  const headerFrom = extractEmailAddress(getHeader(mime, "From") ?? "").toLowerCase();
+  const envelopeFrom = message.from.toLowerCase();
   const owners = await q.ownerDestinations(db, alias.user_id, env.DESTINATION_ENCRYPTION_KEY);
-  const fromOwner = owners.has(message.from.toLowerCase());
-  const authOk = auth?.spf === "PASS" || auth?.dmarc === "PASS";
-  if (!fromOwner || !authOk) {
+  const spfOwner = auth?.spf === "PASS" && owners.has(envelopeFrom);
+  const dmarcOwner = auth?.dmarc === "PASS" && !!headerFrom && owners.has(headerFrom);
+  if (!spfOwner && !dmarcOwner) {
     await q.insertEvent(db, {
       alias_id: alias.id, type: "reject", external_sender: parsed.externalSender,
-      detail: fromOwner ? "spf" : "not_owner", ts: now,
+      detail: owners.has(envelopeFrom) || (headerFrom && owners.has(headerFrom)) ? "auth" : "not_owner", ts: now,
     });
     return;
   }
 
-  const raw = await streamToBytes(message.raw);
-  let mime = parseMime(raw);
-  const subject = getHeader(mime, "Subject") ?? "";
   mime = removeHeaders(mime, ["From", "Sender", "Reply-To", "Return-Path", "DKIM-Signature", "Message-ID", "X-Reinjected", "Received"]);
   mime = setHeader(mime, "From", alias.full_address);
   mime = setHeader(mime, "To", parsed.externalSender);

@@ -123,6 +123,50 @@ test("P2: recovery /recover/verify works for active users with valid token+code"
   expect(mfaAfter?.totp_enabled).toBe(0);
 });
 
+test("P3: /api/settings/mfa/setup refuses to overwrite enabled MFA (re-enrol bypass)", async () => {
+  const app = createApp();
+  const userId = await makeUser(1);
+
+  // User has MFA enabled.
+  await (env.DB as D1Database).prepare(
+    "INSERT INTO mfa (user_id, totp_secret, totp_enabled, totp_backup_codes) VALUES (?, 'oldsec', 1, '[\"hashedA\",\"hashedB\"]')"
+  ).bind(userId).run();
+
+  const cookie = "__Host-session=" + (await signSession("sek", userId, 3600));
+  const res = await app.request("/api/settings/mfa/setup", {
+    method: "POST",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: "{}"
+  }, testEnv);
+
+  expect(res.status).toBe(409);
+
+  // Secret and backup codes must be untouched — bypass would have wiped them.
+  const after = await (env.DB as D1Database).prepare(
+    "SELECT totp_secret, totp_enabled, totp_backup_codes FROM mfa WHERE user_id = ?"
+  ).bind(userId).first<{ totp_secret: string; totp_enabled: number; totp_backup_codes: string }>();
+  expect(after?.totp_secret).toBe("oldsec");
+  expect(after?.totp_enabled).toBe(1);
+  expect(after?.totp_backup_codes).toBe('["hashedA","hashedB"]');
+});
+
+test("P3: /api/settings/mfa/setup still works when MFA not yet enabled", async () => {
+  const app = createApp();
+  const userId = await makeUser(1);
+
+  const cookie = "__Host-session=" + (await signSession("sek", userId, 3600));
+  const res = await app.request("/api/settings/mfa/setup", {
+    method: "POST",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: "{}"
+  }, testEnv);
+
+  expect(res.status).toBe(200);
+  const body = await res.json<{ secret: string; uri: string }>();
+  expect(typeof body.secret).toBe("string");
+  expect(body.uri).toContain("otpauth://");
+});
+
 test("P2: recovery /recover/send-code rejects inactive users", async () => {
   const app = createApp();
   const userId = await makeUser(0);
