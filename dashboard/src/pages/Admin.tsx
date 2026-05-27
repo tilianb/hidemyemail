@@ -330,7 +330,6 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
                 <div className="setting-info">
                   <label htmlFor="setting-rate-alias" className="setting-label">Per-Alias Rate Limit (emails/hr)</label>
                   <div className="setting-desc">Max forwards per alias per hour</div>
-                  <div className="setting-updated">Last updated: {settingsData.rate_limit_per_alias?.updated_at ? new Date(settingsData.rate_limit_per_alias.updated_at).toLocaleString() : "Never"}</div>
                 </div>
                 <div className="setting-control">
                   <input
@@ -348,7 +347,6 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
                 <div className="setting-info">
                   <label htmlFor="setting-rate-global" className="setting-label">Global Rate Limit (emails/hr)</label>
                   <div className="setting-desc">Max total forwards per hour across all aliases</div>
-                  <div className="setting-updated">Last updated: {settingsData.rate_limit_global?.updated_at ? new Date(settingsData.rate_limit_global.updated_at).toLocaleString() : "Never"}</div>
                 </div>
                 <div className="setting-control">
                   <input
@@ -366,7 +364,6 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
                 <div className="setting-info">
                   <label htmlFor="setting-max-bytes" className="setting-label">Max Inbound Email Size</label>
                   <div className="setting-desc">Maximum email size accepted (in MB)</div>
-                  <div className="setting-updated">Last updated: {settingsData.max_inbound_bytes?.updated_at ? new Date(settingsData.max_inbound_bytes.updated_at).toLocaleString() : "Never"}</div>
                 </div>
                 <div className="setting-control">
                   <input
@@ -391,7 +388,6 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
                 <div className="setting-info">
                   <div className="setting-label">Catch-All Auto-Create</div>
                   <div className="setting-desc">Automatically create aliases when receiving emails to unknown addresses</div>
-                  <div className="setting-updated">Last updated: {settingsData.catch_all_auto_create?.updated_at ? new Date(settingsData.catch_all_auto_create.updated_at).toLocaleString() : "Never"}</div>
                 </div>
                 <div className="setting-control">
                   <label className="switch">
@@ -409,7 +405,6 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
                 <div className="setting-info">
                   <div className="setting-label">User Registration</div>
                   <div className="setting-desc">Allow new users to register accounts</div>
-                  <div className="setting-updated">Last updated: {settingsData.registration_enabled?.updated_at ? new Date(settingsData.registration_enabled.updated_at).toLocaleString() : "Never"}</div>
                 </div>
                 <div className="setting-control">
                   <label className="switch">
@@ -427,7 +422,6 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
                 <div className="setting-info">
                   <label htmlFor="setting-cors" className="setting-label">CORS Allowed Domains</label>
                   <div className="setting-desc">Comma-separated list of domains allowed to access the API</div>
-                  <div className="setting-updated">Last updated: {settingsData.cors_allowed_domains?.updated_at ? new Date(settingsData.cors_allowed_domains.updated_at).toLocaleString() : "Never"}</div>
                 </div>
                 <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
                   <input
@@ -446,7 +440,6 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
                 <div className="setting-info">
                   <label htmlFor="setting-ses-region" className="setting-label">SES Region (Override)</label>
                   <div className="setting-desc">e.g. us-east-1</div>
-                  <div className="setting-updated">Last updated: {settingsData.ses_region?.updated_at ? new Date(settingsData.ses_region.updated_at).toLocaleString() : "Never"}</div>
                 </div>
                 <div className="setting-control">
                   <input
@@ -464,7 +457,6 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
                 <div className="setting-info">
                   <label htmlFor="setting-ses-key" className="setting-label">SES Access Key ID (Override)</label>
                   <div className="setting-desc">AWS access key with SES permissions</div>
-                  <div className="setting-updated">Last updated: {settingsData.ses_access_key_id?.updated_at ? new Date(settingsData.ses_access_key_id.updated_at).toLocaleString() : "Never"}</div>
                 </div>
                 <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
                   <input
@@ -483,7 +475,6 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
                 <div className="setting-info">
                   <label htmlFor="setting-ses-secret" className="setting-label">SES Secret Access Key (Override)</label>
                   <div className="setting-desc">AWS secret key with SES permissions</div>
-                  <div className="setting-updated">Last updated: {settingsData.ses_secret_access_key?.updated_at ? new Date(settingsData.ses_secret_access_key.updated_at).toLocaleString() : "Never"}</div>
                 </div>
                 <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
                   <input
@@ -502,7 +493,6 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
                 <div className="setting-info">
                   <label htmlFor="setting-s3-bucket" className="setting-label">S3 Inbound Bucket (Override)</label>
                   <div className="setting-desc">Bucket name where SES stores inbound emails</div>
-                  <div className="setting-updated">Last updated: {settingsData.s3_inbound_bucket?.updated_at ? new Date(settingsData.s3_inbound_bucket.updated_at).toLocaleString() : "Never"}</div>
                 </div>
                 <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
                   <input
@@ -521,7 +511,6 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
                 <div className="setting-info">
                   <label htmlFor="setting-sns-topic" className="setting-label">SNS Inbound Topic ARN (Override)</label>
                   <div className="setting-desc">The ARN of the SNS topic receiving SES inbound notifications</div>
-                  <div className="setting-updated">Last updated: {settingsData.sns_inbound_topic_arn?.updated_at ? new Date(settingsData.sns_inbound_topic_arn.updated_at).toLocaleString() : "Never"}</div>
                 </div>
                 <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
                   <input
