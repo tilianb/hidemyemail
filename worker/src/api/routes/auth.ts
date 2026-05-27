@@ -345,7 +345,10 @@ export function authRoutes() {
 
     await db.prepare(
       "UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL WHERE user_id = ?"
-    ).bind(user.id).run();
+    ).bind(user.id).run().catch((err: unknown) => {
+      if (err instanceof Error && err.message.includes("no such table")) return;
+      throw err;
+    });
 
     // Log them in immediately
     const sessionId = await signSession(c.env.SESSION_SECRET, user.id, SESSION_TTL);
