@@ -17,7 +17,7 @@ export function Recover() {
 
   if (!token) {
     return (
-      <div className="card" style={{ maxWidth: 440, margin: "10vh auto", textAlign: "center", padding: "40px 32px" }}>
+      <div className="card recovery-card">
         <div className="logo-container icon-error">
           <svg viewBox="0 0 24 24">
             <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
@@ -25,9 +25,9 @@ export function Recover() {
             <line x1="12" y1="17" x2="12.01" y2="17"></line>
           </svg>
         </div>
-        <h1 style={{ marginBottom: 8 }}>Invalid Link</h1>
-        <p className="text-secondary" style={{ marginBottom: 24, fontSize: "0.9rem" }}>This recovery link is missing, malformed, or expired.</p>
-        <button className="btn btn-secondary" onClick={() => window.location.href = "/"} style={{ width: "100%", justifyContent: "center", padding: "10px 14px", fontSize: "0.9rem", fontWeight: 600 }}>
+        <h1 className="recovery-title">Invalid Link</h1>
+        <p className="recovery-copy">This recovery link is missing, malformed, or expired.</p>
+        <button className="btn btn-soft recovery-button" onClick={() => window.location.href = "/"}>
           Go to Dashboard
         </button>
       </div>
@@ -64,7 +64,7 @@ export function Recover() {
   }
 
   return (
-    <div className="card" style={{ maxWidth: 440, margin: "10vh auto", textAlign: "center", padding: "40px 32px" }}>
+    <div className="card recovery-card">
       {step === 1 && (
         <>
           <div className="logo-container icon-accent">
@@ -73,12 +73,12 @@ export function Recover() {
               <path d="M22 6l-10 7L2 6"></path>
             </svg>
           </div>
-          <h1 style={{ marginBottom: 8 }}>Account <span className="brand-redact">Recovery</span></h1>
-          <p className="text-secondary" style={{ marginBottom: 32, fontSize: "0.9rem" }}>
+          <h1 className="recovery-title">Account <span className="brand-redact">Recovery</span></h1>
+          <p className="recovery-copy recovery-copy-loose">
             Click the button below to send a 6-digit authentication code to your default destination email address.
           </p>
           <form onSubmit={handleSendCode}>
-            <button className="btn btn-primary" type="submit" disabled={loading} style={{ width: "100%", justifyContent: "center", padding: "11px 20px", fontSize: "0.9rem", fontWeight: 600 }}>
+            <button className="btn btn-primary recovery-button" type="submit" disabled={loading}>
               {loading ? "Sending..." : "Send Auth Code"}
             </button>
           </form>
@@ -93,15 +93,14 @@ export function Recover() {
               <path d="M22 6l-10 7L2 6"></path>
             </svg>
           </div>
-          <h1 style={{ marginBottom: 8 }}>Authentication <span className="brand-redact">Code</span></h1>
-          <p className="text-secondary" style={{ marginBottom: 24, fontSize: "0.9rem" }}>
+          <h1 className="recovery-title">Authentication <span className="brand-redact">Code</span></h1>
+          <p className="recovery-copy">
             Enter the 6-digit authentication code sent to your email to verify your identity.
           </p>
-          <form onSubmit={handleVerify} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <form onSubmit={handleVerify} className="recovery-form">
             <div className="field">
               <input
-                className="input input-mono"
-                style={{ textAlign: "center", fontSize: "1.4rem", letterSpacing: "0.3em", padding: "12px 16px" }}
+                className="input input-mono recovery-code-input"
                 type="text"
                 maxLength={6}
                 value={code}
@@ -112,7 +111,7 @@ export function Recover() {
                 placeholder="123456"
               />
             </div>
-            <button className="btn btn-primary" type="submit" disabled={loading || code.length < 6} style={{ width: "100%", justifyContent: "center", padding: "11px 20px", fontSize: "0.9rem", fontWeight: 600, marginTop: 8 }}>
+            <button className="btn btn-primary recovery-button" type="submit" disabled={loading || code.length < 6}>
               {loading ? "Verifying..." : "Verify Code"}
             </button>
           </form>
@@ -126,17 +125,17 @@ export function Recover() {
               <polyline points="20 6 9 17 4 12"></polyline>
             </svg>
           </div>
-          <h1 style={{ marginBottom: 8 }}>Recovery Successful</h1>
-          <p className="text-secondary" style={{ marginBottom: 24, fontSize: "0.9rem" }}>
+          <h1 className="recovery-title">Recovery Successful</h1>
+          <p className="recovery-copy">
             A new master passphrase has been securely generated. 
-            <strong style={{ color: "var(--text-primary)" }}> You must save this in your password manager immediately.</strong>
+            <strong className="text-primary"> You must save this in your password manager immediately.</strong>
           </p>
-          <div className="email-badge" style={{ fontSize: "1.2rem", padding: "12px 20px", letterSpacing: "0.05em" }}>
+          <div className="email-badge recovery-passphrase">
             {newPassphrase}
           </div>
-          <div style={{ display: "flex", gap: 12 }}>
+          <div className="recovery-actions">
             <CopyButton text={newPassphrase} />
-            <button className="btn btn-primary" onClick={() => window.location.href = "/"} style={{ flex: 1, justifyContent: "center", padding: "11px 20px", fontSize: "0.9rem", fontWeight: 600 }}>
+            <button className="btn btn-primary recovery-button flex-1" onClick={() => window.location.href = "/"}>
               Go to Dashboard
             </button>
           </div>

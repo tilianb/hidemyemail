@@ -14,6 +14,7 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   sns_allowed_topic_arn: "",
   sns_inbound_topic_arn: "",
   forwarded_from_format: "name_address_parens",
+  main_global_domain: "hidemyemail.dev",
 };
 
 // Kept for backward-compat with any imports (tests, etc.)

@@ -2,12 +2,16 @@ import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import * as q from "../../db/queries";
 import { encryptDestination, decryptDestination, hashDestination } from "../../lib/crypto";
+import { getMainGlobalDomain } from "../../lib/settings";
 
 export function domainRoutes() {
   const r = new Hono<AppEnv>();
   r.get("/domains", async (c) => {
     const userId = c.get("userId");
-    const rows = await c.env.DB.prepare("SELECT * FROM domains WHERE is_global = 1 OR user_id = ? ORDER BY domain").bind(userId).all<any>();
+    const sql = userId === 1
+      ? "SELECT * FROM domains WHERE is_global = 1 OR user_id = ? ORDER BY domain"
+      : "SELECT * FROM domains WHERE (is_global = 1 AND active = 1 AND verified_at IS NOT NULL) OR user_id = ? ORDER BY domain";
+    const rows = await c.env.DB.prepare(sql).bind(userId).all<any>();
     
     try {
       const results = [];
@@ -32,7 +36,8 @@ export function domainRoutes() {
     const prefix = domain.toLowerCase().replace(/[^a-z0-9-]/g, "");
     if (!prefix || prefix.length > 63) return c.json({ error: "invalid prefix" }, 400);
 
-    const fullDomain = `${prefix}.hidemyemail.dev`;
+    const mainGlobalDomain = await getMainGlobalDomain(c.env.DB, c.env);
+    const fullDomain = `${prefix}.${mainGlobalDomain}`;
 
     const count = await c.env.DB.prepare("SELECT COUNT(*) as count FROM domains WHERE user_id = ? AND is_global = 0").bind(userId).first<{ count: number }>();
     if (count && count.count >= 5) {
@@ -66,10 +71,14 @@ export function domainRoutes() {
 
     // Scope precheck by user_id for non-admins to prevent IDOR leak of other users' domain IDs
     const domainRow = userId === 1
-      ? await c.env.DB.prepare("SELECT is_global FROM domains WHERE id = ?").bind(id).first<{ is_global: number }>()
-      : await c.env.DB.prepare("SELECT is_global FROM domains WHERE id = ? AND user_id = ?").bind(id, userId).first<{ is_global: number }>();
+      ? await c.env.DB.prepare("SELECT is_global, domain FROM domains WHERE id = ?").bind(id).first<{ is_global: number; domain: string }>()
+      : await c.env.DB.prepare("SELECT is_global, domain FROM domains WHERE id = ? AND user_id = ?").bind(id, userId).first<{ is_global: number; domain: string }>();
     if (!domainRow) return c.json({ error: "not found" }, 404);
     if (domainRow.is_global && userId !== 1) return c.json({ error: "cannot delete global domain" }, 400);
+    if (domainRow.is_global && userId === 1) {
+      const mainGlobalDomain = await getMainGlobalDomain(c.env.DB, c.env);
+      if (domainRow.domain === mainGlobalDomain) return c.json({ error: "cannot delete main global domain" }, 400);
+    }
 
     // Get all alias IDs belonging to this user under this domain for cleanup
     const aliasRows = userId === 1 

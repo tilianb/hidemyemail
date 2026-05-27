@@ -7,7 +7,7 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-function buildHtmlWrapper(title: string, heading: string, bodyText: string, actionHtml: string, fallbackUrl?: string): string {
+function buildHtmlWrapper(title: string, heading: string, bodyText: string, actionHtml: string, fallbackUrl?: string, mainGlobalDomain: string = "hidemyemail.dev"): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -55,7 +55,7 @@ function buildHtmlWrapper(title: string, heading: string, bodyText: string, acti
                 This link was requested for HideMyEmail. If you did not request this, you can safely ignore this email.
               </p>
               <p style="margin:0;font-size:11px;color:#55555f;font-family:'Inter',sans-serif;">
-                &copy; ${new Date().getFullYear()} HideMyEmail &middot; <a href="https://hidemyemail.dev" style="color:#ffb300;text-decoration:none;font-weight:500;">hidemyemail.dev</a>
+                &copy; ${new Date().getFullYear()} HideMyEmail &middot; <a href="https://${escapeHtml(mainGlobalDomain)}" style="color:#ffb300;text-decoration:none;font-weight:500;">${escapeHtml(mainGlobalDomain)}</a>
               </p>
             </td>
           </tr>
@@ -67,7 +67,7 @@ function buildHtmlWrapper(title: string, heading: string, bodyText: string, acti
 </html>`;
 }
 
-export function buildRecoveryEmail(to: string, url: string): string {
+export function buildRecoveryEmail(to: string, url: string, mainGlobalDomain: string = "hidemyemail.dev"): string {
   const boundary = `----=_Part_${Date.now().toString(36)}`;
   
   const textBody = `HideMyEmail Account Recovery
@@ -80,7 +80,7 @@ ${url}
 
 This link expires in 24 hours.
 
-— HideMyEmail (https://hidemyemail.dev)`;
+— HideMyEmail (https://${mainGlobalDomain})`;
 
   const actionHtml = `
     <table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:0 auto 32px;width:100%;">
@@ -99,11 +99,12 @@ This link expires in 24 hours.
     `Account <span style="background:rgba(255,179,0,0.15);color:#ffb300;border-radius:4px;padding:0 5px;margin:0 1px;border:1px solid rgba(255,179,0,0.2);font-weight:700;display:inline-block;">Recovery</span>`,
     "You have requested a recovery link for your HideMyEmail account. Click the button below to verify your identity and generate a new secure passphrase.",
     actionHtml,
-    url
+    url,
+    mainGlobalDomain
   );
 
   const msgLines = [
-    `From: HideMyEmail <noreply@hidemyemail.dev>`,
+    `From: HideMyEmail <noreply@${mainGlobalDomain}>`,
     `To: ${to}`,
     `Subject: Account Recovery Link`,
     `MIME-Version: 1.0`,
@@ -126,7 +127,7 @@ This link expires in 24 hours.
   return btoa(unescape(encodeURIComponent(msgLines.join("\r\n"))));
 }
 
-export function buildMfaEmail(to: string, code: string): string {
+export function buildMfaEmail(to: string, code: string, mainGlobalDomain: string = "hidemyemail.dev"): string {
   const boundary = `----=_Part_${Date.now().toString(36)}`;
   
   const textBody = `Your HideMyEmail Authentication Code
@@ -136,7 +137,7 @@ Your 6-digit authentication code is: ${code}
 
 Enter this code on the recovery page to complete the process. This code expires soon.
 
-— HideMyEmail (https://hidemyemail.dev)`;
+— HideMyEmail (https://${mainGlobalDomain})`;
 
   const actionHtml = `
     <div style="display:inline-block;background:#111114;border:1px dashed rgba(255,255,255,0.08);padding:12px 24px;border-radius:4px;font-family:'JetBrains Mono','Menlo',monospace;font-size:24px;font-weight:700;letter-spacing:0.2em;color:#e8e8ec;margin-bottom:32px;text-align:center;">
@@ -147,11 +148,13 @@ Enter this code on the recovery page to complete the process. This code expires 
     "Your Authentication Code",
     `Authentication <span style="background:rgba(255,179,0,0.15);color:#ffb300;border-radius:4px;padding:0 5px;margin:0 1px;border:1px solid rgba(255,179,0,0.2);font-weight:700;display:inline-block;">Code</span>`,
     "Enter this 6-digit code on the recovery page to complete the process. This code will expire soon.",
-    actionHtml
+    actionHtml,
+    undefined,
+    mainGlobalDomain
   );
 
   const msgLines = [
-    `From: HideMyEmail <noreply@hidemyemail.dev>`,
+    `From: HideMyEmail <noreply@${mainGlobalDomain}>`,
     `To: ${to}`,
     `Subject: Your Authentication Code`,
     `MIME-Version: 1.0`,
