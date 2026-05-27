@@ -9,5 +9,10 @@ dist/
 .DS_Store
 
 # AI assistant files
+CLAUDE.md
+.mcp.json*
+.mcp.json.map
 .claude/
 .antigravitycli/
+.playwright-mcp/
+.codebase-memory/

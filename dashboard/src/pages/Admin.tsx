@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type Domain } from "../api";
-import { useToast, TableSkeleton, EmptyState, ConfirmDialog, PromptDialog, ChoiceDialog } from "../ui";
+import { useToast, TableSkeleton, EmptyState, ConfirmDialog, PromptDialog, ChoiceDialog, CopyButton } from "../ui";
 import { Users, Trash2, Globe, Cloud, Edit3, Key, Server, Settings } from "lucide-react";
 
 const FORWARDED_FROM_FORMATS = [
@@ -14,6 +14,41 @@ const FORWARDED_FROM_FORMATS = [
   { value: "via_hidemyemail", label: "Name via HideMyEmail", example: '"Alice via HideMyEmail" <alias@domain>' },
 ];
 
+function verificationRecords(domain: Domain, sesRegion: string) {
+  return {
+    txtHost: `_hidemyemail.${domain.domain}`,
+    txtValue: `hidemyemail-verify=${domain.verification_token ?? ""}`,
+    mxHost: domain.domain,
+    mxValue: `inbound-smtp.${sesRegion}.amazonaws.com`,
+    spfHost: domain.domain,
+    spfValue: "v=spf1 include:amazonses.com ~all",
+  };
+}
+
+function DnsField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="dns-field">
+      <div className="dns-field-label">{label}</div>
+      <div className="dns-field-value">
+        <code className="input-mono">{value}</code>
+        <CopyButton text={value} />
+      </div>
+    </div>
+  );
+}
+
+function DnsRecordRow({ type, fields }: { type: string; fields: { label: string; value: string }[] }) {
+  return (
+    <div className="dns-record-row">
+      <div className="dns-record-type">
+        <span>Type</span>
+        <code className="input-mono">{type}</code>
+      </div>
+      {fields.map(field => <DnsField key={`${type}-${field.label}`} label={field.label} value={field.value} />)}
+    </div>
+  );
+}
+
 export function Admin() {
   const { toast } = useToast();
   const [users, setUsers] = useState<{ id: number; created_at: number; alias_count: number; active: number; forwarding: number; name: string | null }[]>([]);
@@ -24,9 +59,13 @@ export function Admin() {
   const [submittingDomain, setSubmittingDomain] = useState(false);
   const [awsTab, setAwsTab] = useState<"auto" | "manual">("auto");
   const [showAwsSetup, setShowAwsSetup] = useState(false);
+  const [showDomains, setShowDomains] = useState(false);
+  const [showUsers, setShowUsers] = useState(false);
   const [confirmState, setConfirmState] = useState<{ title: string; body: string; confirmLabel?: string; onConfirm: () => void } | null>(null);
   const [promptState, setPromptState] = useState<{ title: string; body: string; defaultValue?: string; confirmLabel?: string; onConfirm: (val: string) => void } | null>(null);
   const [choiceState, setChoiceState] = useState<{ title: string; body: string; primaryLabel: string; secondaryLabel: string; onPrimary: () => void; onSecondary: () => void; } | null>(null);
+  const [expandedVerifyId, setExpandedVerifyId] = useState<number | null>(null);
+  const [verifyingDomain, setVerifyingDomain] = useState(false);
 
   const [envData, setEnvData] = useState<{ vars: Record<string, { value: string; secret: false }>; secrets: Record<string, { configured: boolean; preview?: string }> } | null>(null);
   const [settingsData, setSettingsData] = useState<Record<string, { value: string; updated_at: number }> | null>(null);
@@ -35,6 +74,16 @@ export function Admin() {
   const [showEnvVars, setShowEnvVars] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const workerOrigin = window.location.origin;
+  const currentMainGlobalDomain = editedSettings.main_global_domain || "hidemyemail.dev";
+  const selectableMainGlobalDomains = globalDomains.filter(d => d.active === 1 && d.verified_at !== null);
+  const sesRegion = editedSettings.ses_region || envData?.vars.SES_REGION.value || "us-east-1";
+  const activeUserCount = users.filter(u => u.active === 1).length;
+  const forwardingUserCount = users.filter(u => u.forwarding === 1).length;
+  const sortedGlobalDomains = [...globalDomains].sort((a, b) => {
+    if (a.domain === currentMainGlobalDomain) return -1;
+    if (b.domain === currentMainGlobalDomain) return 1;
+    return a.domain.localeCompare(b.domain);
+  });
 
   async function load() {
     setLoading(true);
@@ -122,21 +171,41 @@ export function Admin() {
     }
   }
 
+  async function verifyDomain(domain: Domain) {
+    setVerifyingDomain(true);
+    try {
+      const res = await api.adminVerifyDomain(domain.id);
+      if (res.verified) {
+        toast("Domain verified successfully", "success");
+        setExpandedVerifyId(null);
+        await load();
+      } else {
+        toast(res.error || "Domain not yet verified", "error");
+      }
+    } catch (err: any) {
+      toast(err.message || "Failed to verify domain", "error");
+    } finally {
+      setVerifyingDomain(false);
+    }
+  }
+
   const isSettingsDirty = settingsData && Object.keys(editedSettings).some(k => settingsData[k]?.value !== editedSettings[k]);
 
   return (
-    <div>
-      <div className="page-header">
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
+    <div className="admin-control-room">
+      <div className="page-header admin-hero">
+        <div className="admin-hero-kicker">Control Room</div>
+        <div className="admin-hero-title-row">
           <h1 className="page-title">System Administration</h1>
+          <span className="badge badge-amber">Operator</span>
         </div>
         <p className="page-subtitle">
-          Manage system-wide settings, users, global domains, and AWS configuration.
+          Manage runtime policy, user access, global domains, and SES infrastructure from one coherent console.
         </p>
       </div>
 
       {stats && (
-        <div className="stagger-1" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 24 }}>
+        <div className="admin-stat-grid stagger-1">
           <div className="stat-card">
             <div className="stat-label">Total Users</div>
             <div className="stat-value">{stats.users.toLocaleString()}</div>
@@ -153,12 +222,15 @@ export function Admin() {
       )}
 
       {/* AWS Onboarding Wizard */}
-      <div className="card stagger-2" style={{ marginBottom: 24, borderLeft: "3px solid var(--accent-blue)" }}>
-        <div className="card-header" style={{ cursor: "pointer", marginBottom: showAwsSetup ? 24 : 0, borderBottom: showAwsSetup ? "1px solid var(--border)" : "none", paddingBottom: showAwsSetup ? 16 : 0 }} onClick={() => setShowAwsSetup(!showAwsSetup)}>
-          <span className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <Cloud size={18} /> AWS Setup Wizard
-          </span>
-          <button className="btn btn-ghost" type="button" onClick={(e) => { e.stopPropagation(); setShowAwsSetup(!showAwsSetup); }}>
+      <div className={`card admin-panel-card admin-aws-card stagger-6 ${showAwsSetup ? "is-open" : ""}`}>
+        <div className="card-header admin-section-header admin-collapsible-header" onClick={() => setShowAwsSetup(!showAwsSetup)}>
+          <div>
+            <span className="card-title admin-section-title">
+              <Cloud size={18} /> AWS Setup
+            </span>
+            <p className="admin-section-subtitle">One-time SES, SNS, and S3 provisioning templates.</p>
+          </div>
+          <button className="admin-panel-toggle" type="button" onClick={(e) => { e.stopPropagation(); setShowAwsSetup(!showAwsSetup); }}>
             {showAwsSetup ? "Hide" : "Show"}
           </button>
         </div>
@@ -305,12 +377,15 @@ echo "SNS_ALLOWED_TOPIC_ARN=$OUTBOUND_TOPIC_ARN"`}
       </div>
 
       {envData && (
-        <div className="card stagger-3" style={{ marginBottom: 24 }}>
-          <div className="card-header" style={{ cursor: "pointer", marginBottom: showEnvVars ? 24 : 0, borderBottom: showEnvVars ? "1px solid var(--border)" : "none", paddingBottom: showEnvVars ? 16 : 0 }} onClick={() => setShowEnvVars(!showEnvVars)}>
-            <span className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <Server size={18} /> Environment Variables
-            </span>
-            <button className="btn btn-ghost" type="button" onClick={(e) => { e.stopPropagation(); setShowEnvVars(!showEnvVars); }}>
+        <div className={`card admin-panel-card admin-env-card stagger-5 ${showEnvVars ? "is-open" : ""}`}>
+          <div className="card-header admin-section-header admin-collapsible-header" onClick={() => setShowEnvVars(!showEnvVars)}>
+            <div>
+              <span className="card-title admin-section-title">
+                <Server size={18} /> Environment
+              </span>
+              <p className="admin-section-subtitle">Read-only Worker variables and secret configuration status.</p>
+            </div>
+            <button className="admin-panel-toggle" type="button" onClick={(e) => { e.stopPropagation(); setShowEnvVars(!showEnvVars); }}>
               {showEnvVars ? "Hide" : "Show"}
             </button>
           </div>
@@ -358,12 +433,15 @@ echo "SNS_ALLOWED_TOPIC_ARN=$OUTBOUND_TOPIC_ARN"`}
       )}
 
       {settingsData && (
-        <div className="card stagger-4" style={{ marginBottom: 24 }}>
-          <div className="card-header" style={{ cursor: "pointer", marginBottom: showSettings ? 24 : 0, borderBottom: showSettings ? "1px solid var(--border)" : "none", paddingBottom: showSettings ? 16 : 0 }} onClick={() => setShowSettings(!showSettings)}>
-            <span className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <Settings size={18} /> Runtime Settings
-            </span>
-            <button className="btn btn-ghost" type="button" onClick={(e) => { e.stopPropagation(); setShowSettings(!showSettings); }}>
+        <div className={`card admin-panel-card admin-settings-card stagger-4 ${showSettings ? "is-open" : ""}`}>
+          <div className="card-header admin-section-header admin-collapsible-header" onClick={() => setShowSettings(!showSettings)}>
+            <div>
+              <span className="card-title admin-section-title">
+                <Settings size={18} /> System Settings
+              </span>
+              <p className="admin-section-subtitle">Runtime policy, rate limits, registration, and relay behavior.</p>
+            </div>
+            <button className="admin-panel-toggle" type="button" onClick={(e) => { e.stopPropagation(); setShowSettings(!showSettings); }}>
               {showSettings ? "Hide" : "Show"}
             </button>
           </div>
@@ -508,6 +586,29 @@ echo "SNS_ALLOWED_TOPIC_ARN=$OUTBOUND_TOPIC_ARN"`}
                 </div>
               </div>
 
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-main-global-domain" className="setting-label">Main Global Domain</label>
+                  <div className="setting-desc">The primary domain used for system emails and the default frontend display</div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <select
+                    id="setting-main-global-domain"
+                    className="input input-mono"
+                    value={currentMainGlobalDomain}
+                    onChange={e => setEditedSettings({...editedSettings, main_global_domain: e.target.value})}
+                    style={{ width: "100%" }}
+                  >
+                    {!selectableMainGlobalDomains.find(d => d.domain === currentMainGlobalDomain) && currentMainGlobalDomain && (
+                      <option value={currentMainGlobalDomain}>{currentMainGlobalDomain}</option>
+                    )}
+                    {selectableMainGlobalDomains.map(d => (
+                      <option key={d.id} value={d.domain}>{d.domain}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               {/* AWS Config Overrides */}
               <div className="setting-row">
                 <div className="setting-info">
@@ -628,6 +729,7 @@ echo "SNS_ALLOWED_TOPIC_ARN=$OUTBOUND_TOPIC_ARN"`}
                     max_inbound_bytes: "26214400",
                     catch_all_auto_create: "true",
                     registration_enabled: "true",
+                    main_global_domain: "hidemyemail.dev",
                     cors_allowed_domains: "https://hidemyemail.dev,http://localhost:5173",
                     forwarded_from_format: "name_address_parens"
                   });
@@ -649,23 +751,28 @@ echo "SNS_ALLOWED_TOPIC_ARN=$OUTBOUND_TOPIC_ARN"`}
         </div>
       )}
 
-      <div className="card stagger-5" style={{ marginBottom: 24 }}>
-        <div className="card-header">
-          <span className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <Globe size={18} /> Global Domains
-          </span>
+      <div className={`card admin-panel-card admin-domain-card stagger-2 ${showDomains ? "is-open" : ""}`}>
+        <div className="card-header admin-section-header admin-collapsible-header" onClick={() => setShowDomains(!showDomains)}>
+          <div>
+            <span className="card-title admin-section-title">
+              <Globe size={18} /> Domains
+            </span>
+            <p className="admin-section-subtitle">Domains all users can select after DNS and relay readiness checks pass.</p>
+          </div>
+          <button className="admin-panel-toggle" type="button" onClick={(e) => { e.stopPropagation(); setShowDomains(!showDomains); }}>
+            {showDomains ? "Hide" : "Show"}
+          </button>
         </div>
+        {showDomains && (
         <div className="card-body">
-          <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 16 }}>
-            Add domains that are available to all users on the platform.
-          </p>
-          <form onSubmit={createGlobalDomain} className="form-strip" style={{ gap: 12 }}>
+          <form onSubmit={createGlobalDomain} className="form-strip admin-domain-form">
             <div className="field grow">
-              <label className="field-label" htmlFor="global-dom">Domain Name (e.g., example.com)</label>
+              <label className="field-label" htmlFor="global-dom">Add global domain</label>
               <input
                 id="global-dom"
                 className="input input-mono"
                 type="text"
+                placeholder="example.com or hide.tburg.net"
                 value={domainForm}
                 onChange={e => setDomainForm(e.target.value.toLowerCase())}
                 required
@@ -678,52 +785,163 @@ echo "SNS_ALLOWED_TOPIC_ARN=$OUTBOUND_TOPIC_ARN"`}
           </form>
           
           {globalDomains.length > 0 && (
-            <div style={{ marginTop: 24, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 16 }}>
-              <h3 style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-muted)", marginBottom: 12 }}>Active Global Domains</h3>
-              <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-                {globalDomains.map(d => (
-                  <li key={d.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "rgba(255,255,255,0.02)", borderRadius: 4 }}>
-                    <div>
-                      <span className="font-mono" style={{ fontSize: "0.85rem", display: "block" }}>{d.domain}</span>
-                      <span className="text-muted" style={{ fontSize: "0.75rem" }}>Added {new Date(d.created_at > 1e11 ? d.created_at : d.created_at * 1000).toLocaleDateString()}</span>
+            <div className="domain-control-stack">
+              {sortedGlobalDomains.map(d => {
+                const records = verificationRecords(d, sesRegion);
+                const expanded = expandedVerifyId === d.id;
+                const isMain = d.domain === currentMainGlobalDomain;
+                return (
+                  <section key={d.id} className={`domain-module ${isMain ? "domain-module-main" : ""}`}>
+                    <div className="domain-module-mainline">
+                      <div className="domain-identity">
+                        <span className="domain-signal" aria-hidden="true" />
+                        <div>
+                          <div className="domain-name-line">
+                            <span className="font-mono domain-name">{d.domain}</span>
+                            {isMain && <span className="badge badge-amber">Primary</span>}
+                            {d.verified_at ? <span className="badge badge-green">Verified</span> : <span className="badge badge-muted">Pending DNS</span>}
+                          </div>
+                          <div className="domain-meta">
+                            {isMain ? "Pinned main global domain" : `Added ${new Date(d.created_at > 1e11 ? d.created_at : d.created_at * 1000).toLocaleDateString()}`}
+                            <span>•</span>
+                            <span>{d.active === 1 ? "Available to users" : "Disabled"}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="domain-actions">
+                        <button className="btn btn-outline btn-sm" type="button" onClick={() => setExpandedVerifyId(expanded ? null : d.id)}>
+                          {expanded ? "Hide DNS" : (d.verified_at ? "DNS records" : "Verify DNS")}
+                        </button>
+
+                        <label className="domain-toggle">
+                          <span>Active</span>
+                          <div className="switch">
+                              <input type="checkbox" checked={d.active === 1} disabled={d.domain === currentMainGlobalDomain} onChange={async (e) => {
+                                try {
+                                  await api.adminUpdateDomain(d.id, { active: e.target.checked ? 1 : 0 });
+                                  load();
+                                } catch (err: any) { toast(err.message, "error"); }
+                              }} />
+                              <span className="switch-track"></span>
+                            </div>
+                        </label>
+
+                        <label className="domain-toggle" style={{ opacity: d.active ? 1 : 0.5 }}>
+                          <span>Custom aliases</span>
+                          <div className="switch">
+                              <input type="checkbox" checked={d.allow_custom_aliases === 1} onChange={async (e) => {
+                                try {
+                                  await api.adminUpdateDomain(d.id, { allow_custom_aliases: e.target.checked ? 1 : 0 });
+                                  load();
+                                } catch (err: any) { toast(err.message, "error"); }
+                              }} />
+                              <span className="switch-track"></span>
+                            </div>
+                        </label>
+
+                        {d.domain !== currentMainGlobalDomain && (
+                            <button 
+                              className="btn-icon danger" 
+                              title="Delete global domain"
+                              onClick={() => {
+                                setConfirmState({
+                                  title: "Delete Global Domain",
+                                  body: `Delete ${d.domain} and ALL associated aliases for ALL users?`,
+                                  confirmLabel: "Delete Domain",
+                                  onConfirm: async () => {
+                                    try {
+                                      await api.deleteDomain(d.id);
+                                      toast("Global domain deleted", "success");
+                                      await load();
+                                    } catch (err: any) {
+                                      toast(err.message || "Failed to delete domain", "error");
+                                    }
+                                  }
+                                });
+                              }}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                        )}
+                      </div>
                     </div>
-                    {d.domain !== "hidemyemail.dev" && (
-                      <button 
-                        className="btn-icon danger" 
-                        title="Delete global domain"
-                        onClick={() => {
-                          setConfirmState({
-                            title: "Delete Global Domain",
-                            body: `Delete ${d.domain} and ALL associated aliases for ALL users?`,
-                            confirmLabel: "Delete Domain",
-                            onConfirm: async () => {
-                              try {
-                                await api.deleteDomain(d.id);
-                                toast("Global domain deleted", "success");
-                                await load();
-                              } catch (err: any) {
-                                toast(err.message || "Failed to delete domain", "error");
-                              }
-                            }
-                          });
-                        }}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    )}
-                  </li>
-                ))}
-              </ul>
+
+                    {expanded && (
+                      <div className="dns-panel">
+                        <div className="dns-panel-header">
+                          <div>
+                            <div className="dns-panel-title">DNS records for <span className="font-mono">{d.domain}</span></div>
+                            <p>Copy these exact provider-ready records. Use the full Host/FQDN shown below for your DNS host field.</p>
+                          </div>
+                        </div>
+                        <div className="dns-record-grid">
+                            <DnsRecordRow
+                              type="TXT"
+                              fields={[
+                                { label: "Host / FQDN", value: records.txtHost },
+                                { label: "Value", value: records.txtValue },
+                              ]}
+                            />
+                            <DnsRecordRow
+                              type="MX"
+                              fields={[
+                                { label: "Host / FQDN", value: records.mxHost },
+                                { label: "Priority", value: "10" },
+                                { label: "Value", value: records.mxValue },
+                              ]}
+                            />
+                            <DnsRecordRow
+                              type="TXT (SPF)"
+                              fields={[
+                                { label: "Host / FQDN", value: records.spfHost },
+                                { label: "Value", value: records.spfValue },
+                              ]}
+                            />
+                        </div>
+                          {!d.verified_at && (
+                            <div className="dns-panel-actions">
+                              <button 
+                                className="btn btn-primary" 
+                                onClick={() => verifyDomain(d)}
+                                disabled={verifyingDomain}
+                              >
+                                {verifyingDomain ? "Verifying..." : "Verify DNS"}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                  </section>
+                  );
+                })}
             </div>
           )}
         </div>
+        )}
       </div>
 
-      <div className="stagger-6">
-        <h2 className="section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <Users size={18} /> Users
-        </h2>
-        <div className="table-wrap table-wrap-stack">
+      <div className={`card admin-panel-card admin-users-card stagger-3 ${showUsers ? "is-open" : ""}`}>
+        <div className="card-header admin-section-header admin-collapsible-header" onClick={() => setShowUsers(!showUsers)}>
+          <div>
+            <span className="card-title admin-section-title">
+              <Users size={18} /> Users
+            </span>
+            <p className="admin-section-subtitle">Login access, forwarding state, recovery, and account controls.</p>
+          </div>
+          <div className="admin-section-actions">
+            <button className="admin-panel-toggle" type="button" onClick={(e) => { e.stopPropagation(); setShowUsers(!showUsers); }}>
+              {users.length} users · {showUsers ? "Hide" : "Show"}
+            </button>
+          </div>
+        </div>
+        {showUsers && (
+        <div className="card-body">
+          <div className="admin-user-summary">
+            <span><strong>{activeUserCount}</strong> active</span>
+            <span><strong>{forwardingUserCount}</strong> forwarding</span>
+            <span><strong>{users.length - activeUserCount}</strong> disabled</span>
+          </div>
+          <div className="table-wrap table-wrap-stack admin-users-table">
           <table className="dossier dossier-stack">
             <thead>
                 <tr>
@@ -849,7 +1067,9 @@ echo "SNS_ALLOWED_TOPIC_ARN=$OUTBOUND_TOPIC_ARN"`}
               body="No users have signed up yet."
             />
           )}
+          </div>
         </div>
+        )}
       </div>
       
       {confirmState && (

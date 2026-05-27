@@ -10,16 +10,19 @@ export function Domains() {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ prefix: "", default_destination: "" });
   const [submitting, setSubmitting] = useState(false);
+  const [mainGlobalDomain, setMainGlobalDomain] = useState("hidemyemail.dev");
 
   async function load() {
     setLoading(true);
     try {
-      const [doms, dests] = await Promise.all([
+      const [doms, dests, conf] = await Promise.all([
         api.domains(),
         api.destinations(),
+        api.config(),
       ]);
       setRows(doms);
       setDestinations(dests.filter(d => d.verified_at !== null));
+      setMainGlobalDomain(conf.main_global_domain);
     } catch {
       toast("Failed to load domains", "error");
     } finally {
@@ -60,32 +63,26 @@ export function Domains() {
   return (
     <div>
       <div className="page-header">
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
+        <div className="page-title-row">
           <h1 className="page-title">Domains</h1>
-          {!loading && (
-            <span className="badge badge-muted">
-              {rows.length}
-            </span>
-          )}
         </div>
         <p className="page-subtitle">
           Managed domains — all inbound mail routes through these.
         </p>
       </div>
 
-      <div className="card stagger-1" style={{ marginBottom: 24 }}>
+      <div className="card stagger-1 card-form-gap">
         <div className="card-header">
           <span className="card-title">Add Subdomain ({myDomainsCount} / 5 used)</span>
         </div>
         <form onSubmit={create}>
-          <div className="form-strip" style={{ gap: 12 }}>
-            <div className="field" style={{ minWidth: 200, display: "flex", flexDirection: "column" }}>
+          <div className="form-strip">
+            <div className="field form-field-lg">
               <label className="field-label" htmlFor="dom-prefix">Subdomain prefix</label>
               <div className="input-group">
                 <input
                   id="dom-prefix"
                   className="input input-mono"
-                  style={{ flex: 1, minWidth: 0 }}
                   type="text"
                   placeholder="name"
                   value={form.prefix}
@@ -94,7 +91,7 @@ export function Domains() {
                   disabled={submitting || myDomainsCount >= 5}
                 />
                 <div className="input-suffix">
-                  .hidemyemail.dev
+                  .{mainGlobalDomain}
                 </div>
               </div>
             </div>
@@ -113,12 +110,12 @@ export function Domains() {
                 ))}
               </select>
             </div>
-            <button className="btn btn-primary" type="submit" disabled={submitting || destinations.length === 0 || myDomainsCount >= 5} style={{ alignSelf: "flex-end" }}>
+            <button className="btn btn-primary form-submit" type="submit" disabled={submitting || destinations.length === 0 || myDomainsCount >= 5}>
               {submitting ? "Adding…" : "Add"}
             </button>
           </div>
           {destinations.length === 0 && (
-            <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: 8 }}>
+            <div className="form-help">
               You must verify a destination email first.
             </div>
           )}
@@ -134,7 +131,7 @@ export function Domains() {
                 <th>Type</th>
                 <th>Default destination</th>
                 <th>Added</th>
-                <th style={{ width: 40 }}></th>
+                <th className="th-actions"></th>
               </tr>
             </thead>
             {loading ? (
@@ -160,20 +157,19 @@ export function Domains() {
                       {d.default_destination ? (
                         <div className="addr-cell">
                           <span
-                            className="addr-mono redact"
                             title={d.default_destination}
-                            style={{ maxWidth: 220, display: "block", padding: "1px 4px" }}
+                            className="addr-mono redact redacted-token"
                           >
                             {d.default_destination}
                           </span>
                           <CopyButton text={d.default_destination} />
                         </div>
                       ) : (
-                        <span className="text-muted italic">None (Drop email)</span>
+                        <span className="muted-italic">None (Drop email)</span>
                       )}
                     </td>
                     <td data-label="Added">
-                      <span className="font-mono text-muted" style={{ fontSize: "0.78rem" }}>
+                      <span className="font-mono text-muted">
                         {new Date(d.created_at > 1e11 ? d.created_at : d.created_at * 1000).toLocaleDateString()}
                       </span>
                     </td>
