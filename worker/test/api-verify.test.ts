@@ -1,15 +1,19 @@
 import { env } from "cloudflare:test";
 import { beforeAll, beforeEach, expect, test } from "vitest";
 import { createApp } from "../src/api/app";
+import { signSession } from "../src/lib/auth";
 import { resetDb } from "./helpers";
 
-let testEnv: any;
+let testEnv: any; let cookie: string;
 beforeAll(async () => {
   testEnv = { ...env, SESSION_SECRET: "sek" };
+  cookie = "__Host-session=" + (await signSession("sek", 1, 3600));
 });
 
 beforeEach(async () => {
   await resetDb(env.DB as D1Database);
+  await (env.DB as D1Database).prepare("DELETE FROM destinations").run();
+  delete testEnv.__sesSend;
 });
 
 test("GET and POST /api/verify email verification flow", async () => {
@@ -132,4 +136,39 @@ test("GET and POST /api/verify with invalid / missing token", async () => {
   expect(postInvalidRes.status).toBe(400);
   const postInvalidHtml = await postInvalidRes.text();
   expect(postInvalidHtml).toContain("Link Expired or Invalid");
+});
+
+test("POST /api/destinations stores pending destination before sending verification email", async () => {
+  let releaseSend!: () => void;
+  const sendStarted = new Promise<void>((resolve) => {
+    testEnv.__sesSend = async () => {
+      resolve();
+      await new Promise<void>((release) => { releaseSend = release; });
+      return "message-id";
+    };
+  });
+
+  const app = createApp();
+  const createRes = await app.request("/api/destinations", {
+    method: "POST",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "new@example.com" }),
+  }, {
+    ...testEnv,
+    SES_ACCESS_KEY_ID: "akid",
+    SES_SECRET_ACCESS_KEY: "secret",
+    SES_REGION: "ap-southeast-2",
+  });
+
+  expect(createRes.status).toBe(200);
+  await sendStarted;
+
+  const row = await (env.DB as D1Database).prepare(
+    "SELECT token, verified_at FROM destinations WHERE user_id = 1"
+  ).first<{ token: string; verified_at: number | null }>();
+  expect(row?.token).toBeTruthy();
+  expect(row?.verified_at).toBeNull();
+
+  releaseSend();
+  delete testEnv.__sesSend;
 });

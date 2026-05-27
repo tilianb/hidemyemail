@@ -1,10 +1,13 @@
 import { Hono } from "hono";
 import { setCookie, deleteCookie, getCookie } from "hono/cookie";
+import type { Context } from "hono";
 import type { AppEnv } from "../app";
-import { verifyPassword, signSession, derivePassphraseHash, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge } from "../../lib/auth";
+import { verifyPassword, signFreshAuth, signSession, derivePassphraseHash, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge } from "../../lib/auth";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
+import { getEnvWithOverride } from "../../lib/settings";
 
 const SESSION_TTL = 60 * 60 * 24 * 7; // 7 days
+const FRESH_AUTH_TTL = 60 * 10; // 10 minutes
 
 // Rate limit policy: 10 failed attempts per IP per hour, fixed window.
 // Successful auth does NOT count — only failures consume budget.
@@ -34,6 +37,23 @@ async function recordFailedAttempt(ip: string, db: D1Database): Promise<void> {
     return;
   }
   await db.prepare("UPDATE rate_limits SET attempts = attempts + 1 WHERE ip = ?").bind(ip).run();
+}
+
+async function setAuthenticatedCookies(c: Context<AppEnv>, userId: number): Promise<void> {
+  const sessionToken = await signSession(c.env.SESSION_SECRET, userId, SESSION_TTL);
+  const freshAuthToken = await signFreshAuth(c.env.SESSION_SECRET, userId, FRESH_AUTH_TTL);
+  setCookie(c, "__Host-session", sessionToken, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
+  setCookie(c, "__Host-fresh-auth", freshAuthToken, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: FRESH_AUTH_TTL });
+}
+
+function randomSixDigitCode(): string {
+  const max = 1_000_000;
+  const limit = Math.floor(0x1_0000_0000 / max) * max;
+  const values = new Uint32Array(1);
+  do {
+    crypto.getRandomValues(values);
+  } while (values[0]! >= limit);
+  return (values[0]! % max).toString().padStart(6, "0");
 }
 
 export function authRoutes() {
@@ -89,8 +109,7 @@ export function authRoutes() {
       return c.json({ mfa_required: true });
     }
 
-    const token = await signSession(c.env.SESSION_SECRET, userId, SESSION_TTL);
-    setCookie(c, "__Host-session", token, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
+    await setAuthenticatedCookies(c, userId);
     return c.json({ ok: true, userId });
   });
 
@@ -98,6 +117,13 @@ export function authRoutes() {
     const ip = c.req.header("cf-connecting-ip") || "unknown";
     if (!(await canAttempt(ip, c.env.DB))) {
       return c.json({ error: "too many attempts" }, 429);
+    }
+
+    // Check if registration is enabled
+    const { getBoolSetting } = await import("../../lib/settings");
+    const registrationEnabled = await getBoolSetting(c.env.DB, "registration_enabled");
+    if (!registrationEnabled) {
+      return c.json({ error: "Registration is currently disabled" }, 403);
     }
 
     const { password } = await c.req.json<{ password: string }>().catch(() => ({ password: "" }));
@@ -113,8 +139,7 @@ export function authRoutes() {
       ).bind(hash, Date.now()).run();
 
       const userId = res.meta.last_row_id;
-      const token = await signSession(c.env.SESSION_SECRET, userId, SESSION_TTL);
-      setCookie(c, "__Host-session", token, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
+      await setAuthenticatedCookies(c, userId);
       return c.json({ ok: true, userId });
     } catch (err: any) {
       if (err.message && err.message.includes("UNIQUE constraint failed")) {
@@ -127,6 +152,7 @@ export function authRoutes() {
 
   r.post("/logout", (c) => {
     deleteCookie(c, "__Host-session", { path: "/", secure: true });
+    deleteCookie(c, "__Host-fresh-auth", { path: "/", secure: true });
     return c.json({ ok: true });
   });
 
@@ -182,8 +208,7 @@ export function authRoutes() {
     }
 
     deleteCookie(c, "__Host-mfa-challenge", { path: "/", secure: true });
-    const token = await signSession(c.env.SESSION_SECRET, userId, SESSION_TTL);
-    setCookie(c, "__Host-session", token, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
+    await setAuthenticatedCookies(c, userId);
     return c.json({ ok: true, userId });
   });
 
@@ -264,8 +289,7 @@ export function authRoutes() {
       .bind(result.authenticationInfo.newCounter, response.id).run();
 
     deleteCookie(c, "__Host-passkey-challenge", { path: "/", secure: true });
-    const sessionToken = await signSession(c.env.SESSION_SECRET, cred.user_id, SESSION_TTL);
-    setCookie(c, "__Host-session", sessionToken, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
+    await setAuthenticatedCookies(c, cred.user_id);
 
     return c.json({ ok: true, userId: cred.user_id });
   });
@@ -297,15 +321,19 @@ export function authRoutes() {
     const { buildMfaEmail } = await import("../../lib/emails");
 
     const email = await decryptDestination(dest.email, c.env.DESTINATION_ENCRYPTION_KEY);
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const code = randomSixDigitCode();
 
     await db.prepare("UPDATE users SET recovery_mfa_code = ? WHERE id = ?").bind(code, user.id).run();
 
-    if (c.env.SES_ACCESS_KEY_ID && c.env.SES_SECRET_ACCESS_KEY && c.env.SES_REGION) {
+    const sesAccessKeyId = await getEnvWithOverride(db, c.env, "ses_access_key_id");
+    const sesSecretAccessKey = await getEnvWithOverride(db, c.env, "ses_secret_access_key");
+    const sesRegion = await getEnvWithOverride(db, c.env, "ses_region");
+
+    if (sesAccessKeyId && sesSecretAccessKey && sesRegion) {
       await sendRaw({
-        accessKeyId: c.env.SES_ACCESS_KEY_ID,
-        secretAccessKey: c.env.SES_SECRET_ACCESS_KEY,
-        region: c.env.SES_REGION
+        accessKeyId: sesAccessKeyId,
+        secretAccessKey: sesSecretAccessKey,
+        region: sesRegion
       }, {
         from: "HideMyEmail <noreply@hidemyemail.dev>",
         to: email,
@@ -345,11 +373,13 @@ export function authRoutes() {
 
     await db.prepare(
       "UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL WHERE user_id = ?"
-    ).bind(user.id).run();
+    ).bind(user.id).run().catch((err: unknown) => {
+      if (err instanceof Error && err.message.includes("no such table")) return;
+      throw err;
+    });
 
     // Log them in immediately
-    const sessionId = await signSession(c.env.SESSION_SECRET, user.id, SESSION_TTL);
-    setCookie(c, "__Host-session", sessionId, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
+    await setAuthenticatedCookies(c, user.id);
     
     return c.json({ ok: true, passphrase: newPassphrase });
   });

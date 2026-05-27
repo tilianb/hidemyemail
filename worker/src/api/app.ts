@@ -13,6 +13,8 @@ import { sesInboundRoutes } from "./routes/ses-inbound";
 import { destinationRoutes, verificationRoute } from "./routes/destinations";
 import { adminRoutes } from "./routes/admin";
 import { settingsRoutes } from "./routes/settings";
+import { getSetting } from "../lib/settings";
+import { SETTING_DEFAULTS } from "../config";
 
 export type AppEnv = {
   Bindings: Env;
@@ -34,19 +36,22 @@ export function createApp() {
   });
 
   app.use("*", cors({
-    origin: (origin) => {
+    origin: async (origin, c) => {
       if (!origin) return "";
-      const allowedDomains = [
-        "hidemyemail.dev",
-        "localhost:5173",
-        "pages.dev",
-        "workers.dev"
-      ];
+      // Read CORS allowed domains from DB settings (falls back to defaults)
+      let domainsStr: string;
+      try {
+        domainsStr = await getSetting(c.env.DB, "cors_allowed_domains");
+      } catch {
+        domainsStr = SETTING_DEFAULTS.cors_allowed_domains ?? "";
+      }
+      const allowedOrigins = domainsStr.split(",").map(d => d.trim()).filter(Boolean);
       try {
         const url = new URL(origin);
-        if (allowedDomains.some(domain => url.host === domain || url.host.endsWith("." + domain))) {
-          return origin;
-        }
+        if (allowedOrigins.some(allowed => {
+          if (allowed.includes("://")) return origin === allowed;
+          return origin === `https://${allowed}` || origin === `http://${allowed}`;
+        })) return origin;
       } catch (e) {}
       return "";
     },
@@ -75,6 +80,9 @@ export function createApp() {
     if (!token) return c.json({ error: "unauthorized" }, 401);
     const userId = await verifySession(c.env.SESSION_SECRET, token);
     if (userId === null) return c.json({ error: "unauthorized" }, 401);
+    const user = await c.env.DB.prepare("SELECT active FROM users WHERE id = ?")
+      .bind(userId).first<{ active: number }>();
+    if (!user || user.active === 0) return c.json({ error: "Account is disabled" }, 403);
     c.set("userId", userId);
     return next();
   });
