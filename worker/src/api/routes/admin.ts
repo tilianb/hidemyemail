@@ -221,6 +221,13 @@ export function adminRoutes() {
   // ── Runtime Settings (DB-backed, editable) ─────────────────────────────────
   r.get("/settings", async (c) => {
     const settings = await getAllSettings(c.env.DB);
+    // Mask sensitive secrets so they don't leak to the frontend UI
+    if (settings.ses_secret_access_key?.value) {
+      settings.ses_secret_access_key.value = maskSecret(settings.ses_secret_access_key.value);
+    }
+    if (settings.sns_secret?.value) {
+      settings.sns_secret.value = maskSecret(settings.sns_secret.value);
+    }
     return c.json({ settings });
   });
 
@@ -235,6 +242,11 @@ export function adminRoutes() {
     for (const [key, value] of Object.entries(body)) {
       if (!VALID_SETTING_KEYS.includes(key)) {
         errors.push(`Unknown setting: ${key}`);
+        continue;
+      }
+
+      // Ignore masked secrets that weren't changed by the user
+      if ((key === "ses_secret_access_key" || key === "sns_secret") && value.includes("••••••")) {
         continue;
       }
 
