@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import { sendRaw } from "../../lib/ses";
 import { hashDestination, encryptDestination, decryptDestination } from "../../lib/crypto";
+import { getEnvWithOverride } from "../../lib/settings";
 
 function escapeHtml(s: string): string {
   return s
@@ -50,27 +51,48 @@ export function destinationRoutes() {
     const token = crypto.randomUUID();
     
     try {
-      // Send verification email via SES first
-      if (c.env.SES_ACCESS_KEY_ID && c.env.SES_SECRET_ACCESS_KEY && c.env.SES_REGION) {
-        const verifyUrl = new URL(`/api/verify?token=${token}`, c.req.url).toString();
-        const rawBase64 = buildVerificationEmail(email, verifyUrl);
-
-        await sendRaw({
-          accessKeyId: c.env.SES_ACCESS_KEY_ID,
-          secretAccessKey: c.env.SES_SECRET_ACCESS_KEY,
-          region: c.env.SES_REGION
-        }, {
-          from: "HideMyEmail <noreply@hidemyemail.dev>",
-          to: email,
-          rawBase64
-        });
-      }
-
-      // Save destination to DB after successful send
+      // Save destination first so the verification link exists before the
+      // outbound send is handed off to SES in the background.
       const encryptedEmail = await encryptDestination(email, c.env.DESTINATION_ENCRYPTION_KEY);
       await c.env.DB.prepare(
         "INSERT INTO destinations (user_id, email, email_hash, token, created_at) VALUES (?, ?, ?, ?, ?)"
       ).bind(userId, encryptedEmail, emailHash, token, Date.now()).run();
+
+      const sesAccessKeyId = await getEnvWithOverride(c.env.DB, c.env, "ses_access_key_id");
+      const sesSecretAccessKey = await getEnvWithOverride(c.env.DB, c.env, "ses_secret_access_key");
+      const sesRegion = await getEnvWithOverride(c.env.DB, c.env, "ses_region");
+
+      if (sesAccessKeyId && sesSecretAccessKey && sesRegion) {
+        const verifyUrl = new URL(`/api/verify?token=${token}`, c.req.url).toString();
+        const rawBase64 = buildVerificationEmail(email, verifyUrl);
+        const sesSend: typeof sendRaw = (c.env as any).__sesSend ?? sendRaw;
+
+        const startedAt = Date.now();
+        const sendTask = sesSend({
+            accessKeyId: sesAccessKeyId,
+            secretAccessKey: sesSecretAccessKey,
+            region: sesRegion
+          }, {
+            from: "HideMyEmail <noreply@hidemyemail.dev>",
+            to: email,
+            rawBase64
+          })
+          .then((messageId) => {
+            console.log("Verification email sent", { messageId, ms: Date.now() - startedAt });
+          })
+          .catch(async (err) => {
+            console.error("Verification email send failed", err);
+            await c.env.DB.prepare("DELETE FROM destinations WHERE token = ? AND verified_at IS NULL")
+              .bind(token)
+              .run();
+          });
+
+        try {
+          c.executionCtx.waitUntil(sendTask);
+        } catch {
+          void sendTask;
+        }
+      }
 
       return c.json({ ok: true });
     } catch (err: any) {
@@ -558,6 +580,9 @@ This link expires in 24 hours. If you did not request this, you can safely ignor
     `From: HideMyEmail <noreply@hidemyemail.dev>`,
     `To: ${to}`,
     `Subject: Verify your email address`,
+    `Date: ${new Date().toUTCString()}`,
+    `Message-ID: <${crypto.randomUUID()}@hidemyemail.dev>`,
+    `Reply-To: HideMyEmail <noreply@hidemyemail.dev>`,
     `MIME-Version: 1.0`,
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
     ``,
