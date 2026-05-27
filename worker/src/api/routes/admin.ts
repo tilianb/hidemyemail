@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import { getAllSettings, getEnvWithOverride } from "../../lib/settings";
+import { encryptDestination } from "../../lib/crypto";
 import { VALID_SETTING_KEYS, SETTING_DEFAULTS } from "../../config";
 
 /** Mask a secret: show first 3 + "•••" + last 3, or just "•••" if too short */
@@ -220,7 +221,7 @@ export function adminRoutes() {
 
   // ── Runtime Settings (DB-backed, editable) ─────────────────────────────────
   r.get("/settings", async (c) => {
-    const settings = await getAllSettings(c.env.DB);
+    const settings = await getAllSettings(c.env.DB, c.env);
     // Mask sensitive secrets so they don't leak to the frontend UI
     if (settings.ses_secret_access_key?.value) {
       settings.ses_secret_access_key.value = maskSecret(settings.ses_secret_access_key.value);
@@ -288,7 +289,10 @@ export function adminRoutes() {
       return c.json({ error: errors.join("; ") }, 400);
     }
 
-    for (const { key, value } of updates) {
+    for (let { key, value } of updates) {
+      if (value && (key === "ses_secret_access_key" || key === "sns_secret")) {
+        value = await encryptDestination(value, c.env.DESTINATION_ENCRYPTION_KEY);
+      }
       await db.prepare(
         "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
       ).bind(key, value, now).run();
