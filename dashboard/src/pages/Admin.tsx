@@ -205,7 +205,7 @@ export function Admin() {
       </div>
 
       {stats && (
-        <div className="admin-stat-grid stagger-1">
+        <div className="admin-stat-grid">
           <div className="stat-card">
             <div className="stat-label">Total Users</div>
             <div className="stat-value">{stats.users.toLocaleString()}</div>
@@ -222,7 +222,7 @@ export function Admin() {
       )}
 
       {/* AWS Onboarding Wizard */}
-      <div className={`card admin-panel-card admin-aws-card stagger-6 ${showAwsSetup ? "is-open" : ""}`}>
+      <div className={`card admin-panel-card admin-aws-card ${showAwsSetup ? "is-open" : ""}`}>
         <div className="card-header admin-section-header admin-collapsible-header" onClick={() => setShowAwsSetup(!showAwsSetup)}>
           <div>
             <span className="card-title admin-section-title">
@@ -377,7 +377,7 @@ echo "SNS_ALLOWED_TOPIC_ARN=$OUTBOUND_TOPIC_ARN"`}
       </div>
 
       {envData && (
-        <div className={`card admin-panel-card admin-env-card stagger-5 ${showEnvVars ? "is-open" : ""}`}>
+        <div className={`card admin-panel-card admin-env-card ${showEnvVars ? "is-open" : ""}`}>
           <div className="card-header admin-section-header admin-collapsible-header" onClick={() => setShowEnvVars(!showEnvVars)}>
             <div>
               <span className="card-title admin-section-title">
@@ -433,7 +433,7 @@ echo "SNS_ALLOWED_TOPIC_ARN=$OUTBOUND_TOPIC_ARN"`}
       )}
 
       {settingsData && (
-        <div className={`card admin-panel-card admin-settings-card stagger-4 ${showSettings ? "is-open" : ""}`}>
+        <div className={`card admin-panel-card admin-settings-card ${showSettings ? "is-open" : ""}`}>
           <div className="card-header admin-section-header admin-collapsible-header" onClick={() => setShowSettings(!showSettings)}>
             <div>
               <span className="card-title admin-section-title">
@@ -751,7 +751,7 @@ echo "SNS_ALLOWED_TOPIC_ARN=$OUTBOUND_TOPIC_ARN"`}
         </div>
       )}
 
-      <div className={`card admin-panel-card admin-domain-card stagger-2 ${showDomains ? "is-open" : ""}`}>
+      <div className={`card admin-panel-card admin-domain-card ${showDomains ? "is-open" : ""}`}>
         <div className="card-header admin-section-header admin-collapsible-header" onClick={() => setShowDomains(!showDomains)}>
           <div>
             <span className="card-title admin-section-title">
@@ -920,7 +920,7 @@ echo "SNS_ALLOWED_TOPIC_ARN=$OUTBOUND_TOPIC_ARN"`}
         )}
       </div>
 
-      <div className={`card admin-panel-card admin-users-card stagger-3 ${showUsers ? "is-open" : ""}`}>
+      <div className={`card admin-panel-card admin-users-card ${showUsers ? "is-open" : ""}`}>
         <div className="card-header admin-section-header admin-collapsible-header" onClick={() => setShowUsers(!showUsers)}>
           <div>
             <span className="card-title admin-section-title">
