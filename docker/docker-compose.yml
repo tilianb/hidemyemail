@@ -1,0 +1,31 @@
+# hidemyemail.dev self-host stack.
+#
+# Build:   docker compose -f docker/docker-compose.yml build
+# Run:     docker compose -f docker/docker-compose.yml up -d
+# Logs:    docker compose -f docker/docker-compose.yml logs -f app
+#
+# Put your AWS credentials and secrets into docker/.env (see .env.example).
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: hidemyemail:local
+    container_name: hidemyemail
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-8787}:8787"
+    env_file:
+      - .env
+    volumes:
+      - hidemyemail-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8787/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  hidemyemail-data:

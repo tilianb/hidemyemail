@@ -1,0 +1,17 @@
+# Keep build context lean. Paths are relative to the build context (repo root).
+**/node_modules
+**/.git
+**/.wrangler
+**/.DS_Store
+**/dist
+dashboard/dist
+worker/dist
+worker/.dev.vars
+**/.env
+**/.env.*
+!**/.env.example
+.claude
+.antigravitycli
+.github
+docs
+*.log
