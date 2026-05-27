@@ -11,7 +11,6 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   ses_access_key_id: "",
   ses_secret_access_key: "",
   s3_inbound_bucket: "",
-  sns_secret: "",
   sns_allowed_topic_arn: "",
   sns_inbound_topic_arn: "",
 };

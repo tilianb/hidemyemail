@@ -15,7 +15,7 @@ export async function getSetting(db: D1Database, key: string, env?: any): Promis
     val = SETTING_DEFAULTS[key] ?? "";
   }
   
-  if (val && env?.DESTINATION_ENCRYPTION_KEY && (key === "ses_secret_access_key" || key === "sns_secret")) {
+  if (val && env?.DESTINATION_ENCRYPTION_KEY && key === "ses_secret_access_key") {
     return await decryptDestination(val, env.DESTINATION_ENCRYPTION_KEY);
   }
   return val;
@@ -59,7 +59,7 @@ export async function getAllSettings(db: D1Database, env?: any): Promise<Record<
     const rows = await db.prepare("SELECT key, value, updated_at FROM settings").all<{ key: string; value: string; updated_at: number }>();
     for (const row of rows.results ?? []) {
       let val = row.value;
-      if (val && env?.DESTINATION_ENCRYPTION_KEY && (row.key === "ses_secret_access_key" || row.key === "sns_secret")) {
+      if (val && env?.DESTINATION_ENCRYPTION_KEY && row.key === "ses_secret_access_key") {
         val = await decryptDestination(val, env.DESTINATION_ENCRYPTION_KEY);
       }
       result[row.key] = { value: val, updated_at: row.updated_at };

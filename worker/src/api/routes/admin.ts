@@ -200,7 +200,6 @@ export function adminRoutes() {
       "AUTH_PASSWORD_HASH",
       "AUTH_PASSWORD_SALT",
       "DESTINATION_ENCRYPTION_KEY",
-      "SNS_SECRET",
       "SNS_ALLOWED_TOPIC_ARN",
       "SNS_INBOUND_TOPIC_ARN",
     ] as const;
@@ -226,9 +225,6 @@ export function adminRoutes() {
     if (settings.ses_secret_access_key?.value) {
       settings.ses_secret_access_key.value = maskSecret(settings.ses_secret_access_key.value);
     }
-    if (settings.sns_secret?.value) {
-      settings.sns_secret.value = maskSecret(settings.sns_secret.value);
-    }
     return c.json({ settings });
   });
 
@@ -247,7 +243,7 @@ export function adminRoutes() {
       }
 
       // Ignore masked secrets that weren't changed by the user
-      if ((key === "ses_secret_access_key" || key === "sns_secret") && value.includes("••••••")) {
+      if (key === "ses_secret_access_key" && value.includes("••••••")) {
         continue;
       }
 
@@ -290,7 +286,7 @@ export function adminRoutes() {
     }
 
     for (let { key, value } of updates) {
-      if (value && (key === "ses_secret_access_key" || key === "sns_secret")) {
+      if (value && key === "ses_secret_access_key") {
         value = await encryptDestination(value, c.env.DESTINATION_ENCRYPTION_KEY);
       }
       await db.prepare(

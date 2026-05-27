@@ -16,7 +16,6 @@ npx wrangler secret put AUTH_PASSWORD_HASH
 npx wrangler secret put SESSION_SECRET           # e.g. openssl rand -hex 32
 npx wrangler secret put SES_ACCESS_KEY_ID
 npx wrangler secret put SES_SECRET_ACCESS_KEY
-npx wrangler secret put SNS_SECRET               # Secure random string for SNS webhook auth
 npx wrangler secret put SNS_ALLOWED_TOPIC_ARN    # Outbound bounce/complaint topic ARN
 npx wrangler secret put SNS_INBOUND_TOPIC_ARN    # Inbound email receipt topic ARN
 npx wrangler secret put DESTINATION_ENCRYPTION_KEY # 32-byte hex string (e.g. openssl rand -hex 32)
@@ -39,14 +38,17 @@ Update `wrangler.jsonc` with your specific variables:
    - **Action 1 (S3)**: Deliver to the S3 bucket you created.
    - **Action 2 (SNS)**: Publish to your Inbound SNS Topic.
 4. **SNS Webhook (Inbound)**: Subscribe your worker's webhook to the inbound topic:
-   `https://<worker-host>/api/ses/inbound?secret=<your_sns_secret>`
+   `https://<worker-host>/api/ses/inbound`
+   The Worker verifies AWS SNS signatures and rejects any topic other than `SNS_INBOUND_TOPIC_ARN`.
 
 ### Outbound (Replies & Deliverability)
 1. **Verify Domains**: Verify each sending domain D in SES and add the DKIM CNAMEs.
 2. **SNS Topic (Outbound)**: Create a second SNS topic for bounce, delivery, and complaint events. Set `SNS_ALLOWED_TOPIC_ARN` in your secrets.
 3. **SNS Webhook (Outbound)**: Subscribe your worker's webhook to the outbound topic:
-   `https://<worker-host>/api/ses/notification?secret=<your_sns_secret>`
+   `https://<worker-host>/api/ses/notification`
+   The Worker verifies AWS SNS signatures and rejects any topic other than `SNS_ALLOWED_TOPIC_ARN`.
 4. **Confirm Subscriptions**: Check your worker's logs (`npx wrangler tail`) for the `SubscribeURL` upon creation and open it in your browser to confirm both SNS subscriptions.
+   Preview/dev deployments should use their own SNS topic ARNs; do not use query-string topic overrides.
 5. (Optional) Request SES production access if you need to send replies to unverified addresses.
 
 ## 4. DNS Configuration per domain
