@@ -60,10 +60,10 @@ export function Domains() {
   return (
     <div>
       <div className="page-header">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
           <h1 className="page-title">Domains</h1>
           {!loading && (
-            <span className="badge badge-muted" style={{ position: "relative", top: -2 }}>
+            <span className="badge badge-muted">
               {rows.length}
             </span>
           )}
@@ -113,11 +113,9 @@ export function Domains() {
                 ))}
               </select>
             </div>
-            <div style={{ paddingTop: 20 }}>
-              <button className="btn btn-primary" type="submit" disabled={submitting || destinations.length === 0 || myDomainsCount >= 5}>
-                {submitting ? "Adding…" : "Add"}
-              </button>
-            </div>
+            <button className="btn btn-primary" type="submit" disabled={submitting || destinations.length === 0 || myDomainsCount >= 5} style={{ alignSelf: "flex-end" }}>
+              {submitting ? "Adding…" : "Add"}
+            </button>
           </div>
           {destinations.length === 0 && (
             <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: 8 }}>
