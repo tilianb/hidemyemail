@@ -3,7 +3,7 @@ const WORDS = [
   "knife", "lemon", "magic", "night", "ocean", "pearl", "quiet", "river", "stone", "train",
   "union", "voice", "water", "xenon", "yacht", "zebra", "alert", "brick", "cloud", "dance",
   "earth", "frost", "grape", "honey", "index", "jelly", "koala", "laser", "mango", "ninja",
-  "orbit", "piano", "quilt", "radar", "sugar", "tiger", "umbra", "venom", "wheat", "x-ray",
+  "orbit", "piano", "quilt", "radar", "sugar", "tiger", "umbra", "venom", "wheat", "xray",
   "yield", "zonal", "amber", "blade", "crisp", "diner", "elite", "fable", "glint", "hound",
   "inbox", "joker", "kneel", "lunar", "medal", "novel", "oasis", "pulse", "query", "roast",
   "scout", "tulip", "unify", "viper", "whale", "xerox", "yearn", "zesty", "acorn", "baker",
@@ -12,10 +12,10 @@ const WORDS = [
 ];
 
 export function generatePassphrase(): string {
-  const array = new Uint32Array(6);
+  const array = new Uint32Array(16);
   window.crypto.getRandomValues(array);
   const selected = [];
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 16; i++) {
     selected.push(WORDS[array[i] % WORDS.length]);
   }
   return selected.join("-");

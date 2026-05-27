@@ -857,6 +857,111 @@ table.dossier tbody td {
 .stagger-2 { animation: fade-up 350ms ease both 120ms; }
 .stagger-3 { animation: fade-up 350ms ease both 180ms; }
 .stagger-4 { animation: fade-up 350ms ease both 240ms; }
+.stagger-5 { animation: fade-up 350ms ease both 300ms; }
+.stagger-6 { animation: fade-up 350ms ease both 360ms; }
+.stagger-7 { animation: fade-up 350ms ease both 420ms; }
+.stagger-8 { animation: fade-up 350ms ease both 480ms; }
+
+/* ─── Environment variable list ─────────────────────────────────────────── */
+.env-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.env-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  transition: background var(--t-fast);
+}
+.env-row:last-child { border-bottom: none; }
+.env-row:hover { background: rgba(255,255,255,0.015); }
+.env-key {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  min-width: 0;
+  word-break: break-all;
+}
+.env-val {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  text-align: right;
+  min-width: 0;
+  word-break: break-all;
+}
+
+/* ─── Settings form rows ────────────────────────────────────────────────── */
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+.setting-row:last-child { border-bottom: none; }
+.setting-info {
+  flex: 1;
+  min-width: 0;
+}
+.setting-label {
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+.setting-desc {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.setting-updated {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+  opacity: 0.7;
+}
+.setting-control {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.setting-control .input {
+  width: 160px;
+}
+.settings-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-top: var(--space-5);
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 700px) {
+  .setting-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+  .setting-control .input {
+    width: 100%;
+  }
+}
 
 /* ─── Divider ────────────────────────────────────────────────────────────── */
 .divider {

@@ -2,7 +2,8 @@ import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import { routeEmail } from "../../email/router";
 import { fetchS3Object } from "../../lib/s3";
-import { timingSafeEqual } from "../../lib/auth";
+import { getEnvWithOverride } from "../../lib/settings";
+import { verifySnsMessage } from "../../lib/sns";
 
 export function sesInboundRoutes() {
   const r = new Hono<AppEnv>();
@@ -11,16 +12,17 @@ export function sesInboundRoutes() {
     const body = await c.req.json<any>().catch(() => null);
     if (!body) return c.json({ error: "bad body" }, 400);
 
-    // Webhook authentication — SNS_SECRET must be set
-    const secret = c.req.header("x-webhook-secret") || c.req.query("secret") || "";
-    if (!c.env.SNS_SECRET || !timingSafeEqual(secret, c.env.SNS_SECRET)) {
-      return c.json({ error: "unauthorized" }, 401);
-    }
+    const sesRegion = await getEnvWithOverride(c.env.DB, c.env, "ses_region");
+    const verified = await verifySnsMessage(body, {
+      region: sesRegion,
+      fetchCert: (c.env as any).__snsCertFetch ?? fetch,
+    });
+    if (!verified.ok) return c.json({ error: "invalid sns signature" }, 401);
 
-    // Guard: only accept the configured inbound SNS topic(s)
-    // We allow passing an additional allowed_topic via query string to make branch preview testing easier.
-    const allowedTopics = [c.env.SNS_INBOUND_TOPIC_ARN, c.req.query("allowed_topic")].filter(Boolean);
-    if (allowedTopics.length > 0 && !allowedTopics.includes(body.TopicArn)) {
+    // Guard: only accept the configured inbound SNS topic.
+    const snsInboundTopic = await getEnvWithOverride(c.env.DB, c.env, "sns_inbound_topic_arn");
+    if (!snsInboundTopic) return c.json({ error: "missing SNS_INBOUND_TOPIC_ARN configuration" }, 500);
+    if (body.TopicArn !== snsInboundTopic) {
       return c.json({ error: "forbidden topic" }, 403);
     }
 
@@ -33,11 +35,12 @@ export function sesInboundRoutes() {
       console.log("SNS inbound SubscribeURL (auto-confirming):", subscribeUrl);
       
       // Auto-confirm the subscription so you don't have to check logs
+      const confirmFetch: typeof fetch = (c.env as any).__snsConfirmFetch ?? fetch;
       try {
-        c.executionCtx.waitUntil(fetch(subscribeUrl).catch(err => console.error("Auto-confirm failed:", err)));
+        c.executionCtx.waitUntil(confirmFetch(subscribeUrl).catch(err => console.error("Auto-confirm failed:", err)));
       } catch (e) {
         // Fallback for tests or environments without executionCtx
-        fetch(subscribeUrl).catch(err => console.error("Auto-confirm failed:", err));
+        void confirmFetch(subscribeUrl).catch(err => console.error("Auto-confirm failed:", err));
       }
       
       return c.json({ ok: true });
@@ -69,15 +72,19 @@ export function sesInboundRoutes() {
     };
 
     // Fetch full raw MIME from S3 (supports emails of any size, no SNS 256KB truncation risk)
+    const sesAccessKeyId = await getEnvWithOverride(c.env.DB, c.env, "ses_access_key_id");
+    const sesSecretAccessKey = await getEnvWithOverride(c.env.DB, c.env, "ses_secret_access_key");
+    const s3InboundBucket = await getEnvWithOverride(c.env.DB, c.env, "s3_inbound_bucket");
+    
     const creds = {
-      accessKeyId: c.env.SES_ACCESS_KEY_ID,
-      secretAccessKey: c.env.SES_SECRET_ACCESS_KEY,
-      region: c.env.SES_REGION,
+      accessKeyId: sesAccessKeyId,
+      secretAccessKey: sesSecretAccessKey,
+      region: sesRegion,
     };
     const s3Fetch = (c.env as any).__s3Fetch ?? fetchS3Object;
     let raw: Uint8Array;
     try {
-      raw = await s3Fetch(creds, c.env.S3_INBOUND_BUCKET, messageId);
+      raw = await s3Fetch(creds, s3InboundBucket, messageId);
     } catch (err) {
       console.error("S3 fetch failed for", messageId, String(err));
       return c.json({ error: "s3 unavailable" }, 500); // 5xx → SNS retries for up to 23 days

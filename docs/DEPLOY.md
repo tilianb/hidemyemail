@@ -16,7 +16,6 @@ npx wrangler secret put AUTH_PASSWORD_HASH
 npx wrangler secret put SESSION_SECRET           # e.g. openssl rand -hex 32
 npx wrangler secret put SES_ACCESS_KEY_ID
 npx wrangler secret put SES_SECRET_ACCESS_KEY
-npx wrangler secret put SNS_SECRET               # Secure random string for SNS webhook auth
 npx wrangler secret put SNS_ALLOWED_TOPIC_ARN    # Outbound bounce/complaint topic ARN
 npx wrangler secret put SNS_INBOUND_TOPIC_ARN    # Inbound email receipt topic ARN
 npx wrangler secret put DESTINATION_ENCRYPTION_KEY # 32-byte hex string (e.g. openssl rand -hex 32)
@@ -39,15 +38,26 @@ Update `wrangler.jsonc` with your specific variables:
    - **Action 1 (S3)**: Deliver to the S3 bucket you created.
    - **Action 2 (SNS)**: Publish to your Inbound SNS Topic.
 4. **SNS Webhook (Inbound)**: Subscribe your worker's webhook to the inbound topic:
-   `https://<worker-host>/api/ses/inbound?secret=<your_sns_secret>`
+   `https://<worker-host>/api/ses/inbound`
+   The Worker verifies AWS SNS signatures and rejects any topic other than `SNS_INBOUND_TOPIC_ARN`.
 
 ### Outbound (Replies & Deliverability)
 1. **Verify Domains**: Verify each sending domain D in SES and add the DKIM CNAMEs.
-2. **SNS Topic (Outbound)**: Create a second SNS topic for bounce, delivery, and complaint events. Set `SNS_ALLOWED_TOPIC_ARN` in your secrets.
-3. **SNS Webhook (Outbound)**: Subscribe your worker's webhook to the outbound topic:
-   `https://<worker-host>/api/ses/notification?secret=<your_sns_secret>`
-4. **Confirm Subscriptions**: Check your worker's logs (`npx wrangler tail`) for the `SubscribeURL` upon creation and open it in your browser to confirm both SNS subscriptions.
-5. (Optional) Request SES production access if you need to send replies to unverified addresses.
+2. **Custom MAIL FROM**: Configure a custom MAIL FROM subdomain for each sending domain, for example `bounce.D`. This keeps the Return-Path under your domain instead of `amazonses.com`, improving SPF alignment and reputation signals.
+   ```bash
+   aws sesv2 put-email-identity-mail-from-attributes \
+     --region ap-southeast-2 \
+     --email-identity D \
+     --mail-from-domain bounce.D \
+     --behavior-on-mx-failure USE_DEFAULT_VALUE
+   ```
+3. **SNS Topic (Outbound)**: Create a second SNS topic for bounce, delivery, and complaint events. Set `SNS_ALLOWED_TOPIC_ARN` in your secrets.
+4. **SNS Webhook (Outbound)**: Subscribe your worker's webhook to the outbound topic:
+   `https://<worker-host>/api/ses/notification`
+   The Worker verifies AWS SNS signatures and rejects any topic other than `SNS_ALLOWED_TOPIC_ARN`.
+5. **Confirm Subscriptions**: Check your worker's logs (`npx wrangler tail`) for the `SubscribeURL` upon creation and open it in your browser to confirm both SNS subscriptions.
+   Preview/dev deployments should use their own SNS topic ARNs; do not use query-string topic overrides.
+6. (Optional) Request SES production access if you need to send replies to unverified addresses.
 
 ## 4. DNS Configuration per domain
 Configure your domain's DNS records (e.g., in Cloudflare) to route emails to SES and ensure high deliverability:
@@ -55,6 +65,9 @@ Configure your domain's DNS records (e.g., in Cloudflare) to route emails to SES
 - **SPF**: Add `v=spf1 include:amazonses.com ~all` as a TXT record.
 - **DMARC**: `_dmarc TXT "v=DMARC1; p=quarantine; rua=mailto:dmarc@<your-domain>"`
 - **DKIM**: Add the 3 DKIM CNAME records provided by Amazon SES during verification.
+- **Custom MAIL FROM**: For `bounce.<your-domain>`, publish exactly one MX record and one SPF TXT record:
+  - `bounce MX 10 feedback-smtp.<your-region>.amazonses.com`
+  - `bounce TXT "v=spf1 include:amazonses.com ~all"`
 
 ## 5. Deploy Worker + Dashboard
 ```bash
