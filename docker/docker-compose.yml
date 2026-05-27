@@ -1,17 +1,30 @@
 # hidemyemail.dev self-host stack.
 #
-# Build:   docker compose -f docker/docker-compose.yml build
-# Run:     docker compose -f docker/docker-compose.yml up -d
-# Logs:    docker compose -f docker/docker-compose.yml logs -f app
+# Pull pre-built image (recommended):
+#   docker compose -f docker/docker-compose.yml pull
+#   docker compose -f docker/docker-compose.yml up -d
 #
-# Put your AWS credentials and secrets into docker/.env (see .env.example).
+# Build locally from source instead:
+#   docker compose -f docker/docker-compose.yml build
+#   docker compose -f docker/docker-compose.yml up -d
+#
+# Logs:
+#   docker compose -f docker/docker-compose.yml logs -f app
+#
+# Override the image tag (e.g. pin a release):
+#   IMAGE_TAG=v1.2.3 docker compose ... up -d
+#
+# Put AWS credentials and app secrets in docker/.env (see .env.example).
 
 services:
   app:
+    image: ghcr.io/tilianb/hidemyemail:${IMAGE_TAG:-latest}
+    # Local build is the fallback when the image isn't in the registry yet,
+    # and the target of `docker compose build` for development.
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: hidemyemail:local
+    pull_policy: ${PULL_POLICY:-missing}
     container_name: hidemyemail
     restart: unless-stopped
     ports:
