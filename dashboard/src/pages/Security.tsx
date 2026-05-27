@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import QRCode from "react-qr-code";
+import { QRCode } from "react-qr-code";
 import { api } from "../api";
 import { useToast } from "../ui";
 import { ShieldCheck, ShieldOff, KeyRound, Copy, RefreshCw, Loader2, Fingerprint, Trash2, Pencil } from "lucide-react";
