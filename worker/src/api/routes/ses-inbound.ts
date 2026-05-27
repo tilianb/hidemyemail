@@ -35,11 +35,12 @@ export function sesInboundRoutes() {
       console.log("SNS inbound SubscribeURL (auto-confirming):", subscribeUrl);
       
       // Auto-confirm the subscription so you don't have to check logs
+      const confirmFetch: typeof fetch = (c.env as any).__snsConfirmFetch ?? fetch;
       try {
-        c.executionCtx.waitUntil(fetch(subscribeUrl).catch(err => console.error("Auto-confirm failed:", err)));
+        c.executionCtx.waitUntil(confirmFetch(subscribeUrl).catch(err => console.error("Auto-confirm failed:", err)));
       } catch (e) {
         // Fallback for tests or environments without executionCtx
-        fetch(subscribeUrl).catch(err => console.error("Auto-confirm failed:", err));
+        void confirmFetch(subscribeUrl).catch(err => console.error("Auto-confirm failed:", err));
       }
       
       return c.json({ ok: true });

@@ -17,7 +17,7 @@ const RAW_EMAIL = [
   "",
 ].join("\r\n");
 
-function testEnv(opts: { s3Throws?: boolean; raw?: string; certPem?: string } = {}) {
+function testEnv(opts: { s3Throws?: boolean; raw?: string; certPem?: string; confirmFetch?: typeof fetch } = {}) {
   const sesSent: any[] = [];
   const raw = opts.raw ?? RAW_EMAIL;
   return {
@@ -28,6 +28,7 @@ function testEnv(opts: { s3Throws?: boolean; raw?: string; certPem?: string } = 
     SES_SECRET_ACCESS_KEY: "testsecret",
     SES_REGION: "ap-southeast-2",
     __snsCertFetch: async () => new Response(opts.certPem ?? "bad cert", { status: 200 }),
+    __snsConfirmFetch: opts.confirmFetch,
 
     __s3Fetch: opts.s3Throws
       ? async () => { throw new Error("S3 unavailable"); }
@@ -81,12 +82,20 @@ test("wrong TopicArn → 403", async () => {
 test("SubscriptionConfirmation → 200", async () => {
   const app = createApp();
   const signed = await makeSignedSnsBody({ type: "SubscriptionConfirmation", topicArn: INBOUND_ARN });
+  let confirmedUrl = "";
   const res = await app.request("/api/ses/inbound", {
     method: "POST",
     headers: { "Content-Type": "text/plain" },
     body: JSON.stringify(signed.body),
-  }, testEnv({ certPem: signed.certPem }));
+  }, testEnv({
+    certPem: signed.certPem,
+    confirmFetch: async (url) => {
+      confirmedUrl = String(url);
+      return new Response(null, { status: 200 });
+    },
+  }));
   expect(res.status).toBe(200);
+  expect(confirmedUrl).toBe(signed.body.SubscribeURL);
 });
 
 test("tampered signed notification → 401", async () => {
