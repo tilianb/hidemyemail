@@ -18,7 +18,7 @@ npx wrangler secret put SES_ACCESS_KEY_ID
 npx wrangler secret put SES_SECRET_ACCESS_KEY
 npx wrangler secret put SNS_ALLOWED_TOPIC_ARN    # Outbound bounce/complaint topic ARN
 npx wrangler secret put SNS_INBOUND_TOPIC_ARN    # Inbound email receipt topic ARN
-npx wrangler secret put DESTINATION_ENCRYPTION_KEY # 32-byte hex string (e.g. openssl rand -hex 32)
+npx wrangler secret put DESTINATION_ENCRYPTION_KEY # 32-byte base64 string (e.g. openssl rand -base64 32)
 ```
 Update `wrangler.jsonc` with your specific variables:
 ```jsonc
