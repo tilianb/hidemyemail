@@ -1,11 +1,13 @@
 import { Hono } from "hono";
 import { setCookie, deleteCookie, getCookie } from "hono/cookie";
+import type { Context } from "hono";
 import type { AppEnv } from "../app";
-import { verifyPassword, signSession, derivePassphraseHash, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge } from "../../lib/auth";
+import { verifyPassword, signFreshAuth, signSession, derivePassphraseHash, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge } from "../../lib/auth";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { getEnvWithOverride } from "../../lib/settings";
 
 const SESSION_TTL = 60 * 60 * 24 * 7; // 7 days
+const FRESH_AUTH_TTL = 60 * 10; // 10 minutes
 
 // Rate limit policy: 10 failed attempts per IP per hour, fixed window.
 // Successful auth does NOT count — only failures consume budget.
@@ -35,6 +37,23 @@ async function recordFailedAttempt(ip: string, db: D1Database): Promise<void> {
     return;
   }
   await db.prepare("UPDATE rate_limits SET attempts = attempts + 1 WHERE ip = ?").bind(ip).run();
+}
+
+async function setAuthenticatedCookies(c: Context<AppEnv>, userId: number): Promise<void> {
+  const sessionToken = await signSession(c.env.SESSION_SECRET, userId, SESSION_TTL);
+  const freshAuthToken = await signFreshAuth(c.env.SESSION_SECRET, userId, FRESH_AUTH_TTL);
+  setCookie(c, "__Host-session", sessionToken, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
+  setCookie(c, "__Host-fresh-auth", freshAuthToken, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: FRESH_AUTH_TTL });
+}
+
+function randomSixDigitCode(): string {
+  const max = 1_000_000;
+  const limit = Math.floor(0x1_0000_0000 / max) * max;
+  const values = new Uint32Array(1);
+  do {
+    crypto.getRandomValues(values);
+  } while (values[0]! >= limit);
+  return (values[0]! % max).toString().padStart(6, "0");
 }
 
 export function authRoutes() {
@@ -90,8 +109,7 @@ export function authRoutes() {
       return c.json({ mfa_required: true });
     }
 
-    const token = await signSession(c.env.SESSION_SECRET, userId, SESSION_TTL);
-    setCookie(c, "__Host-session", token, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
+    await setAuthenticatedCookies(c, userId);
     return c.json({ ok: true, userId });
   });
 
@@ -121,8 +139,7 @@ export function authRoutes() {
       ).bind(hash, Date.now()).run();
 
       const userId = res.meta.last_row_id;
-      const token = await signSession(c.env.SESSION_SECRET, userId, SESSION_TTL);
-      setCookie(c, "__Host-session", token, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
+      await setAuthenticatedCookies(c, userId);
       return c.json({ ok: true, userId });
     } catch (err: any) {
       if (err.message && err.message.includes("UNIQUE constraint failed")) {
@@ -135,6 +152,7 @@ export function authRoutes() {
 
   r.post("/logout", (c) => {
     deleteCookie(c, "__Host-session", { path: "/", secure: true });
+    deleteCookie(c, "__Host-fresh-auth", { path: "/", secure: true });
     return c.json({ ok: true });
   });
 
@@ -190,8 +208,7 @@ export function authRoutes() {
     }
 
     deleteCookie(c, "__Host-mfa-challenge", { path: "/", secure: true });
-    const token = await signSession(c.env.SESSION_SECRET, userId, SESSION_TTL);
-    setCookie(c, "__Host-session", token, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
+    await setAuthenticatedCookies(c, userId);
     return c.json({ ok: true, userId });
   });
 
@@ -272,8 +289,7 @@ export function authRoutes() {
       .bind(result.authenticationInfo.newCounter, response.id).run();
 
     deleteCookie(c, "__Host-passkey-challenge", { path: "/", secure: true });
-    const sessionToken = await signSession(c.env.SESSION_SECRET, cred.user_id, SESSION_TTL);
-    setCookie(c, "__Host-session", sessionToken, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
+    await setAuthenticatedCookies(c, cred.user_id);
 
     return c.json({ ok: true, userId: cred.user_id });
   });
@@ -305,7 +321,7 @@ export function authRoutes() {
     const { buildMfaEmail } = await import("../../lib/emails");
 
     const email = await decryptDestination(dest.email, c.env.DESTINATION_ENCRYPTION_KEY);
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const code = randomSixDigitCode();
 
     await db.prepare("UPDATE users SET recovery_mfa_code = ? WHERE id = ?").bind(code, user.id).run();
 
@@ -363,8 +379,7 @@ export function authRoutes() {
     });
 
     // Log them in immediately
-    const sessionId = await signSession(c.env.SESSION_SECRET, user.id, SESSION_TTL);
-    setCookie(c, "__Host-session", sessionId, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
+    await setAuthenticatedCookies(c, user.id);
     
     return c.json({ ok: true, passphrase: newPassphrase });
   });

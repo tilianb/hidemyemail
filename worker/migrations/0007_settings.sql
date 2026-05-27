@@ -12,4 +12,4 @@ INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES
   ('max_inbound_bytes', '26214400', 0),
   ('catch_all_auto_create', 'true', 0),
   ('registration_enabled', 'true', 0),
-  ('cors_allowed_domains', 'hidemyemail.dev,localhost:5173,pages.dev,workers.dev', 0);
+  ('cors_allowed_domains', 'https://hidemyemail.dev,http://localhost:5173', 0);

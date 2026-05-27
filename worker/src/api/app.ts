@@ -45,12 +45,13 @@ export function createApp() {
       } catch {
         domainsStr = SETTING_DEFAULTS.cors_allowed_domains ?? "";
       }
-      const allowedDomains = domainsStr.split(",").map(d => d.trim()).filter(Boolean);
+      const allowedOrigins = domainsStr.split(",").map(d => d.trim()).filter(Boolean);
       try {
         const url = new URL(origin);
-        if (allowedDomains.some(domain => url.host === domain || url.host.endsWith("." + domain))) {
-          return origin;
-        }
+        if (allowedOrigins.some(allowed => {
+          if (allowed.includes("://")) return origin === allowed;
+          return origin === `https://${allowed}` || origin === `http://${allowed}`;
+        })) return origin;
       } catch (e) {}
       return "";
     },
@@ -79,6 +80,9 @@ export function createApp() {
     if (!token) return c.json({ error: "unauthorized" }, 401);
     const userId = await verifySession(c.env.SESSION_SECRET, token);
     if (userId === null) return c.json({ error: "unauthorized" }, 401);
+    const user = await c.env.DB.prepare("SELECT active FROM users WHERE id = ?")
+      .bind(userId).first<{ active: number }>();
+    if (!user || user.active === 0) return c.json({ error: "Account is disabled" }, 403);
     c.set("userId", userId);
     return next();
   });

@@ -420,8 +420,8 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
 
               <div className="setting-row">
                 <div className="setting-info">
-                  <label htmlFor="setting-cors" className="setting-label">CORS Allowed Domains</label>
-                  <div className="setting-desc">Comma-separated list of domains allowed to access the API</div>
+                  <label htmlFor="setting-cors" className="setting-label">CORS Allowed Origins</label>
+                  <div className="setting-desc">Comma-separated exact origins allowed to access the API</div>
                 </div>
                 <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
                   <input
@@ -537,7 +537,7 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
                     max_inbound_bytes: "26214400",
                     catch_all_auto_create: "true",
                     registration_enabled: "true",
-                    cors_allowed_domains: "hidemyemail.dev,localhost:5173,pages.dev,workers.dev"
+                    cors_allowed_domains: "https://hidemyemail.dev,http://localhost:5173"
                   });
                 }}
                 type="button"

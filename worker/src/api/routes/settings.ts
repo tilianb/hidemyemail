@@ -1,9 +1,40 @@
 import { Hono } from "hono";
 import { setCookie, deleteCookie, getCookie } from "hono/cookie";
+import type { Context } from "hono";
 import type { AppEnv } from "../app";
-import { signPasskeyRegChallenge, verifyPasskeyRegChallenge } from "../../lib/auth";
+import { signPasskeyRegChallenge, verifyFreshAuth, verifyPasskeyRegChallenge } from "../../lib/auth";
 import { fromBase64url, toBase64url, getRpFromOrigin } from "../../lib/webauthn";
 import type { RegistrationResponseJSON } from "@simplewebauthn/server";
+
+const RATE_LIMIT_MAX = 10;
+const RATE_LIMIT_WINDOW_SECONDS = 3600;
+
+async function canAttempt(ip: string, db: D1Database): Promise<boolean> {
+  const now = Math.floor(Date.now() / 1000);
+  const row = await db.prepare("SELECT attempts, reset_at FROM rate_limits WHERE ip = ?").bind(ip).first<{ attempts: number; reset_at: number }>();
+  if (!row) return true;
+  if (now >= row.reset_at) return true;
+  return row.attempts < RATE_LIMIT_MAX;
+}
+
+async function recordFailedAttempt(ip: string, db: D1Database): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  const row = await db.prepare("SELECT attempts, reset_at FROM rate_limits WHERE ip = ?").bind(ip).first<{ attempts: number; reset_at: number }>();
+  if (!row) {
+    await db.prepare("INSERT INTO rate_limits (ip, attempts, reset_at) VALUES (?, 1, ?)").bind(ip, now + RATE_LIMIT_WINDOW_SECONDS).run();
+    return;
+  }
+  if (now >= row.reset_at) {
+    await db.prepare("UPDATE rate_limits SET attempts = 1, reset_at = ? WHERE ip = ?").bind(now + RATE_LIMIT_WINDOW_SECONDS, ip).run();
+    return;
+  }
+  await db.prepare("UPDATE rate_limits SET attempts = attempts + 1 WHERE ip = ?").bind(ip).run();
+}
+
+async function hasFreshAuth(c: Context<AppEnv>): Promise<boolean> {
+  const token = getCookie(c, "__Host-fresh-auth");
+  return !!token && await verifyFreshAuth(c.env.SESSION_SECRET, token, c.get("userId"));
+}
 
 export function settingsRoutes() {
   const r = new Hono<AppEnv>();
@@ -27,6 +58,7 @@ export function settingsRoutes() {
   // Begin TOTP setup: generate secret and return URI for QR code
   r.post("/mfa/setup", async (c) => {
     const userId = c.get("userId");
+    if (!(await hasFreshAuth(c))) return c.json({ error: "fresh authentication required" }, 401);
     const { generateTOTPSecret, makeTOTPUri } = await import("../../lib/totp");
     const { encryptDestination } = await import("../../lib/crypto");
 
@@ -96,7 +128,10 @@ export function settingsRoutes() {
 
   // Disable TOTP — requires a valid TOTP code or backup code for confirmation
   r.post("/mfa/disable", async (c) => {
+    const ip = c.req.header("cf-connecting-ip") || "unknown";
+    if (!(await canAttempt(ip, c.env.DB))) return c.json({ error: "too many attempts" }, 429);
     const userId = c.get("userId");
+    if (!(await hasFreshAuth(c))) return c.json({ error: "fresh authentication required" }, 401);
     const { code } = await c.req.json<{ code: string }>().catch(() => ({ code: "" }));
 
     if (!code) return c.json({ error: "Code required" }, 400);
@@ -122,7 +157,10 @@ export function settingsRoutes() {
       verified = (await verifyBackupCode(normalized, hashedCodes)) !== -1;
     }
 
-    if (!verified) return c.json({ error: "Invalid code" }, 401);
+    if (!verified) {
+      await recordFailedAttempt(ip, c.env.DB);
+      return c.json({ error: "Invalid code" }, 401);
+    }
 
     await c.env.DB.prepare(
       "UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL WHERE user_id = ?"
@@ -133,7 +171,10 @@ export function settingsRoutes() {
 
   // Regenerate backup codes — requires current TOTP code
   r.post("/mfa/backup-codes", async (c) => {
+    const ip = c.req.header("cf-connecting-ip") || "unknown";
+    if (!(await canAttempt(ip, c.env.DB))) return c.json({ error: "too many attempts" }, 429);
     const userId = c.get("userId");
+    if (!(await hasFreshAuth(c))) return c.json({ error: "fresh authentication required" }, 401);
     const { code } = await c.req.json<{ code: string }>().catch(() => ({ code: "" }));
 
     if (!code || !/^\d{6}$/.test(code)) {
@@ -152,6 +193,7 @@ export function settingsRoutes() {
     const secret = await decryptDestination(mfa.totp_secret, c.env.DESTINATION_ENCRYPTION_KEY);
 
     if (!(await verifyTOTP(secret, code))) {
+      await recordFailedAttempt(ip, c.env.DB);
       return c.json({ error: "Invalid code" }, 401);
     }
 
@@ -177,6 +219,7 @@ export function settingsRoutes() {
   // Generate a WebAuthn registration challenge
   r.post("/passkeys/challenge", async (c) => {
     const userId = c.get("userId");
+    if (!(await hasFreshAuth(c))) return c.json({ error: "fresh authentication required" }, 401);
     const { generateRegistrationOptions } = await import("@simplewebauthn/server");
     const { rpID } = getRpFromOrigin(c.req.header("origin"));
 
@@ -214,6 +257,7 @@ export function settingsRoutes() {
   // Verify attestation and persist the new credential
   r.post("/passkeys/register", async (c) => {
     const sessionUserId = c.get("userId");
+    if (!(await hasFreshAuth(c))) return c.json({ error: "fresh authentication required" }, 401);
 
     const regCookie = getCookie(c, "__Host-passkey-reg");
     if (!regCookie) return c.json({ error: "No registration challenge" }, 401);
@@ -276,6 +320,7 @@ export function settingsRoutes() {
 
   r.delete("/passkeys/:id", async (c) => {
     const userId = c.get("userId");
+    if (!(await hasFreshAuth(c))) return c.json({ error: "fresh authentication required" }, 401);
     const id = c.req.param("id");
 
     await c.env.DB.prepare(
