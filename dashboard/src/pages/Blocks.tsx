@@ -79,10 +79,10 @@ export function Blocks() {
     <div>
       {/* Page header */}
       <div className="page-header">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
           <h1 className="page-title">Blocks</h1>
           {!loading && (
-            <span className="badge badge-muted" style={{ position: "relative", top: -2 }}>
+            <span className="badge badge-muted">
               {rows.length}
             </span>
           )}
@@ -126,15 +126,14 @@ export function Blocks() {
                 disabled={submitting}
               />
             </div>
-            <div style={{ paddingTop: 20 }}>
-              <button
-                className="btn btn-primary"
-                type="submit"
-                disabled={submitting || !pattern.trim()}
-              >
-                {submitting ? "Blocking…" : "Block sender"}
-              </button>
-            </div>
+            <button
+              className="btn btn-primary"
+              type="submit"
+              disabled={submitting || !pattern.trim()}
+              style={{ alignSelf: "flex-end" }}
+            >
+              {submitting ? "Blocking…" : "Block sender"}
+            </button>
           </div>
         </form>
       </div>
