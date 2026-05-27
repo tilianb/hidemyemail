@@ -1,7 +1,18 @@
 import { useEffect, useState } from "react";
 import { api, type Domain } from "../api";
 import { useToast, TableSkeleton, EmptyState, ConfirmDialog, PromptDialog, ChoiceDialog } from "../ui";
-import { Users, Trash2, Globe, Cloud, Edit3, Key } from "lucide-react";
+import { Users, Trash2, Globe, Cloud, Edit3, Key, Server, Settings } from "lucide-react";
+
+const FORWARDED_FROM_FORMATS = [
+  { value: "name_address_parens", label: "Name (email at domain)", example: '"Alice (alice at store.com)" <alias@domain>' },
+  { value: "name_address_parens_at", label: "Name (email@domain)", example: '"Alice (alice@store.com)" <alias@domain>' },
+  { value: "name_address_dash", label: "Name - email at domain", example: '"Alice - alice at store.com" <alias@domain>' },
+  { value: "name_address_dash_at", label: "Name - email@domain", example: '"Alice - alice@store.com" <alias@domain>' },
+  { value: "name_only", label: "Name only", example: '"Alice" <alias@domain>' },
+  { value: "address_only", label: "Email at domain only", example: '"alice at store.com" <alias@domain>' },
+  { value: "address_only_at", label: "Email@domain only", example: '"alice@store.com" <alias@domain>' },
+  { value: "via_hidemyemail", label: "Name via HideMyEmail", example: '"Alice via HideMyEmail" <alias@domain>' },
+];
 
 export function Admin() {
   const { toast } = useToast();
@@ -17,17 +28,35 @@ export function Admin() {
   const [promptState, setPromptState] = useState<{ title: string; body: string; defaultValue?: string; confirmLabel?: string; onConfirm: (val: string) => void } | null>(null);
   const [choiceState, setChoiceState] = useState<{ title: string; body: string; primaryLabel: string; secondaryLabel: string; onPrimary: () => void; onSecondary: () => void; } | null>(null);
 
+  const [envData, setEnvData] = useState<{ vars: Record<string, { value: string; secret: false }>; secrets: Record<string, { configured: boolean; preview?: string }> } | null>(null);
+  const [settingsData, setSettingsData] = useState<Record<string, { value: string; updated_at: number }> | null>(null);
+  const [editedSettings, setEditedSettings] = useState<Record<string, string>>({});
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [showEnvVars, setShowEnvVars] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const workerOrigin = window.location.origin;
+
   async function load() {
     setLoading(true);
     try {
-      const [uRes, sRes, doms] = await Promise.all([
+      const [uRes, sRes, doms, envRes, setRes] = await Promise.all([
         api.adminUsers(),
         api.adminStats(),
-        api.domains()
+        api.domains(),
+        api.adminEnv(),
+        api.adminSettings()
       ]);
       setUsers(uRes.users);
       setStats(sRes.totals);
       setGlobalDomains(doms.filter(d => d.is_global === 1));
+      setEnvData(envRes);
+      setSettingsData(setRes.settings);
+      
+      const newEdited: Record<string, string> = {};
+      for (const [k, v] of Object.entries(setRes.settings)) {
+        newEdited[k] = v.value;
+      }
+      setEditedSettings(newEdited);
     } catch {
       toast("Failed to load admin data", "error");
     } finally {
@@ -69,6 +98,31 @@ export function Admin() {
       setSubmittingDomain(false);
     }
   }
+
+  async function saveSettings() {
+    setSavingSettings(true);
+    try {
+      const changed: Record<string, string> = {};
+      if (settingsData) {
+        for (const [k, v] of Object.entries(editedSettings)) {
+          if (settingsData[k]?.value !== v) changed[k] = v;
+        }
+      }
+      if (Object.keys(changed).length > 0) {
+        await api.adminUpdateSettings(changed);
+        toast("Settings saved", "success");
+        await load();
+      } else {
+        toast("No changes to save", "success");
+      }
+    } catch (err: any) {
+      toast(err.message || "Failed to save settings", "error");
+    } finally {
+      setSavingSettings(false);
+    }
+  }
+
+  const isSettingsDirty = settingsData && Object.keys(editedSettings).some(k => settingsData[k]?.value !== editedSettings[k]);
 
   return (
     <div>
@@ -112,7 +166,8 @@ export function Admin() {
           <div className="card-body">
             <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 16 }}>
             Set up the required AWS services (SES, SNS, S3) for inbound and outbound email routing.
-            Choose your preferred deployment method below.
+            SNS requests are authenticated by AWS signature verification, so webhook URLs do not need shared secrets.
+            Configure each environment with its own exact SNS topic ARNs.
           </p>
           
           <div className="tabs" style={{ display: "flex", gap: 16, marginBottom: 16 }}>
@@ -128,13 +183,19 @@ export function Admin() {
             <div style={{ padding: 16, background: "rgba(255,255,255,0.02)", borderRadius: 6, fontSize: "0.85rem" }}>
               <p style={{ marginBottom: 12 }}>
                 We recommend using AWS CloudFormation to automatically provision all required resources securely.
-                Save the template below as <code>template.yaml</code> and deploy it in the AWS Console.
+                Save the template below as <code>template.yaml</code> and deploy it in the AWS Console. For preview/dev,
+                use the preview Worker URL and copy the generated preview topic ARNs into that environment.
               </p>
               <textarea 
                 className="input input-mono" 
                 readOnly 
                 style={{ width: "100%", height: 350, fontSize: "11px", marginBottom: 8 }}
                 value={`AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  WorkerBaseUrl:
+    Type: String
+    Default: "${workerOrigin}"
+    Description: Worker origin, for example https://hidemyemail-preview.example.workers.dev
 Resources:
   InboundBucket:
     Type: AWS::S3::Bucket
@@ -162,6 +223,18 @@ Resources:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: hidemyemail-outbound
+  InboundWorkerSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: https
+      TopicArn: !Ref InboundTopic
+      Endpoint: !Sub "\${WorkerBaseUrl}/api/ses/inbound"
+  OutboundWorkerSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: https
+      TopicArn: !Ref OutboundTopic
+      Endpoint: !Sub "\${WorkerBaseUrl}/api/ses/notification"
   InboundRuleSet:
     Type: AWS::SES::ReceiptRuleSet
     Properties:
@@ -177,10 +250,17 @@ Resources:
         Actions:
           - S3Action:
               BucketName: !Ref InboundBucket
-              TopicArn: !Ref InboundTopic`}
+              TopicArn: !Ref InboundTopic
+Outputs:
+  InboundBucketName:
+    Value: !Ref InboundBucket
+  SnsInboundTopicArn:
+    Value: !Ref InboundTopic
+  SnsAllowedTopicArn:
+    Value: !Ref OutboundTopic`}
               />
               <p className="text-muted">
-                After deployment, copy the Bucket Name and SNS Topic ARNs to your <code>wrangler.jsonc</code> file. Also ensure that the "hidemyemail-rules" SES rule set is marked as active in the AWS console.
+                After deployment, copy <code>InboundBucketName</code>, <code>SnsInboundTopicArn</code>, and <code>SnsAllowedTopicArn</code> to your Worker environment. Confirm the SNS subscriptions in AWS if they are still pending. Also ensure that the "hidemyemail-rules" SES rule set is marked as active in the AWS console.
               </p>
             </div>
           )}
@@ -188,7 +268,7 @@ Resources:
           {awsTab === "manual" && (
             <div style={{ padding: 16, background: "rgba(255,255,255,0.02)", borderRadius: 6, fontSize: "0.85rem" }}>
               <p style={{ marginBottom: 12 }}>
-                Run the following AWS CLI commands to provision the resources manually:
+                Run the following AWS CLI commands to provision the resources manually. The subscription endpoints intentionally have no <code>secret</code> or <code>allowed_topic</code> query parameters.
               </p>
               <pre style={{ overflowX: "auto", background: "#000", padding: 12, borderRadius: 4, color: "#0f0" }}>
 {`# 1. Create S3 Bucket for inbound emails
@@ -200,13 +280,23 @@ ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 aws s3api put-bucket-policy --bucket $BUCKET_NAME --policy "{\\"Statement\\":[{\\"Effect\\":\\"Allow\\",\\"Principal\\":{\\"Service\\":\\"ses.amazonaws.com\\"},\\"Action\\":\\"s3:PutObject\\",\\"Resource\\":\\"arn:aws:s3:::$BUCKET_NAME/*\\",\\"Condition\\":{\\"StringEquals\\":{\\"aws:Referer\\":\\"$ACCOUNT_ID\\"}}}]}"
 
 # 3. Create SNS Topics
-TOPIC_ARN=$(aws sns create-topic --name hidemyemail-inbound --query TopicArn --output text)
-aws sns create-topic --name hidemyemail-outbound
+WORKER_ORIGIN="${workerOrigin}"
+INBOUND_TOPIC_ARN=$(aws sns create-topic --name hidemyemail-inbound --query TopicArn --output text)
+OUTBOUND_TOPIC_ARN=$(aws sns create-topic --name hidemyemail-outbound --query TopicArn --output text)
 
-# 4. Create SES Receipt Rule Set and Rule
+# 4. Subscribe Worker webhooks. SNS signatures authenticate requests.
+aws sns subscribe --topic-arn $INBOUND_TOPIC_ARN --protocol https --notification-endpoint "$WORKER_ORIGIN/api/ses/inbound"
+aws sns subscribe --topic-arn $OUTBOUND_TOPIC_ARN --protocol https --notification-endpoint "$WORKER_ORIGIN/api/ses/notification"
+
+# 5. Create SES Receipt Rule Set and Rule
 aws ses create-receipt-rule-set --rule-set-name hidemyemail-rules
-aws ses create-receipt-rule --rule-set-name hidemyemail-rules --rule "{\\"Name\\":\\"store-and-notify\\",\\"Enabled\\":true,\\"Actions\\":[{\\"S3Action\\":{\\"BucketName\\":\\"$BUCKET_NAME\\",\\"TopicArn\\":\\"$TOPIC_ARN\\"}}]}"
-aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
+aws ses create-receipt-rule --rule-set-name hidemyemail-rules --rule "{\\"Name\\":\\"store-and-notify\\",\\"Enabled\\":true,\\"Actions\\":[{\\"S3Action\\":{\\"BucketName\\":\\"$BUCKET_NAME\\",\\"TopicArn\\":\\"$INBOUND_TOPIC_ARN\\"}}]}"
+aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules
+
+# 6. Configure Worker environment
+echo "S3_INBOUND_BUCKET=$BUCKET_NAME"
+echo "SNS_INBOUND_TOPIC_ARN=$INBOUND_TOPIC_ARN"
+echo "SNS_ALLOWED_TOPIC_ARN=$OUTBOUND_TOPIC_ARN"`}
               </pre>
             </div>
           )}
@@ -214,7 +304,352 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
         )}
       </div>
 
-      <div className="card stagger-3" style={{ marginBottom: 24 }}>
+      {envData && (
+        <div className="card stagger-3" style={{ marginBottom: 24 }}>
+          <div className="card-header" style={{ cursor: "pointer", marginBottom: showEnvVars ? 24 : 0, borderBottom: showEnvVars ? "1px solid var(--border)" : "none", paddingBottom: showEnvVars ? 16 : 0 }} onClick={() => setShowEnvVars(!showEnvVars)}>
+            <span className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Server size={18} /> Environment Variables
+            </span>
+            <button className="btn btn-ghost" type="button" onClick={(e) => { e.stopPropagation(); setShowEnvVars(!showEnvVars); }}>
+              {showEnvVars ? "Hide" : "Show"}
+            </button>
+          </div>
+          {showEnvVars && (
+            <div className="card-body">
+              <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 16 }}>
+                Read-only view of Cloudflare Worker environment variables and secrets. Note that secrets cannot be modified here.
+              </p>
+              <div className="table-wrap">
+                <table className="dossier">
+                  <thead>
+                    <tr>
+                      <th>Variable</th>
+                      <th>Value / Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(envData.vars).map(([k, v]) => (
+                      <tr key={k}>
+                        <td className="font-mono" style={{ fontSize: "0.85rem" }}>{k}</td>
+                        <td className="font-mono" style={{ fontSize: "0.85rem" }}>{v.value}</td>
+                      </tr>
+                    ))}
+                    {Object.entries(envData.secrets).map(([k, v]) => (
+                      <tr key={k}>
+                        <td className="font-mono" style={{ fontSize: "0.85rem" }}>{k}</td>
+                        <td>
+                          {v.configured ? (
+                            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                              <span className="badge badge-green">Configured</span>
+                              {v.preview && <span className="font-mono text-muted" style={{ fontSize: "0.85rem" }}>{v.preview}</span>}
+                            </div>
+                          ) : (
+                            <span className="badge badge-amber">Not Set</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {settingsData && (
+        <div className="card stagger-4" style={{ marginBottom: 24 }}>
+          <div className="card-header" style={{ cursor: "pointer", marginBottom: showSettings ? 24 : 0, borderBottom: showSettings ? "1px solid var(--border)" : "none", paddingBottom: showSettings ? 16 : 0 }} onClick={() => setShowSettings(!showSettings)}>
+            <span className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Settings size={18} /> Runtime Settings
+            </span>
+            <button className="btn btn-ghost" type="button" onClick={(e) => { e.stopPropagation(); setShowSettings(!showSettings); }}>
+              {showSettings ? "Hide" : "Show"}
+            </button>
+          </div>
+          {showSettings && (
+          <div className="card-body">
+            <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 24 }}>
+              These settings are stored in the database and can be modified at runtime without redeploying the worker.
+            </p>
+            
+            <div className="settings-grid" style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-rate-alias" className="setting-label">Per-Alias Rate Limit (emails/hr)</label>
+                  <div className="setting-desc">Max forwards per alias per hour</div>
+                </div>
+                <div className="setting-control">
+                  <input
+                    id="setting-rate-alias"
+                    className="input"
+                    type="number"
+                    min="1"
+                    value={editedSettings.rate_limit_per_alias || ""}
+                    onChange={e => setEditedSettings({...editedSettings, rate_limit_per_alias: e.target.value})}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-rate-global" className="setting-label">Global Rate Limit (emails/hr)</label>
+                  <div className="setting-desc">Max total forwards per hour across all aliases</div>
+                </div>
+                <div className="setting-control">
+                  <input
+                    id="setting-rate-global"
+                    className="input"
+                    type="number"
+                    min="1"
+                    value={editedSettings.rate_limit_global || ""}
+                    onChange={e => setEditedSettings({...editedSettings, rate_limit_global: e.target.value})}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-max-bytes" className="setting-label">Max Inbound Email Size</label>
+                  <div className="setting-desc">Maximum email size accepted (in MB)</div>
+                </div>
+                <div className="setting-control">
+                  <input
+                    id="setting-max-bytes"
+                    className="input"
+                    type="number"
+                    min="1"
+                    value={editedSettings.max_inbound_bytes ? (parseInt(editedSettings.max_inbound_bytes, 10) / 1024 / 1024).toString() : ""}
+                    onChange={e => {
+                      const mb = parseInt(e.target.value, 10);
+                      if (!isNaN(mb)) {
+                        setEditedSettings({...editedSettings, max_inbound_bytes: (mb * 1024 * 1024).toString()});
+                      }
+                    }}
+                    style={{ width: 100 }}
+                  />
+                  <span className="text-muted font-mono" style={{ marginLeft: 8 }}>MB</span>
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <div className="setting-label">Catch-All Auto-Create</div>
+                  <div className="setting-desc">Automatically create aliases when receiving emails to unknown addresses</div>
+                </div>
+                <div className="setting-control">
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={editedSettings.catch_all_auto_create === "true"}
+                      onChange={e => setEditedSettings({...editedSettings, catch_all_auto_create: e.target.checked ? "true" : "false"})}
+                    />
+                    <span className="switch-track"></span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <div className="setting-label">User Registration</div>
+                  <div className="setting-desc">Allow new users to register accounts</div>
+                </div>
+                <div className="setting-control">
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={editedSettings.registration_enabled === "true"}
+                      onChange={e => setEditedSettings({...editedSettings, registration_enabled: e.target.checked ? "true" : "false"})}
+                    />
+                    <span className="switch-track"></span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-cors" className="setting-label">CORS Allowed Origins</label>
+                  <div className="setting-desc">Comma-separated exact origins allowed to access the API</div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <input
+                    id="setting-cors"
+                    className="input input-mono"
+                    type="text"
+                    value={editedSettings.cors_allowed_domains || ""}
+                    onChange={e => setEditedSettings({...editedSettings, cors_allowed_domains: e.target.value})}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-forwarded-from-format" className="setting-label">Forwarded Sender Display</label>
+                  <div className="setting-desc">
+                    How forwarded emails appear in your inbox. Default avoids raw @ signs for deliverability.
+                  </div>
+                  <div className="setting-desc input-mono" style={{ marginTop: 6 }}>
+                    {FORWARDED_FROM_FORMATS.find(f => f.value === editedSettings.forwarded_from_format)?.example || FORWARDED_FROM_FORMATS[0].example}
+                  </div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <select
+                    id="setting-forwarded-from-format"
+                    className="input"
+                    value={editedSettings.forwarded_from_format || "name_address_parens"}
+                    onChange={e => setEditedSettings({...editedSettings, forwarded_from_format: e.target.value})}
+                    style={{ width: "100%" }}
+                  >
+                    {FORWARDED_FROM_FORMATS.map(format => (
+                      <option key={format.value} value={format.value}>{format.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* AWS Config Overrides */}
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-ses-region" className="setting-label">SES Region (Override)</label>
+                  <div className="setting-desc">e.g. us-east-1</div>
+                </div>
+                <div className="setting-control">
+                  <input
+                    id="setting-ses-region"
+                    className="input input-mono"
+                    type="text"
+                    placeholder="Fallback to ENV if empty"
+                    value={editedSettings.ses_region || ""}
+                    onChange={e => setEditedSettings({...editedSettings, ses_region: e.target.value})}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-ses-key" className="setting-label">SES Access Key ID (Override)</label>
+                  <div className="setting-desc">AWS access key with SES permissions</div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <input
+                    id="setting-ses-key"
+                    className="input input-mono"
+                    type="text"
+                    placeholder="Fallback to ENV if empty"
+                    value={editedSettings.ses_access_key_id || ""}
+                    onChange={e => setEditedSettings({...editedSettings, ses_access_key_id: e.target.value})}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-ses-secret" className="setting-label">SES Secret Access Key (Override)</label>
+                  <div className="setting-desc">AWS secret key with SES permissions</div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <input
+                    id="setting-ses-secret"
+                    className="input input-mono"
+                    type="password"
+                    placeholder="Fallback to ENV if empty"
+                    value={editedSettings.ses_secret_access_key || ""}
+                    onChange={e => setEditedSettings({...editedSettings, ses_secret_access_key: e.target.value})}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-s3-bucket" className="setting-label">S3 Inbound Bucket (Override)</label>
+                  <div className="setting-desc">Bucket name where SES stores inbound emails</div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <input
+                    id="setting-s3-bucket"
+                    className="input input-mono"
+                    type="text"
+                    placeholder="Fallback to ENV if empty"
+                    value={editedSettings.s3_inbound_bucket || ""}
+                    onChange={e => setEditedSettings({...editedSettings, s3_inbound_bucket: e.target.value})}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-sns-topic" className="setting-label">SNS Inbound Topic ARN (Override)</label>
+                  <div className="setting-desc">Exact ARN of the SNS topic receiving SES inbound notifications</div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <input
+                    id="setting-sns-topic"
+                    className="input input-mono"
+                    type="text"
+                    placeholder="Fallback to ENV if empty"
+                    value={editedSettings.sns_inbound_topic_arn || ""}
+                    onChange={e => setEditedSettings({...editedSettings, sns_inbound_topic_arn: e.target.value})}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-sns-outbound-topic" className="setting-label">SNS Outbound Topic ARN (Override)</label>
+                  <div className="setting-desc">Exact ARN of the SNS topic sending SES bounce/complaint notifications</div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <input
+                    id="setting-sns-outbound-topic"
+                    className="input input-mono"
+                    type="text"
+                    placeholder="Fallback to ENV if empty"
+                    value={editedSettings.sns_allowed_topic_arn || ""}
+                    onChange={e => setEditedSettings({...editedSettings, sns_allowed_topic_arn: e.target.value})}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+              </div>
+
+            </div>
+            
+            <div style={{ marginTop: 32, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.05)", display: "flex", justifyContent: "flex-end", gap: 12 }}>
+              <button 
+                className="btn btn-ghost"
+                onClick={() => {
+                  setEditedSettings({
+                    rate_limit_per_alias: "200",
+                    rate_limit_global: "1000",
+                    max_inbound_bytes: "26214400",
+                    catch_all_auto_create: "true",
+                    registration_enabled: "true",
+                    cors_allowed_domains: "https://hidemyemail.dev,http://localhost:5173",
+                    forwarded_from_format: "name_address_parens"
+                  });
+                }}
+                type="button"
+              >
+                Reset to Defaults
+              </button>
+              <button 
+                className="btn btn-primary"
+                onClick={saveSettings}
+                disabled={!isSettingsDirty || savingSettings}
+              >
+                {savingSettings ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </div>
+          )}
+        </div>
+      )}
+
+      <div className="card stagger-5" style={{ marginBottom: 24 }}>
         <div className="card-header">
           <span className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Globe size={18} /> Global Domains
@@ -284,7 +719,7 @@ aws ses set-active-receipt-rule-set --rule-set-name hidemyemail-rules`}
         </div>
       </div>
 
-      <div className="stagger-4">
+      <div className="stagger-6">
         <h2 className="section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <Users size={18} /> Users
         </h2>

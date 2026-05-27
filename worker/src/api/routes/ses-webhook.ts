@@ -1,26 +1,27 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
-import { timingSafeEqual } from "../../lib/auth";
+import { getEnvWithOverride } from "../../lib/settings";
+import { verifySnsMessage } from "../../lib/sns";
 
-// SNS posts JSON (often Content-Type text/plain). We validate TopicArn and (prod TODO)
-// the SNS signature. SubscriptionConfirmation logs SubscribeURL for one-time manual confirm.
+// SNS posts JSON (often Content-Type text/plain). We verify SNS signatures,
+// validate TopicArn, and log SubscribeURL for one-time manual confirmation.
 export function sesWebhookRoutes() {
   const r = new Hono<AppEnv>();
   r.post("/ses/notification", async (c) => {
     const body = await c.req.json<any>().catch(() => null);
     if (!body) return c.json({ error: "bad body" }, 400);
 
-    // Webhook authentication — SNS_SECRET must be set
-    const secret = c.req.header("x-webhook-secret") || c.req.query("secret") || "";
-    if (!c.env.SNS_SECRET || !timingSafeEqual(secret, c.env.SNS_SECRET)) {
-      return c.json({ error: "unauthorized" }, 401);
-    }
+    const sesRegion = await getEnvWithOverride(c.env.DB, c.env, "ses_region");
+    const verified = await verifySnsMessage(body, {
+      region: sesRegion,
+      fetchCert: (c.env as any).__snsCertFetch ?? fetch,
+    });
+    if (!verified.ok) return c.json({ error: "invalid sns signature" }, 401);
 
-    // Enforce SNS_ALLOWED_TOPIC_ARN in production
-    if (c.env.ENVIRONMENT === "production" && !c.env.SNS_ALLOWED_TOPIC_ARN) {
-      return c.json({ error: "missing SNS_ALLOWED_TOPIC_ARN configuration in production" }, 500);
-    }
-    if (c.env.SNS_ALLOWED_TOPIC_ARN && body.TopicArn !== c.env.SNS_ALLOWED_TOPIC_ARN) {
+    // Enforce the configured outbound notification topic.
+    const snsAllowedTopicArn = await getEnvWithOverride(c.env.DB, c.env, "sns_allowed_topic_arn");
+    if (!snsAllowedTopicArn) return c.json({ error: "missing SNS_ALLOWED_TOPIC_ARN configuration" }, 500);
+    if (body.TopicArn !== snsAllowedTopicArn) {
       return c.json({ error: "forbidden topic" }, 403);
     }
 

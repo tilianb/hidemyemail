@@ -5,7 +5,7 @@ import { streamToBytes, toBase64 } from "../lib/bytes";
 import { parseMime, setHeader, removeHeaders, getHeader, serializeMime } from "../lib/mime";
 import { reverseAddress } from "../lib/reverse";
 import { sendRaw, SesTransientError } from "../lib/ses";
-import { RATE_PER_HOUR_ALIAS, RATE_PER_HOUR_GLOBAL, MAX_INBOUND_BYTES } from "../config";
+import { getNumericSetting, getBoolSetting, getEnvWithOverride, getSetting } from "../lib/settings";
 import { decryptDestination } from "../lib/crypto";
 
 type SesSend = typeof sendRaw;
@@ -19,10 +19,17 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   const domain = await q.getDomain(db, domainName);
   if (!domain || domain.active === 0) return;
 
-  const alias = await q.autoCreateAlias(db, domain.id, localPart, message.to.toLowerCase());
+  // Check catch-all auto-create setting
+  const autoCreateEnabled = await getBoolSetting(db, "catch_all_auto_create");
+  let alias;
+  if (autoCreateEnabled) {
+    alias = await q.autoCreateAlias(db, domain.id, localPart, message.to.toLowerCase());
+  } else {
+    alias = await q.getAlias(db, message.to.toLowerCase());
+  }
   
   if (!alias) {
-    // No alias found, and autoCreate failed because no default destination
+    // No alias found, and autoCreate disabled or failed
     // Silently drop
     return;
   }
@@ -45,14 +52,18 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
     return;
   }
 
+  // Read rate limits from DB settings (falls back to hardcoded defaults)
+  const rateLimitAlias = await getNumericSetting(db, "rate_limit_per_alias");
+  const rateLimitGlobal = await getNumericSetting(db, "rate_limit_global");
   const aliasCount = await q.countEventsSince(db, alias.id, now - 3600_000);
   const globalCount = await q.countEventsSince(db, null, now - 3600_000);
-  if (aliasCount >= RATE_PER_HOUR_ALIAS || globalCount >= RATE_PER_HOUR_GLOBAL) {
+  if (aliasCount >= rateLimitAlias || globalCount >= rateLimitGlobal) {
     await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "rate", ts: now });
     return;
   }
 
-  if (message.rawSize > MAX_INBOUND_BYTES) {
+  const maxInboundBytes = await getNumericSetting(db, "max_inbound_bytes");
+  if (message.rawSize > maxInboundBytes) {
     await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "too_large", ts: now });
     return;
   }
@@ -72,10 +83,10 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   // Reply-To is the reverse address so hitting Reply routes back through the alias.
   // e.g. From: "Alice 'alice@store.com'" <shop@domain>  Reply-To: shop+alice=store.com@domain
   const senderName = extractDisplayName(origFrom);
-  const safeSenderName = senderName.replace(/@/g, " at ");
-  const safeFrom = message.from.replace(/@/g, " at ");
-  const display = safeSenderName ? `${safeSenderName} - ${safeFrom}` : safeFrom;
-  mime = setHeader(mime, "From", `"${sanitize(display)}" <${alias.full_address}>`);
+  const format = await getSetting(db, "forwarded_from_format");
+  const display = buildForwardedFromDisplay(senderName, message.from, format);
+  const fromHeader = `"${sanitize(display)}" <${alias.full_address}>`;
+  mime = setHeader(mime, "From", fromHeader);
   mime = setHeader(mime, "Reply-To", reverseAddr);
   mime = removeHeaders(mime, ["DKIM-Signature", "ARC-Seal", "ARC-Message-Signature", "ARC-Authentication-Results", "Return-Path", "Sender"]);
   mime = setHeader(mime, "X-Reinjected", "1");
@@ -92,9 +103,12 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   const rawBase64 = toBase64(serializeMime(mime));
 
   try {
+    const sesAccessKeyId = await getEnvWithOverride(db, env, "ses_access_key_id");
+    const sesSecretAccessKey = await getEnvWithOverride(db, env, "ses_secret_access_key");
+    const sesRegion = await getEnvWithOverride(db, env, "ses_region");
     await ses(
-      { accessKeyId: env.SES_ACCESS_KEY_ID, secretAccessKey: env.SES_SECRET_ACCESS_KEY, region: env.SES_REGION },
-      { from: reverseAddr, to: dest, rawBase64 }
+      { accessKeyId: sesAccessKeyId, secretAccessKey: sesSecretAccessKey, region: sesRegion },
+      { from: fromHeader, to: dest, rawBase64 }
     );
   } catch (err) {
     await q.insertEvent(db, { alias_id: alias.id, type: "error", external_sender: message.from, detail: String(err), ts: now });
@@ -116,4 +130,30 @@ function extractDisplayName(from: string): string {
 }
 function sanitize(s: string): string {
   return s.replace(/["\r\n]/g, "").slice(0, 100);
+}
+
+function buildForwardedFromDisplay(senderName: string, senderEmail: string, format: string): string {
+  const safeName = senderName.replace(/@/g, " at ");
+  const safeEmail = senderEmail.replace(/@/g, " at ");
+  const name = safeName || safeEmail;
+
+  switch (format) {
+    case "name_address_parens_at":
+      return safeName ? `${safeName} (${senderEmail})` : senderEmail;
+    case "name_address_dash":
+      return safeName ? `${safeName} - ${safeEmail}` : safeEmail;
+    case "name_address_dash_at":
+      return safeName ? `${safeName} - ${senderEmail}` : senderEmail;
+    case "name_only":
+      return name;
+    case "address_only":
+      return safeEmail;
+    case "address_only_at":
+      return senderEmail;
+    case "via_hidemyemail":
+      return `${name} via HideMyEmail`;
+    case "name_address_parens":
+    default:
+      return safeName ? `${safeName} (${safeEmail})` : safeEmail;
+  }
 }

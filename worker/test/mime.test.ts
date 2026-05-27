@@ -29,6 +29,12 @@ test("setHeader replaces existing, appends new; removeHeaders drops", () => {
   expect(out).toContain("body line 1");
 });
 
+test("setHeader rejects header injection", () => {
+  const m = parseMime(RAW);
+  expect(() => setHeader(m, "X-Test", "ok\r\nBcc: attacker@example.com")).toThrow("Invalid header value");
+  expect(() => setHeader(m, "X-Test\nInjected", "ok")).toThrow("Invalid header name");
+});
+
 test("base64 round-trip on binary", () => {
   const bytes = new Uint8Array([0, 1, 2, 255, 254, 10, 13]);
   expect([...fromBase64(toBase64(bytes))]).toEqual([...bytes]);

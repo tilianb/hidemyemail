@@ -101,17 +101,25 @@ export async function signSession(secret: string, userId: number, ttlSeconds: nu
   return `${payload}.${await hmac(secret, payload)}`;
 }
 
+export async function signFreshAuth(secret: string, userId: number, ttlSeconds: number): Promise<string> {
+  const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
+  const payload = `fresh.${userId}.${exp}`;
+  return `${payload}.${await hmac(secret, payload)}`;
+}
+
+export async function verifyFreshAuth(secret: string, token: string, userId: number): Promise<boolean> {
+  const parts = token.split(".");
+  if (parts.length !== 4) return false;
+  const [v, userIdStr, expStr, sig] = parts;
+  if (v !== "fresh" || Number(userIdStr) !== userId) return false;
+  const payload = `${v}.${userIdStr}.${expStr}`;
+  const expected = await hmac(secret, payload);
+  if (!timingSafeEqual(sig!, expected)) return false;
+  return Number(expStr) > Math.floor(Date.now() / 1000);
+}
+
 export async function verifySession(secret: string, token: string): Promise<number | null> {
   const parts = token.split(".");
-  if (parts.length === 3) {
-    const [v, expStr, sig] = parts;
-    if (v !== "v1") return null;
-    const payload = `${v}.${expStr}`;
-    const expected = await hmac(secret, payload);
-    if (!timingSafeEqual(sig!, expected)) return null;
-    if (Number(expStr) > Math.floor(Date.now() / 1000)) return 1;
-    return null;
-  }
   if (parts.length === 4) {
     const [v, userIdStr, expStr, sig] = parts;
     if (v !== "v2") return null;

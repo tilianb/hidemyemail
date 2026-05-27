@@ -3,8 +3,31 @@ import * as q from "../db/queries";
 import { streamToBytes, toBase64 } from "../lib/bytes";
 import { parseMime, setHeader, removeHeaders, getHeader, serializeMime } from "../lib/mime";
 import { sendRaw, SesTransientError } from "../lib/ses";
+import { getEnvWithOverride } from "../lib/settings";
 
 type SesSend = typeof sendRaw;
+
+// Pull the bare "user@host" out of an RFC 5322 From header. Handles "Name <a@b>",
+// '"Quoted Name" <a@b>', and bare "a@b". Returns "" if no '@' is present.
+//
+// SECURITY: RFC 5322 lets a quoted-string display-name (and parenthesised
+// comments) contain arbitrary characters, including '<', '>', and '@'. SES
+// parses the real addr-spec out of the From header for DMARC alignment, so a
+// naïve "first <addr> wins" regex disagrees with SES when the display-name
+// embeds an angle-bracketed string — e.g. `From: "spoof <owner@me.com>"
+// <attacker@evil.com>` makes SES report DMARC=PASS for evil.com while a
+// naïve parser returns owner@me.com, opening the relay gate to anyone with a
+// DMARC-aligned attacker domain. Strip quoted-strings and comments first, then
+// take the *last* <addr-spec> (RFC 5322 places it after the display-name).
+function extractEmailAddress(value: string): string {
+  const stripped = value
+    .replace(/"(?:\\.|[^"\\])*"/g, "")  // RFC 5322 quoted-string display-name
+    .replace(/\([^()]*\)/g, "");         // RFC 5322 comment (non-nested)
+  const matches = [...stripped.matchAll(/<\s*([^<>\s]+@[^<>\s]+)\s*>/g)];
+  if (matches.length > 0) return matches[matches.length - 1]![1]!.trim();
+  const bare = stripped.match(/[^\s<>"',;]+@[^\s<>"',;]+/);
+  return bare ? bare[0].trim() : "";
+}
 
 export async function handleReply(
   message: ForwardableEmailMessage, env: Env, parsed: ParsedReverse, auth?: ReplyAuth,
@@ -25,22 +48,29 @@ export async function handleReply(
   }
 
   // SECURITY: reverse addresses are self-describing and therefore guessable (no random
-  // token). The relay gate is: (1) envelope sender ∈ owner destinations, AND (2) SES
-  // SPF/DMARC verdict PASS so that owner address cannot be spoofed. Fail closed.
+  // token). The relay gate must bind the *authenticated* principal to a verified owner
+  // destination. Each SES verdict authenticates a different RFC5322 field:
+  //   - spfVerdict PASS ⇒ envelope MAIL FROM (message.from) is authentic.
+  //   - dmarcVerdict PASS ⇒ header-From (after alignment) is authentic.
+  // Accepting `spf || dmarc` while only matching the envelope lets an attacker spoof
+  // MAIL FROM=owner and DKIM-sign with their own header-From to slip past. Match each
+  // signal against the principal it actually authenticates. Fail closed.
+  const raw = await streamToBytes(message.raw);
+  let mime = parseMime(raw);
+  const subject = getHeader(mime, "Subject") ?? "";
+  const headerFrom = extractEmailAddress(getHeader(mime, "From") ?? "").toLowerCase();
+  const envelopeFrom = message.from.toLowerCase();
   const owners = await q.ownerDestinations(db, alias.user_id, env.DESTINATION_ENCRYPTION_KEY);
-  const fromOwner = owners.has(message.from.toLowerCase());
-  const authOk = auth?.spf === "PASS" || auth?.dmarc === "PASS";
-  if (!fromOwner || !authOk) {
+  const spfOwner = auth?.spf === "PASS" && owners.has(envelopeFrom);
+  const dmarcOwner = auth?.dmarc === "PASS" && !!headerFrom && owners.has(headerFrom);
+  if (!spfOwner && !dmarcOwner) {
     await q.insertEvent(db, {
       alias_id: alias.id, type: "reject", external_sender: parsed.externalSender,
-      detail: fromOwner ? "spf" : "not_owner", ts: now,
+      detail: owners.has(envelopeFrom) || (headerFrom && owners.has(headerFrom)) ? "auth" : "not_owner", ts: now,
     });
     return;
   }
 
-  const raw = await streamToBytes(message.raw);
-  let mime = parseMime(raw);
-  const subject = getHeader(mime, "Subject") ?? "";
   mime = removeHeaders(mime, ["From", "Sender", "Reply-To", "Return-Path", "DKIM-Signature", "Message-ID", "X-Reinjected", "Received"]);
   mime = setHeader(mime, "From", alias.full_address);
   mime = setHeader(mime, "To", parsed.externalSender);
@@ -48,8 +78,11 @@ export async function handleReply(
 
   const rawBase64 = toBase64(serializeMime(mime));
   try {
+    const sesAccessKeyId = await getEnvWithOverride(db, env, "ses_access_key_id");
+    const sesSecretAccessKey = await getEnvWithOverride(db, env, "ses_secret_access_key");
+    const sesRegion = await getEnvWithOverride(db, env, "ses_region");
     await ses(
-      { accessKeyId: env.SES_ACCESS_KEY_ID, secretAccessKey: env.SES_SECRET_ACCESS_KEY, region: env.SES_REGION },
+      { accessKeyId: sesAccessKeyId, secretAccessKey: sesSecretAccessKey, region: sesRegion },
       { from: alias.full_address, to: parsed.externalSender, rawBase64 }
     );
   } catch (err) {

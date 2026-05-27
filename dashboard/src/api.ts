@@ -134,4 +134,9 @@ export const api = {
   // Recovery endpoints
   recoverSendCode: (token: string) => req<{ ok: true }>("/api/recover/send-code", { method: "POST", body: JSON.stringify({ token }) }),
   recoverVerify: (token: string, code: string) => req<{ ok: true; passphrase: string }>("/api/recover/verify", { method: "POST", body: JSON.stringify({ token, code }) }),
+
+  // Admin environment & settings
+  adminEnv: () => req<{ vars: Record<string, { value: string; secret: false }>; secrets: Record<string, { configured: boolean; preview?: string }> }>("/api/admin/env"),
+  adminSettings: () => req<{ settings: Record<string, { value: string; updated_at: number }> }>("/api/admin/settings"),
+  adminUpdateSettings: (data: Record<string, string>) => req<{ ok: true; updated: number }>("/api/admin/settings", { method: "PATCH", body: JSON.stringify(data) }),
 };

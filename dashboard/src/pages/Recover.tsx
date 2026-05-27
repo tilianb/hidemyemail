@@ -4,7 +4,11 @@ import { api } from "../api";
 
 export function Recover() {
   const { toast } = useToast();
-  const token = new URLSearchParams(window.location.search).get("token") || "";
+  const [token] = useState(() => {
+    const value = new URLSearchParams(window.location.search).get("token") || "";
+    if (value) window.history.replaceState(null, "", "/recover");
+    return value;
+  });
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [code, setCode] = useState("");
