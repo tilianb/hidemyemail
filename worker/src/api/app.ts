@@ -43,7 +43,7 @@ export function createApp() {
       try {
         domainsStr = await getSetting(c.env.DB, "cors_allowed_domains");
       } catch {
-        domainsStr = SETTING_DEFAULTS.cors_allowed_domains;
+        domainsStr = SETTING_DEFAULTS.cors_allowed_domains ?? "";
       }
       const allowedDomains = domainsStr.split(",").map(d => d.trim()).filter(Boolean);
       try {
