@@ -104,6 +104,11 @@ test("P2: recovery /recover/verify works for active users with valid token+code"
     "UPDATE users SET recovery_token = ?, recovery_mfa_code = ?, recovery_expires_at = ? WHERE id = ?"
   ).bind(token, code, futureMs, userId).run();
 
+  // Enroll in MFA to ensure it gets reset
+  await (env.DB as D1Database).prepare(
+    "INSERT INTO mfa (user_id, totp_secret, totp_enabled, totp_backup_codes) VALUES (?, 'sec', 1, '[]')"
+  ).bind(userId).run();
+
   const res = await app.request("/api/recover/verify", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -113,6 +118,9 @@ test("P2: recovery /recover/verify works for active users with valid token+code"
   const body = await res.json<{ ok: boolean; passphrase: string }>();
   expect(body.ok).toBe(true);
   expect(typeof body.passphrase).toBe("string");
+
+  const mfaAfter = await (env.DB as D1Database).prepare("SELECT totp_enabled FROM mfa WHERE user_id = ?").bind(userId).first<{ totp_enabled: number }>();
+  expect(mfaAfter?.totp_enabled).toBe(0);
 });
 
 test("P2: recovery /recover/send-code rejects inactive users", async () => {
