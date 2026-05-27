@@ -201,7 +201,9 @@ export function adminRoutes() {
     const id = parseInt(c.req.param("id"), 10);
     if (isNaN(id)) return c.json({ error: "invalid id" }, 400);
 
-    const { allow_custom_aliases, active } = await c.req.json<{ allow_custom_aliases?: number, active?: number }>().catch(() => ({}));
+    const { allow_custom_aliases, active } = await c.req
+      .json<{ allow_custom_aliases?: number, active?: number }>()
+      .catch((): { allow_custom_aliases?: number, active?: number } => ({}));
     const domainRow = await db.prepare("SELECT domain FROM domains WHERE id = ? AND is_global = 1").bind(id).first<{ domain: string }>();
     if (!domainRow) return c.json({ error: "domain not found" }, 404);
     if (allow_custom_aliases !== undefined) {
