@@ -39,6 +39,53 @@ async function hasFreshAuth(c: Context<AppEnv>): Promise<boolean> {
 export function settingsRoutes() {
   const r = new Hono<AppEnv>();
 
+  r.get("/preferences", async (c) => {
+    const userId = c.get("userId");
+    const row = await c.env.DB.prepare(
+      "SELECT inline_actions_pref, inline_actions_position FROM users WHERE id = ?"
+    ).bind(userId).first<{ inline_actions_pref: string | null; inline_actions_position: string | null }>();
+    const { getBoolSetting, getSetting } = await import("../../lib/settings");
+    const defaultEnabled = await getBoolSetting(c.env.DB, "inline_actions_default_enabled");
+    const defaultPosition = (await getSetting(c.env.DB, "inline_actions_default_position")) || "footer";
+    return c.json({
+      inline_actions_pref: row?.inline_actions_pref ?? null, // 'on' | 'off' | null
+      inline_actions_position: row?.inline_actions_position ?? null, // null = inherit
+      defaults: { inline_actions_enabled: defaultEnabled, inline_actions_position: defaultPosition },
+    });
+  });
+
+  r.patch("/preferences", async (c) => {
+    const userId = c.get("userId");
+    const body = await c.req.json<{ inline_actions_pref?: string | null; inline_actions_position?: string | null }>()
+      .catch(() => ({} as { inline_actions_pref?: string | null; inline_actions_position?: string | null }));
+
+    const sets: string[] = [];
+    const binds: any[] = [];
+
+    if ("inline_actions_pref" in body) {
+      const v = body.inline_actions_pref;
+      if (v !== null && v !== "on" && v !== "off") {
+        return c.json({ error: "Invalid inline_actions_pref" }, 400);
+      }
+      sets.push("inline_actions_pref = ?");
+      binds.push(v);
+    }
+
+    if ("inline_actions_position" in body) {
+      const v = body.inline_actions_position;
+      if (v !== null && v !== "header" && v !== "footer") {
+        return c.json({ error: "Invalid inline_actions_position" }, 400);
+      }
+      sets.push("inline_actions_position = ?");
+      binds.push(v);
+    }
+
+    if (sets.length === 0) return c.json({ error: "No fields to update" }, 400);
+    binds.push(userId);
+    await c.env.DB.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).bind(...binds).run();
+    return c.json({ ok: true });
+  });
+
   r.get("/mfa", async (c) => {
     const userId = c.get("userId");
     const mfa = await c.env.DB.prepare(
@@ -58,7 +105,7 @@ export function settingsRoutes() {
   // Begin TOTP setup: generate secret and return URI for QR code
   r.post("/mfa/setup", async (c) => {
     const userId = c.get("userId");
-    if (!(await hasFreshAuth(c))) return c.json({ error: "fresh authentication required" }, 401);
+    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
     const { generateTOTPSecret, makeTOTPUri } = await import("../../lib/totp");
     const { encryptDestination } = await import("../../lib/crypto");
 
@@ -129,9 +176,9 @@ export function settingsRoutes() {
   // Disable TOTP — requires a valid TOTP code or backup code for confirmation
   r.post("/mfa/disable", async (c) => {
     const ip = c.req.header("cf-connecting-ip") || "unknown";
-    if (!(await canAttempt(ip, c.env.DB))) return c.json({ error: "too many attempts" }, 429);
+    if (!(await canAttempt(ip, c.env.DB))) return c.json({ error: "Too many attempts" }, 429);
     const userId = c.get("userId");
-    if (!(await hasFreshAuth(c))) return c.json({ error: "fresh authentication required" }, 401);
+    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
     const { code } = await c.req.json<{ code: string }>().catch(() => ({ code: "" }));
 
     if (!code) return c.json({ error: "Code required" }, 400);
@@ -172,9 +219,9 @@ export function settingsRoutes() {
   // Regenerate backup codes — requires current TOTP code
   r.post("/mfa/backup-codes", async (c) => {
     const ip = c.req.header("cf-connecting-ip") || "unknown";
-    if (!(await canAttempt(ip, c.env.DB))) return c.json({ error: "too many attempts" }, 429);
+    if (!(await canAttempt(ip, c.env.DB))) return c.json({ error: "Too many attempts" }, 429);
     const userId = c.get("userId");
-    if (!(await hasFreshAuth(c))) return c.json({ error: "fresh authentication required" }, 401);
+    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
     const { code } = await c.req.json<{ code: string }>().catch(() => ({ code: "" }));
 
     if (!code || !/^\d{6}$/.test(code)) {
@@ -219,7 +266,7 @@ export function settingsRoutes() {
   // Generate a WebAuthn registration challenge
   r.post("/passkeys/challenge", async (c) => {
     const userId = c.get("userId");
-    if (!(await hasFreshAuth(c))) return c.json({ error: "fresh authentication required" }, 401);
+    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
     const { generateRegistrationOptions } = await import("@simplewebauthn/server");
     const { rpID } = getRpFromOrigin(c.req.header("origin"));
 
@@ -257,7 +304,7 @@ export function settingsRoutes() {
   // Verify attestation and persist the new credential
   r.post("/passkeys/register", async (c) => {
     const sessionUserId = c.get("userId");
-    if (!(await hasFreshAuth(c))) return c.json({ error: "fresh authentication required" }, 401);
+    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
 
     const regCookie = getCookie(c, "__Host-passkey-reg");
     if (!regCookie) return c.json({ error: "No registration challenge" }, 401);
@@ -270,7 +317,7 @@ export function settingsRoutes() {
     const { response, deviceName } = await c.req.json<{ response: RegistrationResponseJSON; deviceName?: string }>()
       .catch(() => ({ response: null as unknown as RegistrationResponseJSON, deviceName: undefined }));
 
-    if (!response?.id) return c.json({ error: "invalid request" }, 400);
+    if (!response?.id) return c.json({ error: "Invalid request" }, 400);
 
     const { verifyRegistrationResponse } = await import("@simplewebauthn/server");
     const { rpID, expectedOrigin } = getRpFromOrigin(c.req.header("origin"));
@@ -320,7 +367,7 @@ export function settingsRoutes() {
 
   r.delete("/passkeys/:id", async (c) => {
     const userId = c.get("userId");
-    if (!(await hasFreshAuth(c))) return c.json({ error: "fresh authentication required" }, 401);
+    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
     const id = c.req.param("id");
 
     await c.env.DB.prepare(

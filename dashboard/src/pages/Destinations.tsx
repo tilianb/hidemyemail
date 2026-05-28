@@ -126,11 +126,6 @@ export function Destinations() {
                           <Clock size={12} className="badge-icon" /> Pending
                         </span>
                       )}
-                      {d.is_default === 1 && (
-                        <span className="badge badge-accent badge-adjacent">
-                          Default
-                        </span>
-                      )}
                     </td>
                     <td>
                       <span className="font-mono text-muted">
@@ -139,7 +134,11 @@ export function Destinations() {
                     </td>
                     <td>
                       <div className="table-actions">
-                        {d.verified_at && d.is_default !== 1 && (
+                        {d.is_default === 1 ? (
+                          <span className="badge badge-accent">
+                            Default
+                          </span>
+                        ) : d.verified_at && (
                           <button className="btn btn-secondary btn-compact" onClick={() => setDefault(d.id)} title="Set as default">
                             Set Default
                           </button>

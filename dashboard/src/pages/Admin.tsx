@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type Domain } from "../api";
 import { useToast, TableSkeleton, EmptyState, ConfirmDialog, PromptDialog, ChoiceDialog, CopyButton } from "../ui";
-import { Users, Trash2, Globe, Cloud, Edit3, Key, Server, Settings } from "lucide-react";
+import { Users, Trash2, Globe, Cloud, Edit3, Key, Server, Settings, Send, CheckCircle, XCircle } from "lucide-react";
 
 const FORWARDED_FROM_FORMATS = [
   { value: "name_address_parens", label: "Name (email at domain)", example: '"Alice (alice at store.com)" <alias@domain>' },
@@ -14,6 +14,14 @@ const FORWARDED_FROM_FORMATS = [
   { value: "via_hidemyemail", label: "Name via HideMyEmail", example: '"Alice via HideMyEmail" <alias@domain>' },
 ];
 
+const TEST_EMAIL_TYPES = [
+  { value: "recovery", label: "Recovery link" },
+  { value: "mfa", label: "MFA code" },
+  { value: "notification", label: "System notification" },
+  { value: "demo_forward", label: "Demo forward (with toolbar)" },
+  { value: "demo_oq", label: "Demo forward (over-quota)" },
+];
+
 function verificationRecords(domain: Domain, sesRegion: string) {
   return {
     txtHost: `_hidemyemail.${domain.domain}`,
@@ -22,12 +30,14 @@ function verificationRecords(domain: Domain, sesRegion: string) {
     mxValue: `inbound-smtp.${sesRegion}.amazonaws.com`,
     spfHost: domain.domain,
     spfValue: "v=spf1 include:amazonses.com ~all",
+    wildcardMxHost: `*.${domain.domain}`,
+    wildcardMxValue: `inbound-smtp.${sesRegion}.amazonaws.com`,
   };
 }
 
-function DnsField({ label, value }: { label: string; value: string }) {
+function DnsField({ label, value, flex = 1 }: { label: string; value: string; flex?: number }) {
   return (
-    <div className="dns-field">
+    <div className="dns-field" style={{ flex }}>
       <div className="dns-field-label">{label}</div>
       <div className="dns-field-value">
         <code className="input-mono">{value}</code>
@@ -37,14 +47,24 @@ function DnsField({ label, value }: { label: string; value: string }) {
   );
 }
 
-function DnsRecordRow({ type, fields }: { type: string; fields: { label: string; value: string }[] }) {
+function DnsRecordRow({ type, fields, status }: { type: string; fields: { label: string; value: string; flex?: number }[], status?: "success" | "error" }) {
   return (
     <div className="dns-record-row">
       <div className="dns-record-type">
         <span>Type</span>
         <code className="input-mono">{type}</code>
       </div>
-      {fields.map(field => <DnsField key={`${type}-${field.label}`} label={field.label} value={field.value} />)}
+      {fields.map(field => <DnsField key={`${type}-${field.label}`} label={field.label} value={field.value} flex={field.flex} />)}
+      {status === "success" && (
+        <div style={{ display: "flex", alignItems: "center", paddingLeft: "1rem", marginLeft: "auto" }}>
+          <CheckCircle size={20} style={{ color: "#10b981" }} />
+        </div>
+      )}
+      {status === "error" && (
+        <div style={{ display: "flex", alignItems: "center", paddingLeft: "1rem", marginLeft: "auto" }}>
+          <XCircle size={20} style={{ color: "#ef4444" }} />
+        </div>
+      )}
     </div>
   );
 }
@@ -66,6 +86,13 @@ export function Admin() {
   const [choiceState, setChoiceState] = useState<{ title: string; body: string; primaryLabel: string; secondaryLabel: string; onPrimary: () => void; onSecondary: () => void; } | null>(null);
   const [expandedVerifyId, setExpandedVerifyId] = useState<number | null>(null);
   const [verifyingDomain, setVerifyingDomain] = useState(false);
+  const [healthStatus, setHealthStatus] = useState<Record<number, { verify_txt?: "success" | "error"; mx?: "success" | "error"; spf?: "success" | "error"; wildcard_mx?: "success" | "error" }>>(() => {
+    try { return JSON.parse(localStorage.getItem("domain_health") || "{}"); } catch { return {}; }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem("domain_health", JSON.stringify(healthStatus)); } catch {}
+  }, [healthStatus]);
 
   const [envData, setEnvData] = useState<{ vars: Record<string, { value: string; secret: false }>; secrets: Record<string, { configured: boolean; preview?: string }> } | null>(null);
   const [settingsData, setSettingsData] = useState<Record<string, { value: string; updated_at: number }> | null>(null);
@@ -73,6 +100,9 @@ export function Admin() {
   const [savingSettings, setSavingSettings] = useState(false);
   const [showEnvVars, setShowEnvVars] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [inboundBytesInput, setInboundBytesInput] = useState<string>("");
+  const [testEmailForm, setTestEmailForm] = useState({ type: "notification", to: "" });
+  const [sendingTestEmail, setSendingTestEmail] = useState(false);
   const workerOrigin = window.location.origin;
   const currentMainGlobalDomain = editedSettings.main_global_domain || "";
   const selectableMainGlobalDomains = globalDomains.filter(d => d.active === 1 && d.verified_at !== null);
@@ -106,6 +136,9 @@ export function Admin() {
         newEdited[k] = v.value;
       }
       setEditedSettings(newEdited);
+      setInboundBytesInput(setRes.settings.max_inbound_bytes?.value 
+        ? (parseInt(setRes.settings.max_inbound_bytes.value, 10) / 1024 / 1024).toString() 
+        : "");
     } catch {
       toast("Failed to load admin data", "error");
     } finally {
@@ -171,13 +204,38 @@ export function Admin() {
     }
   }
 
+  async function sendTestEmail(e: React.FormEvent) {
+    e.preventDefault();
+    setSendingTestEmail(true);
+    try {
+      const res = await api.adminSendTestEmail(testEmailForm);
+      toast(`Test email sent to ${res.to}`, "success");
+    } catch (err: any) {
+      toast(err.message || "Failed to send test email", "error");
+    } finally {
+      setSendingTestEmail(false);
+    }
+  }
+
   async function verifyDomain(domain: Domain) {
     setVerifyingDomain(true);
+    setHealthStatus(prev => { const { [domain.id]: _, ...rest } = prev; return rest; });
     try {
       const res = await api.adminVerifyDomain(domain.id);
+      if (res.results) {
+        setHealthStatus(prev => ({
+          ...prev,
+          [domain.id]: {
+            verify_txt: res.results!.verify_txt ? "success" : "error",
+            mx: res.results!.mx ? "success" : "error",
+            spf: res.results!.spf ? "success" : "error",
+            wildcard_mx: res.results!.wildcard_mx ? "success" : "error",
+          }
+        }));
+      }
       if (res.verified) {
         toast("Domain verified successfully", "success");
-        setExpandedVerifyId(null);
+        if (!domain.verified_at) setExpandedVerifyId(null);
         await load();
       } else {
         toast(res.error || "Domain not yet verified", "error");
@@ -264,7 +322,29 @@ export function Admin() {
                   <section key={d.id} className={`domain-module ${isMain ? "domain-module-main" : ""}`}>
                     <div className="domain-module-mainline">
                       <div className="domain-identity">
-                        <span className="domain-signal" aria-hidden="true" />
+                        {(() => {
+                          let dotColor = "var(--text-muted)";
+                          let shadowColor = "transparent";
+                          const dh = healthStatus[d.id];
+                          const hasHealthError = dh && Object.values(dh).some(v => v === "error");
+                          if (hasHealthError) {
+                            dotColor = "#ef4444";
+                            shadowColor = "rgba(239, 68, 68, 0.45)";
+                          } else if (!d.verified_at) {
+                            dotColor = "var(--accent)";
+                            shadowColor = "rgba(255, 179, 0, 0.45)";
+                          } else if (d.active === 1) {
+                            dotColor = "#10b981";
+                            shadowColor = "rgba(16, 185, 129, 0.45)";
+                          }
+                          return (
+                            <span 
+                              className="domain-signal" 
+                              aria-hidden="true" 
+                              style={{ background: dotColor, boxShadow: `0 0 18px ${shadowColor}` }} 
+                            />
+                          );
+                        })()}
                         <div>
                           <div className="domain-name-line">
                             <span className="font-mono domain-name">{d.domain}</span>
@@ -283,10 +363,11 @@ export function Admin() {
                           {expanded ? "Hide DNS" : (d.verified_at ? "DNS records" : "Verify DNS")}
                         </button>
 
-                        <label className="domain-toggle">
-                          <span>Active</span>
-                          <div className="switch">
-                              <input type="checkbox" checked={d.active === 1} disabled={d.domain === currentMainGlobalDomain} onChange={async (e) => {
+                        {!isMain && (
+                          <label className="domain-toggle" style={{ opacity: !d.verified_at ? 0.5 : 1, cursor: !d.verified_at ? "not-allowed" : "pointer" }} title={!d.verified_at ? "Verify DNS before activating" : ""}>
+                            <span>Active</span>
+                            <div className="switch">
+                              <input type="checkbox" checked={d.active === 1} disabled={!d.verified_at} onChange={async (e) => {
                                 try {
                                   await api.adminUpdateDomain(d.id, { active: e.target.checked ? 1 : 0 });
                                   load();
@@ -294,7 +375,21 @@ export function Admin() {
                               }} />
                               <span className="switch-track"></span>
                             </div>
-                        </label>
+                          </label>
+                        )}
+
+                        <label className="domain-toggle" style={{ opacity: d.active && d.verified_at ? 1 : 0.5 }} title={!d.verified_at ? "Verify DNS before enabling subdomain aliases" : ""}>
+                            <span>Subdomain aliases</span>
+                            <div className="switch">
+                              <input type="checkbox" checked={d.allow_subdomain_aliases === 1} disabled={!d.active || !d.verified_at} onChange={async (e) => {
+                                try {
+                                  await api.adminUpdateDomain(d.id, { allow_subdomain_aliases: e.target.checked ? 1 : 0 });
+                                  load();
+                                } catch (err: any) { toast(err.message, "error"); }
+                              }} />
+                              <span className="switch-track"></span>
+                            </div>
+                          </label>
 
                         <label className="domain-toggle" style={{ opacity: d.active ? 1 : 0.5 }}>
                           <span>Custom aliases</span>
@@ -309,7 +404,7 @@ export function Admin() {
                             </div>
                         </label>
 
-                        {d.domain !== currentMainGlobalDomain && (
+                        {d.domain !== currentMainGlobalDomain ? (
                             <button 
                               className="btn-icon danger" 
                               title="Delete global domain"
@@ -332,6 +427,10 @@ export function Admin() {
                             >
                               <Trash2 size={16} />
                             </button>
+                        ) : (
+                            <button className="btn-icon danger" style={{ visibility: "hidden" }} disabled aria-hidden="true">
+                              <Trash2 size={16} />
+                            </button>
                         )}
                       </div>
                     </div>
@@ -343,42 +442,54 @@ export function Admin() {
                             <div className="dns-panel-title">DNS records for <span className="font-mono">{d.domain}</span></div>
                             <p>Copy these exact provider-ready records. Use the full Host/FQDN shown below for your DNS host field.</p>
                           </div>
+                          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                            <button 
+                              className={d.verified_at ? "btn btn-outline btn-sm" : "btn btn-primary btn-sm"} 
+                              onClick={() => verifyDomain(d)}
+                              disabled={verifyingDomain}
+                            >
+                              {verifyingDomain ? "Checking..." : (d.verified_at ? "Check Health" : "Verify DNS")}
+                            </button>
+                          </div>
                         </div>
                         <div className="dns-record-grid">
                             <DnsRecordRow
-                              type="TXT"
+                              type="MX"
+                              status={healthStatus[d.id]?.mx}
                               fields={[
-                                { label: "Host / FQDN", value: records.txtHost },
-                                { label: "Value", value: records.txtValue },
+                                { label: "Host / FQDN", value: records.mxHost, flex: 1 },
+                                { label: "Priority", value: "10", flex: 0.5 },
+                                { label: "Value", value: records.mxValue, flex: 2 },
                               ]}
                             />
+                            {d.allow_subdomain_aliases === 1 && (
+                              <DnsRecordRow
+                                type="MX (wildcard)"
+                                status={healthStatus[d.id]?.wildcard_mx}
+                                fields={[
+                                  { label: "Host / FQDN", value: records.wildcardMxHost, flex: 1 },
+                                  { label: "Priority", value: "10", flex: 0.5 },
+                                  { label: "Value", value: records.wildcardMxValue, flex: 2 },
+                                ]}
+                              />
+                            )}
                             <DnsRecordRow
-                              type="MX"
+                              type="TXT"
+                              status={healthStatus[d.id]?.verify_txt}
                               fields={[
-                                { label: "Host / FQDN", value: records.mxHost },
-                                { label: "Priority", value: "10" },
-                                { label: "Value", value: records.mxValue },
+                                { label: "Host / FQDN", value: records.txtHost, flex: 1 },
+                                { label: "Value", value: records.txtValue, flex: 2 },
                               ]}
                             />
                             <DnsRecordRow
                               type="TXT (SPF)"
+                              status={healthStatus[d.id]?.spf}
                               fields={[
-                                { label: "Host / FQDN", value: records.spfHost },
-                                { label: "Value", value: records.spfValue },
+                                { label: "Host / FQDN", value: records.spfHost, flex: 1 },
+                                { label: "Value", value: records.spfValue, flex: 2 },
                               ]}
                             />
                         </div>
-                          {!d.verified_at && (
-                            <div className="dns-panel-actions">
-                              <button 
-                                className="btn btn-primary" 
-                                onClick={() => verifyDomain(d)}
-                                disabled={verifyingDomain}
-                              >
-                                {verifyingDomain ? "Verifying..." : "Verify DNS"}
-                              </button>
-                            </div>
-                          )}
                         </div>
                       )}
                   </section>
@@ -564,23 +675,6 @@ export function Admin() {
             <div className="settings-grid" style={{ display: "flex", flexDirection: "column", gap: 0 }}>
               <div className="setting-row">
                 <div className="setting-info">
-                  <label htmlFor="setting-rate-alias" className="setting-label">Per-Alias Rate Limit (emails/hr)</label>
-                  <div className="setting-desc">Max forwards per alias per hour</div>
-                </div>
-                <div className="setting-control">
-                  <input
-                    id="setting-rate-alias"
-                    className="input"
-                    type="number"
-                    min="1"
-                    value={editedSettings.rate_limit_per_alias || ""}
-                    onChange={e => setEditedSettings({...editedSettings, rate_limit_per_alias: e.target.value})}
-                  />
-                </div>
-              </div>
-
-              <div className="setting-row">
-                <div className="setting-info">
                   <label htmlFor="setting-rate-global" className="setting-label">Global Rate Limit (emails/hr)</label>
                   <div className="setting-desc">Max total forwards per hour across all aliases</div>
                 </div>
@@ -588,10 +682,78 @@ export function Admin() {
                   <input
                     id="setting-rate-global"
                     className="input"
-                    type="number"
-                    min="1"
-                    value={editedSettings.rate_limit_global || ""}
-                    onChange={e => setEditedSettings({...editedSettings, rate_limit_global: e.target.value})}
+                    type="text"
+                    inputMode="numeric"
+                    value={editedSettings.rate_limit_global ?? ""}
+                    onChange={e => setEditedSettings({...editedSettings, rate_limit_global: e.target.value.replace(/[^0-9-]/g, "").replace(/(?!^)-/g, "")})}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-rate-alias" className="setting-label">Per-Alias Rate Limit (emails/hr)</label>
+                  <div className="setting-desc">Max forwards per alias per hour</div>
+                </div>
+                <div className="setting-control">
+                  <input
+                    id="setting-rate-alias"
+                    className="input"
+                    type="text"
+                    inputMode="numeric"
+                    value={editedSettings.rate_limit_per_alias ?? ""}
+                    onChange={e => setEditedSettings({...editedSettings, rate_limit_per_alias: e.target.value.replace(/[^0-9-]/g, "").replace(/(?!^)-/g, "")})}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-max-total-aliases" className="setting-label">Max Total Aliases</label>
+                  <div className="setting-desc">Maximum number of aliases a user can have (-1 for unlimited)</div>
+                </div>
+                <div className="setting-control">
+                  <input
+                    id="setting-max-total-aliases"
+                    className="input"
+                    type="text"
+                    inputMode="numeric"
+                    value={editedSettings.max_total_aliases ?? "-1"}
+                    onChange={e => setEditedSettings({...editedSettings, max_total_aliases: e.target.value.replace(/[^0-9-]/g, "").replace(/(?!^)-/g, "")})}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <div className="setting-label">Alias Quota Buffer</div>
+                  <div className="setting-desc">Allow one catch-all auto-created alias above the max total alias limit before dropping new unknown addresses</div>
+                </div>
+                <div className="setting-control">
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={editedSettings.alias_quota_buffer_enabled === "true"}
+                      onChange={e => setEditedSettings({...editedSettings, alias_quota_buffer_enabled: e.target.checked ? "true" : "false"})}
+                    />
+                    <span className="switch-track"></span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-max-subdomains" className="setting-label">Max Subdomains</label>
+                  <div className="setting-desc">Maximum number of custom subdomains a user can create (-1 for unlimited)</div>
+                </div>
+                <div className="setting-control">
+                  <input
+                    id="setting-max-subdomains"
+                    className="input"
+                    type="text"
+                    inputMode="numeric"
+                    value={editedSettings.max_subdomains ?? "-1"}
+                    onChange={e => setEditedSettings({...editedSettings, max_subdomains: e.target.value.replace(/[^0-9-]/g, "").replace(/(?!^)-/g, "")})}
                   />
                 </div>
               </div>
@@ -605,13 +767,19 @@ export function Admin() {
                   <input
                     id="setting-max-bytes"
                     className="input"
-                    type="number"
-                    min="1"
-                    value={editedSettings.max_inbound_bytes ? (parseInt(editedSettings.max_inbound_bytes, 10) / 1024 / 1024).toString() : ""}
+                    type="text"
+                    inputMode="numeric"
+                    value={inboundBytesInput}
                     onChange={e => {
-                      const mb = parseInt(e.target.value, 10);
-                      if (!isNaN(mb)) {
-                        setEditedSettings({...editedSettings, max_inbound_bytes: (mb * 1024 * 1024).toString()});
+                      const val = e.target.value.replace(/[^0-9]/g, "");
+                      setInboundBytesInput(val);
+                      if (val === "") {
+                        setEditedSettings({...editedSettings, max_inbound_bytes: ""});
+                      } else {
+                        const mb = parseInt(val, 10);
+                        if (!isNaN(mb)) {
+                          setEditedSettings({...editedSettings, max_inbound_bytes: (mb * 1024 * 1024).toString()});
+                        }
                       }
                     }}
                     style={{ width: 100 }}
@@ -653,6 +821,44 @@ export function Admin() {
                   </label>
                 </div>
               </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-inline-actions" className="setting-label">Inline Action Links — Default</label>
+                  <div className="setting-desc">
+                    Default for new users. Each user can override in their Settings page.
+                    Choose where the Block / Mute&nbsp;7d / Disable alias bar appears in forwarded emails, or disable it entirely.
+                  </div>
+                </div>
+                <div className="setting-control" style={{ minWidth: 160 }}>
+                  <select
+                    id="setting-inline-actions"
+                    className="input"
+                    value={
+                      editedSettings.inline_actions_default_enabled === "true"
+                        ? ((editedSettings.inline_actions_default_position || "footer"))
+                        : "disable"
+                    }
+                    onChange={e => {
+                      const v = e.target.value;
+                      if (v === "disable") {
+                        setEditedSettings({ ...editedSettings, inline_actions_default_enabled: "false" });
+                      } else {
+                        setEditedSettings({
+                          ...editedSettings,
+                          inline_actions_default_enabled: "true",
+                          inline_actions_default_position: v,
+                        });
+                      }
+                    }}
+                  >
+                    <option value="disable">Disabled</option>
+                    <option value="header">Header</option>
+                    <option value="footer">Footer</option>
+                  </select>
+                </div>
+              </div>
+
 
               <div className="setting-row">
                 <div className="setting-info">
@@ -717,6 +923,38 @@ export function Admin() {
                     ))}
                   </select>
                 </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="test-email-to" className="setting-label">Send Test Email</label>
+                  <div className="setting-desc">Send a sample system email through current SES settings to verify deliverability.</div>
+                </div>
+                <form className="setting-control test-email-control" onSubmit={sendTestEmail}>
+                  <select
+                    className="input"
+                    value={testEmailForm.type}
+                    onChange={e => setTestEmailForm(f => ({ ...f, type: e.target.value }))}
+                    aria-label="Test email type"
+                  >
+                    {TEST_EMAIL_TYPES.map(type => (
+                      <option key={type.value} value={type.value}>{type.label}</option>
+                    ))}
+                  </select>
+                  <input
+                    id="test-email-to"
+                    className="input input-mono"
+                    type="email"
+                    placeholder="operator@example.com"
+                    value={testEmailForm.to}
+                    onChange={e => setTestEmailForm(f => ({ ...f, to: e.target.value }))}
+                    required
+                  />
+                  <button className="btn btn-primary" type="submit" disabled={sendingTestEmail}>
+                    <Send size={14} />
+                    {sendingTestEmail ? "Sending..." : "Send"}
+                  </button>
+                </form>
               </div>
 
               {/* AWS Config Overrides */}
@@ -834,11 +1072,14 @@ export function Admin() {
                 className="btn btn-ghost"
                 onClick={() => {
                   setEditedSettings({
-                    rate_limit_per_alias: "200",
+                    rate_limit_per_alias: "20",
                     rate_limit_global: "1000",
                     max_inbound_bytes: "26214400",
                     catch_all_auto_create: "true",
+                    alias_quota_buffer_enabled: "true",
                     registration_enabled: "false",
+                    inline_actions_default_enabled: "false",
+                    inline_actions_default_position: "footer",
                     main_global_domain: "",
                     cors_allowed_domains: "http://localhost:5173",
                     forwarded_from_format: "name_address_parens"

@@ -1,7 +1,7 @@
 // Hardcoded fallback defaults — used when DB settings row is missing.
 // These match the seed values in migration 0007_settings.sql.
 export const SETTING_DEFAULTS: Record<string, string> = {
-  rate_limit_per_alias: "200",
+  rate_limit_per_alias: "20",
   rate_limit_global: "1000",
   max_inbound_bytes: String(25 * 1024 * 1024),
   catch_all_auto_create: "true",
@@ -15,10 +15,15 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   sns_inbound_topic_arn: "",
   forwarded_from_format: "name_address_parens",
   main_global_domain: "",
+  max_total_aliases: "10",
+  alias_quota_buffer_enabled: "true",
+  max_subdomains: "5",
+  inline_actions_default_enabled: "false",
+  inline_actions_default_position: "footer",
 };
 
 // Kept for backward-compat with any imports (tests, etc.)
-export const RATE_PER_HOUR_ALIAS = 200;   // mirrors old ANONADDY_LIMIT
+export const RATE_PER_HOUR_ALIAS = 20;   // mirrors old ANONADDY_LIMIT
 export const RATE_PER_HOUR_GLOBAL = 1000;
 export const MAX_INBOUND_BYTES = 25 * 1024 * 1024;
 

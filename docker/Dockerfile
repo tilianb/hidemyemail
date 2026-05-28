@@ -31,36 +31,42 @@ RUN cd dashboard && npm run build && \
     cd ../worker && npx wrangler deploy --dry-run --outdir=dist --env="" 2>&1 | tail -20
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Stage 2: runtime — Miniflare host
+# Stage 2: runtime dependencies — install on glibc Linux, then copy only output
 # ──────────────────────────────────────────────────────────────────────────────
-FROM node:22-bookworm-slim AS runtime
-
-# Miniflare pulls workerd (native binary) + sharp. Install only runtime libs.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates tini \
-    && rm -rf /var/lib/apt/lists/*
+FROM node:22-bookworm-slim AS runtime-deps
 
 WORKDIR /app
 
 # Pin Miniflare to the same minor as the worker's wrangler so compatibility-date
-# semantics line up. Bump together.
-COPY docker/package.json ./
+# semantics line up. Bump together. Use the lockfile for reproducible installs.
+COPY docker/package.json docker/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
-    npm install --no-audit --no-fund --omit=dev
+    npm ci --no-audit --no-fund --omit=dev && \
+    mkdir -p /data
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Stage 3: runtime — distroless Miniflare host
+# ──────────────────────────────────────────────────────────────────────────────
+FROM gcr.io/distroless/nodejs22-debian12:nonroot AS runtime
+
+WORKDIR /app
+
+COPY --from=runtime-deps --chown=nonroot:nonroot /app/package.json ./package.json
+COPY --from=runtime-deps --chown=nonroot:nonroot /app/node_modules ./node_modules
 
 # Bundled worker + SPA assets + migrations
-COPY --from=builder /src/worker/dist ./worker-dist
-COPY --from=builder /src/dashboard/dist ./public
-COPY --from=builder /src/worker/migrations ./migrations
+COPY --from=builder --chown=nonroot:nonroot /src/worker/dist ./worker-dist
+COPY --from=builder --chown=nonroot:nonroot /src/dashboard/dist ./public
+COPY --from=builder --chown=nonroot:nonroot /src/worker/migrations ./migrations
 
 # Server entrypoint
-COPY docker/server.mjs ./server.mjs
+COPY --chown=nonroot:nonroot docker/server.mjs ./server.mjs
 
 # D1 sqlite file lives here — mount a volume to persist
-RUN mkdir -p /data && chown -R node:node /data /app
+COPY --from=runtime-deps --chown=nonroot:nonroot /data /data
 VOLUME ["/data"]
 
-USER node
+USER nonroot:nonroot
 EXPOSE 8787
 
 ENV NODE_ENV=production \
@@ -71,5 +77,4 @@ ENV NODE_ENV=production \
     PORT=8787 \
     HOST=0.0.0.0
 
-ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["node", "server.mjs"]
+CMD ["server.mjs"]
