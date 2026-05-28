@@ -56,6 +56,20 @@ test("block verb adds sender to alias block list", async () => {
   expect(rows.results?.[0]?.pattern).toBe("spammer@bad.com");
 });
 
+test("block verb preserves underscores in encoded sender", async () => {
+  const a = await q.autoCreateAlias(DB(), 1, "shop", "shop@hidemyemail.dev");
+  const e = { ...env, DESTINATION_ENCRYPTION_KEY: KEY } as any;
+  const encSender = encodeSender("aa?@x.y");
+  expect(encSender).toContain("_");
+  const sig = await signAction("block", `${a!.id}:${encSender}`, e);
+
+  await handleAction(mkMessage("aa?@x.y", `action+block=${a!.id}_${encSender}_${sig}@hidemyemail.dev`),
+    e, "block", `${a!.id}_${encSender}_${sig}`);
+
+  const rows = await DB().prepare("SELECT pattern FROM blocks WHERE alias_id = ?").bind(a!.id).all<{ pattern: string }>();
+  expect(rows.results?.[0]?.pattern).toBe("aa?@x.y");
+});
+
 test("block verb rejects forged sender (sig bound to encoded sender)", async () => {
   const a = await q.autoCreateAlias(DB(), 1, "shop", "shop@hidemyemail.dev");
   const e = { ...env, DESTINATION_ENCRYPTION_KEY: KEY } as any;

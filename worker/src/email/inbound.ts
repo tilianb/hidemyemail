@@ -7,7 +7,7 @@ import { streamToBytes, toBase64 } from "../lib/bytes";
 import { parseMime, setHeader, removeHeaders, getHeader, serializeMime } from "../lib/mime";
 import { reverseAddress } from "../lib/reverse";
 import { sendRaw, SesTransientError } from "../lib/ses";
-import { getNumericSetting, getBoolSetting, getEnvWithOverride, getSetting } from "../lib/settings";
+import { getNumericSetting, getBoolSetting, getEnvWithOverride, getSetting, getMainGlobalDomain } from "../lib/settings";
 import { decryptDestination } from "../lib/crypto";
 import { extractDisplayName, sanitizeDisplay as sanitize, buildForwardedFromDisplay } from "../lib/from-format";
 
@@ -344,7 +344,7 @@ async function checkCooldown(db: D1Database, key: string, cooldownHours: number)
 
 async function sendSystemNotification(db: D1Database, env: Env, to: string, subject: string, heading: string, bodyText: string) {
   const { buildNotificationEmail } = await import("../lib/emails");
-  const mainGlobalDomain = await getSetting(db, "main_global_domain") || "example.com";
+  const mainGlobalDomain = await getMainGlobalDomain(db, env) || "example.com";
   const rawBase64 = buildNotificationEmail(to, subject, heading, bodyText, mainGlobalDomain);
   const sesAccessKeyId = await getEnvWithOverride(db, env, "ses_access_key_id");
   const sesSecretAccessKey = await getEnvWithOverride(db, env, "ses_secret_access_key");
