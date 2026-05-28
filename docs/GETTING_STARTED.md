@@ -97,7 +97,6 @@ npx wrangler secret put DESTINATION_ENCRYPTION_KEY --env=""
 npx wrangler secret put SES_ACCESS_KEY_ID --env=""
 npx wrangler secret put SES_SECRET_ACCESS_KEY --env=""
 npx wrangler secret put SNS_ALLOWED_TOPIC_ARN --env=""
-npx wrangler secret put SNS_INBOUND_TOPIC_ARN --env=""
 ```
 
 Repeat with `--env preview` for preview secrets you actually use.
@@ -108,14 +107,17 @@ These are not secrets, but they are deployment-specific:
 
 - `SES_REGION`
 - `S3_INBOUND_BUCKET`
+- `SNS_INBOUND_TOPIC_ARN`
 
-Set them in Cloudflare dashboard or via Wrangler deploy flags. The repo deploy scripts use `--keep-vars` so Cloudflare-managed vars are preserved.
+Set them in Cloudflare dashboard or via Wrangler deploy flags. The Wrangler config sets `keep_vars: true` so Cloudflare-managed vars are preserved.
 
 ## 6. Configure AWS and DNS
 
 Continue with [AWS SES setup](AWS_SES_SETUP.md). You need SES domain verification, an S3 bucket, SNS topics, and DNS records before mail will flow.
 
 ## 7. Deploy
+
+Manual deploy from your machine:
 
 ```bash
 cd dashboard
@@ -131,6 +133,17 @@ Preview:
 cd worker
 npm run deploy:preview
 ```
+
+### Automatic deploys (Cloudflare Workers Builds)
+
+This repo deploys via **two separate Workers Builds projects** so prod and preview stay fully isolated:
+
+| Worker | Branch | Root dir | Build command | Deploy command |
+|--------|--------|----------|---------------|----------------|
+| `hidemyemail` | `main` | `worker` | `bash scripts/cf-build.sh` | `npx wrangler deploy` |
+| `hidemyemail-preview` | `dev` | repo root | `bash worker/scripts/cf-build.sh` | `cd worker && npx wrangler deploy --env preview` |
+
+`worker/scripts/cf-build.sh` is cwd-agnostic. It builds the dashboard and runs `wrangler d1 migrations apply --remote` against the correct D1 (`hidemyemail` for main, `hidemyemail-env` for dev) before Cloudflare runs the deploy command, so the schema is always in sync with the code being deployed. No GitHub secrets required — CF Builds provides wrangler auth implicitly.
 
 ## 8. First dashboard setup
 
