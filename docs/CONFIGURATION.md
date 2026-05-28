@@ -69,14 +69,10 @@ Most settings are editable from the Admin dashboard.
 
 ## Cloudflare automatic deploys
 
-Use these settings for Workers Git deployments:
+Cloudflare Workers Builds are supported with `worker/scripts/cf-build.sh`.
+Use the full [automatic deploy setup](DEPLOY.md#8-cloudflare-automatic-deploys) in the deployment guide.
 
-- Root directory: repository root
-- Build command: `cd dashboard && npm ci && npm run build && cd ../worker && npm ci`
-- Deploy command: `cd worker && npm run deploy`
-- Output directory: not needed
-
-Keep Cloudflare-managed variables in the dashboard. The Wrangler config sets `keep_vars: true`, and the npm deploy script also uses `--keep-vars`.
+Keep Cloudflare-managed variables in the dashboard. The Wrangler config sets `keep_vars: true`, and deploy commands should preserve dashboard-managed vars.
 
 ## Preview environment
 
