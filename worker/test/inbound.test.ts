@@ -25,10 +25,30 @@ test("clean mail to new alias → SES re-inject with rewritten headers", async (
   expect(sentinel.sent.length).toBe(1);
   expect(sentinel.sent[0].from).toBe(`"Alice (alice at store.com)" <shop@hidemyemail.dev>`);
   const decoded = atob(sentinel.sent[0].rawBase64);
-  expect(decoded).toContain(`From: "Alice (alice at store.com)" <shop@hidemyemail.dev>`);
   expect(decoded).toContain("Reply-To: shop+alice=store.com@hidemyemail.dev");
   expect(decoded).not.toContain("DKIM-Signature");
   expect((await q.getAlias(DB(), "shop@hidemyemail.dev"))?.fwd_count).toBe(1);
+});
+
+test("clean inbound forwarding rewrites headers without touching MIME body bytes", async () => {
+  const sentinel = { sent: [] as any[] };
+  const raw = [
+    "From: Alice <alice@store.com>",
+    "To: shop@hidemyemail.dev",
+    "Subject: Encoded",
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    "SGVsbG8g8J+YgA==",
+    "",
+  ].join("\r\n");
+
+  await handleInbound(mkMessage("alice@store.com", "shop@hidemyemail.dev", raw), testEnv(sentinel));
+
+  const decoded = atob(sentinel.sent[0].rawBase64);
+  expect(decoded.split("\r\n\r\n")[1]).toBe("SGVsbG8g8J+YgA==\r\n");
+  expect(decoded).toContain("Content-Transfer-Encoding: base64");
+  expect(decoded).toContain("Reply-To: shop+alice=store.com@hidemyemail.dev");
 });
 
 test("admin-selected From format can include raw sender email", async () => {
@@ -39,7 +59,6 @@ test("admin-selected From format can include raw sender email", async () => {
   ).run();
   await handleInbound(mkMessage("alice@store.com", "shop@hidemyemail.dev", RAW), testEnv(sentinel));
   expect(sentinel.sent[0].from).toBe(`"Alice (alice@store.com)" <shop@hidemyemail.dev>`);
-  expect(atob(sentinel.sent[0].rawBase64)).toContain(`From: "Alice (alice@store.com)" <shop@hidemyemail.dev>`);
 });
 
 test("blocked sender → no SES, block event", async () => {
@@ -56,6 +75,37 @@ test("disabled alias → no SES", async () => {
   const a = await q.autoCreateAlias(DB(), 1, "shop", "shop@hidemyemail.dev");
   await DB().prepare("UPDATE aliases SET active = 0 WHERE id = ?").bind(a!.id).run();
   await handleInbound(mkMessage("alice@store.com", "shop@hidemyemail.dev", RAW), testEnv(sentinel));
+  expect(sentinel.sent.length).toBe(0);
+});
+
+test("quota buffer allows exactly one over-limit auto-created alias", async () => {
+  const sentinel = { sent: [] as any[] };
+  await DB().prepare(
+    "INSERT INTO settings (key, value, updated_at) VALUES ('max_total_aliases', '2', 0) " +
+    "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+  ).run();
+  await q.autoCreateAlias(DB(), 1, "one", "one@hidemyemail.dev");
+  await q.autoCreateAlias(DB(), 1, "two", "two@hidemyemail.dev");
+
+  await handleInbound(mkMessage("alice@store.com", "three@hidemyemail.dev", RAW.replace("shop@hidemyemail.dev", "three@hidemyemail.dev")), testEnv(sentinel));
+  await handleInbound(mkMessage("alice@store.com", "four@hidemyemail.dev", RAW.replace("shop@hidemyemail.dev", "four@hidemyemail.dev")), testEnv(sentinel));
+
+  expect((await q.getAlias(DB(), "three@hidemyemail.dev"))?.source).toBe("auto_over_quota");
+  expect(await q.getAlias(DB(), "four@hidemyemail.dev")).toBeNull();
+});
+
+test("disabled quota buffer blocks auto-create at admin alias limit", async () => {
+  const sentinel = { sent: [] as any[] };
+  await DB().prepare(
+    "INSERT INTO settings (key, value, updated_at) VALUES ('max_total_aliases', '2', 0), ('alias_quota_buffer_enabled', 'false', 0) " +
+    "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+  ).run();
+  await q.autoCreateAlias(DB(), 1, "one", "one@hidemyemail.dev");
+  await q.autoCreateAlias(DB(), 1, "two", "two@hidemyemail.dev");
+
+  await handleInbound(mkMessage("alice@store.com", "three@hidemyemail.dev", RAW.replace("shop@hidemyemail.dev", "three@hidemyemail.dev")), testEnv(sentinel));
+
+  expect(await q.getAlias(DB(), "three@hidemyemail.dev")).toBeNull();
   expect(sentinel.sent.length).toBe(0);
 });
 

@@ -41,12 +41,12 @@ export function destinationRoutes() {
   r.post("/destinations", async (c) => {
     const userId = c.get("userId");
     let { email } = await c.req.json<{ email: string }>().catch(() => ({ email: "" }));
-    if (!email || !email.includes("@")) return c.json({ error: "invalid email" }, 400);
+    if (!email || !email.includes("@")) return c.json({ error: "Invalid email" }, 400);
     email = email.toLowerCase();
 
     const emailHash = await hashDestination(email, c.env.DESTINATION_ENCRYPTION_KEY);
     const existing = await c.env.DB.prepare("SELECT id FROM destinations WHERE user_id = ? AND email_hash = ?").bind(userId, emailHash).first();
-    if (existing) return c.json({ error: "already added" }, 409);
+    if (existing) return c.json({ error: "Already added" }, 409);
 
     const token = crypto.randomUUID();
     
@@ -100,26 +100,26 @@ export function destinationRoutes() {
       return c.json({ ok: true });
     } catch (err: any) {
       if (err.message && err.message.includes("UNIQUE constraint failed")) {
-        return c.json({ error: "already added" }, 409);
+        return c.json({ error: "Already added" }, 409);
       }
-      return c.json({ error: "internal error" }, 500);
+      return c.json({ error: "Internal error" }, 500);
     }
   });
 
   r.delete("/destinations/:id", async (c) => {
     const userId = c.get("userId");
     const id = parseInt(c.req.param("id"), 10);
-    if (isNaN(id)) return c.json({ error: "invalid id" }, 400);
+    if (isNaN(id)) return c.json({ error: "Invalid id" }, 400);
 
     // Ensure we don't delete if it's currently in use by an alias or domain
     const dest = await c.env.DB.prepare("SELECT email_hash FROM destinations WHERE id = ? AND user_id = ?").bind(id, userId).first<{ email_hash: string }>();
     if (!dest) return c.json({ ok: true });
 
     const inUseAlias = await c.env.DB.prepare("SELECT id FROM aliases WHERE destination_hash = ? AND user_id = ?").bind(dest.email_hash, userId).first();
-    if (inUseAlias) return c.json({ error: "destination in use by aliases" }, 400);
+    if (inUseAlias) return c.json({ error: "Destination in use by aliases" }, 400);
     
     const inUseDomain = await c.env.DB.prepare("SELECT id FROM domains WHERE default_destination_hash = ? AND user_id = ?").bind(dest.email_hash, userId).first();
-    if (inUseDomain) return c.json({ error: "destination in use by domains" }, 400);
+    if (inUseDomain) return c.json({ error: "Destination in use by domains" }, 400);
 
     await c.env.DB.prepare("DELETE FROM destinations WHERE id = ? AND user_id = ?").bind(id, userId).run();
     return c.json({ ok: true });
@@ -128,11 +128,11 @@ export function destinationRoutes() {
   r.patch("/destinations/:id/default", async (c) => {
     const userId = c.get("userId");
     const id = parseInt(c.req.param("id"), 10);
-    if (isNaN(id)) return c.json({ error: "invalid id" }, 400);
+    if (isNaN(id)) return c.json({ error: "Invalid id" }, 400);
 
     const dest = await c.env.DB.prepare("SELECT verified_at FROM destinations WHERE id = ? AND user_id = ?").bind(id, userId).first<{ verified_at: number | null }>();
-    if (!dest) return c.json({ error: "destination not found" }, 404);
-    if (!dest.verified_at) return c.json({ error: "destination must be verified to be set as default" }, 400);
+    if (!dest) return c.json({ error: "Destination not found" }, 404);
+    if (!dest.verified_at) return c.json({ error: "Destination must be verified to be set as default" }, 400);
 
     await c.env.DB.batch([
       c.env.DB.prepare("UPDATE destinations SET is_default = 0 WHERE user_id = ?").bind(userId),
