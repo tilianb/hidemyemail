@@ -174,3 +174,45 @@ test("POST /api/destinations stores pending destination before sending verificat
   releaseSend();
   delete testEnv.__sesSend;
 });
+
+test("admin can send a selected test email type to an arbitrary destination", async () => {
+  const sent: any[] = [];
+  const app = createApp();
+  const res = await app.request("/api/admin/test-email", {
+    method: "POST",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "mfa", to: "operator@example.com" }),
+  }, {
+    ...testEnv,
+    SES_ACCESS_KEY_ID: "akid",
+    SES_SECRET_ACCESS_KEY: "secret",
+    SES_REGION: "ap-southeast-2",
+    __sesSend: async (_c: any, m: any) => { sent.push(m); return "message-id"; },
+  });
+
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ ok: true, type: "mfa", to: "operator@example.com" });
+  expect(sent).toHaveLength(1);
+  expect(sent[0].to).toBe("operator@example.com");
+  expect(sent[0].from).toBe("HideMyEmail <noreply@example.com>");
+  const decoded = atob(sent[0].rawBase64);
+  expect(decoded).toContain("Your Authentication Code");
+  expect(decoded).toContain("123456");
+});
+
+test("admin test email rejects invalid type and destination", async () => {
+  const app = createApp();
+  const invalidEmail = await app.request("/api/admin/test-email", {
+    method: "POST",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "mfa", to: "not-an-email" }),
+  }, testEnv);
+  expect(invalidEmail.status).toBe(400);
+
+  const invalidType = await app.request("/api/admin/test-email", {
+    method: "POST",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "unknown", to: "operator@example.com" }),
+  }, testEnv);
+  expect(invalidType.status).toBe(400);
+});

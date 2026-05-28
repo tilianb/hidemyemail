@@ -37,6 +37,28 @@ test("owner reply with SPF pass → SES send as alias, leaks stripped", async ()
   expect((await q.getAlias(DB(), "shop@hidemyemail.dev"))?.reply_count).toBe(1);
 });
 
+test("owner reply rewrites headers without touching MIME body bytes", async () => {
+  const sentinel = { sent: [] as any[] };
+  const raw = [
+    "From: Me <real@me.com>",
+    `To: ${TO}`,
+    "Subject: Encoded reply",
+    "Message-ID: <x@gmail.com>",
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    "bXkgcmVwbHkg8J+YgA==",
+    "",
+  ].join("\r\n");
+
+  await handleReply(mkMessage("real@me.com", TO, raw), testEnv(sentinel), PARSED, { spf: "PASS" });
+
+  const decoded = atob(sentinel.sent[0].rawBase64);
+  expect(decoded.split("\r\n\r\n")[1]).toBe("bXkgcmVwbHkg8J+YgA==\r\n");
+  expect(decoded).toContain("Content-Transfer-Encoding: base64");
+  expect(decoded).toContain("From: shop@hidemyemail.dev");
+});
+
 test("non-owner reply → rejected, no SES", async () => {
   const sentinel = { sent: [] as any[] };
   await handleReply(mkMessage("attacker@evil.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });

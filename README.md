@@ -1,6 +1,75 @@
+<p align="center">
+  <img src="dashboard/public/favicon.svg" alt="HideMyEmail logo" width="96" height="96">
+</p>
+
+<p align="center">
+  <a href="https://app.hidemyemail.dev">app.hidemyemail.dev</a>
+</p>
+
 # HideMyEmail
 
 A self-hosted, serverless email-alias service for your own domains. HideMyEmail runs as a Cloudflare Worker with a React dashboard, Cloudflare D1 for state, and AWS SES/S3/SNS for email receiving and sending.
+
+## Why HideMyEmail
+
+Most alias services either lock you into someone else's domain (SimpleLogin,
+Apple Hide My Email, Firefox Relay) or expect you to run a full mail stack on a
+VPS (addy.io self-hosted, Postfix + custom scripts). HideMyEmail sits in
+between: **your domain, your data, no mail server to babysit**. The whole
+inbound path is event-driven serverless — SES receives the message, drops it
+in S3, SNS pings a Cloudflare Worker, the Worker rewrites MIME and hands it
+back to SES for delivery. Replies use a self-describing reverse address so you
+can answer from your normal inbox and recipients only ever see the alias.
+
+### Key features
+
+- **One-click unsubscribe inside every forwarded mail.** Each forward carries
+  a signed `List-Unsubscribe` / `List-Unsubscribe-Post: One-Click` header
+  pointing at an `action+disable=<id>_<hmac>@yourdomain` address. Gmail,
+  Apple Mail and Outlook surface this as a native "Unsubscribe" button — one
+  tap disables the alias on the Worker, no dashboard visit, no login.
+- **Catch-all aliases with quota grace.** First inbound mail to any
+  `*@yourdomain` auto-creates the alias. When you cross the configured
+  ceiling the next 10% are still delivered with an inline `[OVER QUOTA]`
+  warning banner and a 1-hour grace window, then dropped with a system
+  notification — no silent data loss, no surprise bounces.
+- **Subdomain alias gating with live DNS health checks.** Subdomains stay
+  blocked until the wildcard MX record actually resolves; per-record DNS
+  status is checked on demand and persisted, so the Domains page tells you
+  exactly which DNS entry is wrong before you create aliases that would
+  black-hole mail.
+- **DMARC-aligned reply gate.** Replies fail closed unless SES reports
+  SPF=PASS on the envelope sender *or* DMARC=PASS on the header From, and
+  that authenticated address belongs to a verified destination. Stops the
+  guessable-reverse-address spoof class entirely.
+- **Encrypted-at-rest secrets.** Destination inboxes and stored AWS
+  credentials are AES-encrypted in D1 with a separate
+  `DESTINATION_ENCRYPTION_KEY`, so a stolen DB dump leaks neither your
+  recipients nor your SES keys.
+- **Auth that doesn't suck.** Password + TOTP MFA + passkeys + recovery
+  codes, plus admin controls for multi-user instances. Public registration
+  is opt-in.
+- **Block list, per-alias counters, MIME reinjection, custom forwarded-from
+  display formats, sender notifications, rate limits per alias and
+  globally** — the long tail of "I actually use this every day" features.
+
+### Serverless infrastructure
+
+```
+AWS SES recv ──raw MIME──▶ S3 ──SNS──▶ Cloudflare Worker
+                                        │
+                                        ├─ D1 (aliases, users, events, settings)
+                                        ├─ Worker Assets (React dashboard SPA)
+                                        └─ SES SendRawEmail ──▶ verified inbox
+```
+
+No VPS, no Postfix, no cron. Cold start is a Worker isolate (sub-ms);
+state lives in D1 at the edge; the React dashboard is served by the same
+Worker through Wrangler Assets so `/api/*` and the SPA share a single
+deploy. Self-host the *whole* stack via Docker (Miniflare runs the Worker
+locally against a SQLite-backed D1) or wire it to Cloudflare Workers Builds
+for Git-push deploys with automatic D1 migrations — see the
+[architecture diagram below](#architecture).
 
 ## What it does
 

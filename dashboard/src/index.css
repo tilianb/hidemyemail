@@ -415,6 +415,23 @@ select.input { cursor: pointer; }
 .th-actions { width: 40px; }
 .badge-icon { margin-right: var(--space-1); }
 .badge-adjacent { margin-left: var(--space-2); }
+.domain-builder-field { min-width: 360px; }
+.domain-builder .domain-prefix-input { flex: 0 1 150px; }
+.domain-builder .domain-base-select { flex: 1 1 210px; cursor: pointer; }
+.domain-dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  padding: 0 8px;
+  background: var(--surface-2);
+  border-left: 1px solid var(--border-strong);
+  border-right: 1px solid var(--border-strong);
+}
+.domain-builder:focus-within .domain-dot {
+  border-left-color: var(--accent);
+  border-right-color: var(--accent);
+}
 .addr-stack {
   flex-direction: column;
   align-items: flex-start;
@@ -1015,6 +1032,14 @@ table.dossier tbody td {
 .setting-control .input {
   width: 160px;
 }
+.test-email-control {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 620px;
+}
+.test-email-control .input-mono {
+  width: 240px;
+}
 .settings-actions {
   display: flex;
   align-items: center;
@@ -1036,6 +1061,14 @@ table.dossier tbody td {
   }
   .setting-control .input {
     width: 100%;
+  }
+  .test-email-control {
+    width: 100%;
+    justify-content: stretch;
+  }
+  .test-email-control .btn {
+    width: 100%;
+    justify-content: center;
   }
 }
 
@@ -1378,8 +1411,8 @@ table.dossier tbody td {
   overflow-x: auto;
 }
 .dns-record-row {
-  display: grid;
-  grid-template-columns: 112px repeat(3, minmax(190px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--space-3);
   align-items: stretch;
   min-width: 760px;
@@ -1388,8 +1421,12 @@ table.dossier tbody td {
   border-radius: var(--radius-sm);
   background: rgba(255,255,255,0.035);
 }
-.dns-record-type,
+.dns-record-type {
+  flex: 0 0 112px;
+  min-width: 0;
+}
 .dns-field {
+  flex: 1;
   min-width: 0;
 }
 .dns-record-type span,
@@ -1412,9 +1449,8 @@ table.dossier tbody td {
   min-width: 0;
 }
 .dns-field-value code {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: pre-wrap;
+  word-break: break-all;
   font-size: 0.78rem;
 }
 .dns-panel-actions {
@@ -1435,6 +1471,10 @@ table.dossier tbody td {
 .inline-actions { display: flex; align-items: center; gap: var(--space-2); }
 .inline-actions-lg { display: flex; align-items: center; gap: 10px; }
 .inline-actions-wrap { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-4); }
+.inline-actions-nowrap { flex-wrap: nowrap; }
+.inline-actions-nowrap .security-status-media { flex: 1 1 auto; min-width: 0; }
+.inline-actions-select { flex: 0 0 200px; }
+.inline-actions-select .input { width: 100%; }
 .flex-1 { flex: 1; }
 .flex-2 { flex: 2; }
 .flex-input { flex: 1; min-width: 0; }
@@ -1529,6 +1569,8 @@ table.dossier tbody td {
   .login-form-pane { padding: var(--space-6); }
   .security-inline-form,
   .inline-actions-lg { flex-wrap: wrap; }
+  .inline-actions-nowrap { flex-wrap: wrap; align-items: flex-start; }
+  .inline-actions-select { flex-basis: 100%; max-width: 260px; }
 }
 
 /* ─── Scrollbar styling ─────────────────────────────────────────────────── */

@@ -5,8 +5,9 @@ export interface Mime { headers: Header[]; body: Uint8Array; }
 
 function findBodyStart(bytes: Uint8Array): { headerEnd: number; bodyStart: number } {
   for (let i = 0; i + 3 < bytes.length; i++) {
-    if (bytes[i] === 13 && bytes[i + 1] === 10 && bytes[i + 2] === 13 && bytes[i + 3] === 10)
+    if (bytes[i] === 13 && bytes[i + 1] === 10 && bytes[i + 2] === 13 && bytes[i + 3] === 10) {
       return { headerEnd: i, bodyStart: i + 4 };
+    }
   }
   for (let i = 0; i + 1 < bytes.length; i++) {
     if (bytes[i] === 10 && bytes[i + 1] === 10) return { headerEnd: i, bodyStart: i + 2 };
