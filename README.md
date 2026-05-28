@@ -38,6 +38,15 @@ Open <http://localhost:8787>. Put Caddy/nginx/Cloudflare Tunnel in front for
 TLS. See [`docker/README.md`](docker/README.md) for AWS setup, upgrades,
 volumes, and troubleshooting.
 
+## Documentation
+
+- [Getting started](docs/GETTING_STARTED.md)
+- [AWS SES setup](docs/AWS_SES_SETUP.md)
+- [Configuration](docs/CONFIGURATION.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Security notes](docs/SECURITY.md)
+- [Deployment guide](docs/DEPLOY.md)
+
 ## Architecture
 
 ```diagram

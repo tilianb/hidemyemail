@@ -21,8 +21,8 @@
   ],
   "vars": {
     "ENVIRONMENT": "production",
-    "SES_REGION": "",
-    "S3_INBOUND_BUCKET": ""
+    "SES_REGION": "paste-your-ses-region",
+    "S3_INBOUND_BUCKET": "paste-your-inbound-bucket"
   },
   "env": {
     "preview": {
@@ -42,8 +42,8 @@
       ],
       "vars": {
         "ENVIRONMENT": "preview",
-        "SES_REGION": "",
-        "S3_INBOUND_BUCKET": ""
+        "SES_REGION": "paste-your-preview-ses-region",
+        "S3_INBOUND_BUCKET": "paste-your-preview-inbound-bucket"
       }
     }
   }
