@@ -14,6 +14,7 @@ on:
       - "worker/**"
       - "dashboard/**"
       - ".github/workflows/docker.yml"
+      - "!**.md"
   pull_request:
     branches: ['**']
     paths:
@@ -21,6 +22,7 @@ on:
       - "worker/**"
       - "dashboard/**"
       - ".github/workflows/docker.yml"
+      - "!**.md"
   workflow_dispatch:
 
 permissions:
