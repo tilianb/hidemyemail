@@ -166,9 +166,10 @@ jobs:
           file: docker/Dockerfile
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Docker Hub only receives release (tag) builds; main/sha stay on GHCR.
           outputs: |
             type=image,name=${{ env.GHCR_IMAGE }},push-by-digest=true,name-canonical=true,push=true
-            type=image,name=${{ env.DOCKERHUB_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+            ${{ startsWith(github.ref, 'refs/tags/') && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.DOCKERHUB_IMAGE) || '' }}
           cache-from: type=gha,scope=build-${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=build-${{ matrix.platform }}
           # Disabled: attestation manifests break push-by-digest manifest merge
@@ -225,13 +226,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
+      # GHCR: full set — branch (main), sha, semver, and latest on main.
+      - name: Extract GHCR metadata
+        id: meta-ghcr
         uses: docker/metadata-action@v6
         with:
-          images: |
-            ${{ env.GHCR_IMAGE }}
-            ${{ env.DOCKERHUB_IMAGE }}
+          images: ${{ env.GHCR_IMAGE }}
+          flavor: latest=false
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -241,22 +242,41 @@ jobs:
             type=sha,format=short,prefix=sha-
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
 
+      # Docker Hub: releases only — semver tags + latest on newest release. No main/branch/sha.
+      - name: Extract Docker Hub metadata
+        id: meta-dockerhub
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.DOCKERHUB_IMAGE }}
+          flavor: latest=auto
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
       - name: Create GHCR manifest list and push
         working-directory: /tmp/digests
+        env:
+          META_JSON: ${{ steps.meta-ghcr.outputs.json }}
         run: |
-          docker buildx imagetools create $(jq -cr --arg image '${{ env.GHCR_IMAGE }}' '.tags | map(select(startswith($image + ":")) | "-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+          docker buildx imagetools create $(jq -cr --arg image '${{ env.GHCR_IMAGE }}' '.tags | map(select(startswith($image + ":")) | "-t " + .) | join(" ")' <<< "$META_JSON") \
             $(printf '${{ env.GHCR_IMAGE }}@sha256:%s ' *)
 
       - name: Create Docker Hub manifest list and push
+        if: startsWith(github.ref, 'refs/tags/')
         working-directory: /tmp/digests
+        env:
+          META_JSON: ${{ steps.meta-dockerhub.outputs.json }}
         run: |
-          docker buildx imagetools create $(jq -cr --arg image '${{ env.DOCKERHUB_IMAGE }}' '.tags | map(select(startswith($image + ":")) | "-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+          docker buildx imagetools create $(jq -cr --arg image '${{ env.DOCKERHUB_IMAGE }}' '.tags | map(select(startswith($image + ":")) | "-t " + .) | join(" ")' <<< "$META_JSON") \
             $(printf '${{ env.DOCKERHUB_IMAGE }}@sha256:%s ' *)
 
       - name: Inspect GHCR image
         run: |
-          docker buildx imagetools inspect ${{ env.GHCR_IMAGE }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect ${{ env.GHCR_IMAGE }}:${{ steps.meta-ghcr.outputs.version }}
 
       - name: Inspect Docker Hub image
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
-          docker buildx imagetools inspect ${{ env.DOCKERHUB_IMAGE }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect ${{ env.DOCKERHUB_IMAGE }}:${{ steps.meta-dockerhub.outputs.version }}
