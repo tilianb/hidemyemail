@@ -5,8 +5,9 @@ Runs the production Cloudflare Worker unchanged inside a container, using
 as the runtime. D1 is a local SQLite file; the dashboard SPA is served by
 Miniflare's built-in Assets binding. Same routing semantics as prod.
 
-Multi-arch image (`linux/amd64` + `linux/arm64`) is published to
-`ghcr.io/tilianb/hidemyemail` on every push to `main` and every `v*.*.*` tag.
+Multi-arch images (`linux/amd64` + `linux/arm64`) are published to
+`docker.io/tilianb/hidemyemail` and `ghcr.io/tilianb/hidemyemail` on every push
+to `main` and every `v*.*.*` tag.
 
 ---
 
@@ -75,6 +76,13 @@ auto-confirms the SNS subscription on first call — watch
 ```bash
 docker compose pull
 docker compose up -d
+```
+
+Docker Hub is the default registry. To use GHCR instead:
+
+```bash
+IMAGE=ghcr.io/tilianb/hidemyemail docker compose pull
+IMAGE=ghcr.io/tilianb/hidemyemail docker compose up -d
 ```
 
 ### Pin a release
