@@ -2,12 +2,12 @@ import { useEffect, useState } from "react";
 import { QRCode } from "react-qr-code";
 import { api } from "../api";
 import { useToast } from "../ui";
-import { ShieldCheck, ShieldOff, KeyRound, Copy, RefreshCw, Loader2, Fingerprint, Trash2, Pencil } from "lucide-react";
+import { ShieldCheck, ShieldOff, KeyRound, Copy, RefreshCw, Loader2, Fingerprint, Trash2, Pencil, Mail } from "lucide-react";
 
 type SetupStep = "idle" | "qr" | "verify" | "backup";
 type PasskeyRow = { id: string; device_name: string | null; created_at: number };
 
-export function Security() {
+export function Settings() {
   const { toast } = useToast();
   const [enabled, setEnabled] = useState(false);
   const [backupCodesRemaining, setBackupCodesRemaining] = useState(0);
@@ -41,19 +41,75 @@ export function Security() {
   const [regenLoading, setRegenLoading] = useState(false);
   const [newBackupCodes, setNewBackupCodes] = useState<string[]>([]);
 
+  // Email preferences
+  type Tri = "on" | "off" | null;
+  type Pos = "header" | "footer" | null;
+  const [inlineActionsPref, setInlineActionsPref] = useState<Tri>(null);
+  const [inlineActionsPosition, setInlineActionsPosition] = useState<Pos>(null);
+  const [defaultsEnabled, setDefaultsEnabled] = useState(false);
+  const [defaultsPosition, setDefaultsPosition] = useState("footer");
+  const [savingInlineActions, setSavingInlineActions] = useState(false);
+
   async function loadStatus() {
     setLoading(true);
     try {
-      const [mfa, pks] = await Promise.all([api.mfaStatus(), api.passkeyList().catch(() => [])]);
+      const [mfa, pks, prefs] = await Promise.all([
+        api.mfaStatus(),
+        api.passkeyList().catch(() => []),
+        api.preferences().catch(() => ({
+          inline_actions_pref: null as Tri,
+          inline_actions_position: null as Pos,
+          defaults: { inline_actions_enabled: false, inline_actions_position: "footer" },
+        })),
+      ]);
       setEnabled(mfa.enabled);
       setBackupCodesRemaining(mfa.backupCodesRemaining);
       setPasskeys(pks);
+      setInlineActionsPref(prefs.inline_actions_pref);
+      setInlineActionsPosition(prefs.inline_actions_position);
+      setDefaultsEnabled(prefs.defaults.inline_actions_enabled);
+      setDefaultsPosition(prefs.defaults.inline_actions_position);
     } catch {
-      toast("Failed to load security settings", "error");
+      toast("Failed to load settings", "error");
     } finally {
       setLoading(false);
     }
   }
+
+  // Combined value used by the single select. "inherit" resets both fields to
+  // NULL so the user picks back up whatever the admin's default is set to.
+  type InlineChoice = "inherit" | "off" | "header" | "footer";
+
+  async function updateInlineChoice(next: InlineChoice) {
+    const prevPref = inlineActionsPref;
+    const prevPos = inlineActionsPosition;
+    let pref: Tri;
+    let pos: Pos;
+    if (next === "inherit") { pref = null; pos = null; }
+    else if (next === "off") { pref = "off"; pos = null; }
+    else { pref = "on"; pos = next; }
+
+    setInlineActionsPref(pref);
+    setInlineActionsPosition(pos);
+    setSavingInlineActions(true);
+    try {
+      await api.updatePreferences({ inline_actions_pref: pref, inline_actions_position: pos });
+    } catch (err: any) {
+      setInlineActionsPref(prevPref);
+      setInlineActionsPosition(prevPos);
+      toast(err?.message || "Failed to update preference", "error");
+    } finally {
+      setSavingInlineActions(false);
+    }
+  }
+
+  const effectiveEnabled = inlineActionsPref === "on" || (inlineActionsPref === null && defaultsEnabled);
+  const effectivePosition = inlineActionsPosition ?? defaultsPosition;
+  const currentChoice: InlineChoice =
+    inlineActionsPref === null ? "inherit"
+    : inlineActionsPref === "off" ? "off"
+    : (inlineActionsPosition ?? (defaultsPosition === "header" ? "header" : "footer")) as InlineChoice;
+  const defaultLabel = defaultsEnabled ? `${defaultsPosition}` : "disabled";
 
   useEffect(() => { loadStatus(); }, []);
 
@@ -199,8 +255,8 @@ export function Security() {
     return (
       <div>
         <div className="page-header">
-          <h1 className="page-title">Security</h1>
-          <p className="page-subtitle">Manage your account security settings.</p>
+          <h1 className="page-title">Settings</h1>
+          <p className="page-subtitle">Manage your account preferences and security.</p>
         </div>
         <div className="loading-center">
           <Loader2 size={24} className="spin" />
@@ -359,12 +415,45 @@ export function Security() {
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">Security</h1>
-        <p className="page-subtitle">Manage your account security settings.</p>
+        <h1 className="page-title">Settings</h1>
+        <p className="page-subtitle">Manage your account preferences and security.</p>
+      </div>
+
+      {/* Email preferences card */}
+      <div className="card stagger-1 card-spaced-bottom">
+        <div className="card-header">
+          <span className="card-title">Email Preferences</span>
+        </div>
+        <div className="card-body">
+          <div className="inline-actions-wrap inline-actions-nowrap">
+            <div className="security-status-media">
+              <Mail size={20} className="icon-muted" />
+              <div>
+                <div className="status-title">Inline action links</div>
+                <div className="status-caption">
+                  Choose where the Block / Mute&nbsp;7d / Disable alias bar appears in your forwarded emails, or disable it entirely. Currently <strong>{effectiveEnabled ? effectivePosition : "disabled"}</strong>{inlineActionsPref === null ? <> (inheriting site default: <em>{defaultLabel}</em>)</> : null}.
+                </div>
+              </div>
+            </div>
+            <div className="inline-actions inline-actions-select">
+              <select
+                className="input"
+                value={currentChoice}
+                disabled={savingInlineActions}
+                onChange={e => updateInlineChoice(e.target.value as InlineChoice)}
+              >
+                <option value="inherit">Inherit default ({defaultLabel})</option>
+                <option value="off">Disabled</option>
+                <option value="header">Header</option>
+                <option value="footer">Footer</option>
+              </select>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* 2FA status card */}
-      <div className="card stagger-1 card-spaced-bottom">
+      <div className="card stagger-2 card-spaced-bottom">
         <div className="card-header">
           <span className="card-title">Two-Factor Authentication (2FA)</span>
         </div>

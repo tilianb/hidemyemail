@@ -1,11 +1,21 @@
 import { env } from "cloudflare:test";
-import { beforeAll, beforeEach, expect, test } from "vitest";
+import { afterAll, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import { createApp } from "../src/api/app";
 import { signSession } from "../src/lib/auth";
 import { resetDb } from "./helpers";
 
 let testEnv: any; let cookie: string;
-beforeAll(async () => { testEnv = { ...env, SESSION_SECRET: "sek" }; cookie = "__Host-session=" + (await signSession("sek", 1, 3600)); });
+const realFetch = globalThis.fetch;
+beforeAll(async () => {
+  testEnv = { ...env, SESSION_SECRET: "sek" };
+  cookie = "__Host-session=" + (await signSession("sek", 1, 3600));
+  // POST /domains DNS-checks the candidate subdomain's MX before allowing
+  // creation. Tests should not hit real DNS — stub fetch to return a non-ok
+  // response so the gate falls back to allow (the route already does this for
+  // transient lookup failures).
+  globalThis.fetch = vi.fn(async () => new Response("", { status: 503 })) as any;
+});
+afterAll(() => { globalThis.fetch = realFetch; });
 beforeEach(async () => { await resetDb(env.DB as D1Database); });
 
 import { encryptDestination, hashDestination } from "../src/lib/crypto";
@@ -19,6 +29,11 @@ test("create domain, create + list + patch + delete alias", async () => {
   await (env.DB as D1Database).prepare(
     "UPDATE settings SET value = 'hidemyemail.dev' WHERE key = 'main_global_domain'"
   ).run();
+  // The POST /domains route requires the main global domain to exist with
+  // allow_subdomain_aliases = 1 before any subdomain may be created.
+  await (env.DB as D1Database).prepare(
+    "INSERT INTO domains (user_id, is_global, domain, allow_subdomain_aliases, active, verified_at, created_at) VALUES (1, 1, 'hidemyemail.dev', 1, 1, 123, ?)"
+  ).bind(Date.now()).run();
   await (env.DB as D1Database).prepare("INSERT INTO destinations (user_id, email, email_hash, token, verified_at, created_at) VALUES (1, ?, ?, 'tok1', 123, 123)").bind(encReal, hashReal).run();
 
   const encWork = await encryptDestination("work@me.com", testEnv.DESTINATION_ENCRYPTION_KEY);
@@ -61,6 +76,44 @@ test("create domain, create + list + patch + delete alias", async () => {
   expect(blk?.count).toBe(0);
   const evt = await (env.DB as D1Database).prepare("SELECT COUNT(*) as count FROM events WHERE alias_id=?").bind(alias.id).first<{ count: number }>();
   expect(evt?.count).toBe(0);
+});
+
+test("user can create subdomain under any enabled global domain", async () => {
+  const app = createApp();
+  const db = env.DB as D1Database;
+  const h = { cookie, "Content-Type": "application/json" };
+
+  await db.prepare("UPDATE settings SET value = 'primary.example' WHERE key = 'main_global_domain'").run();
+  await db.prepare("INSERT INTO domains (id, user_id, is_global, domain, allow_subdomain_aliases, active, verified_at, created_at) VALUES (30, 1, 1, 'primary.example', 1, 1, 123, 123)").run();
+  await db.prepare("INSERT INTO domains (id, user_id, is_global, domain, allow_subdomain_aliases, active, verified_at, created_at) VALUES (31, 1, 1, 'second.example', 1, 1, 123, 123)").run();
+
+  const res = await app.request("/api/domains", {
+    method: "POST",
+    headers: h,
+    body: JSON.stringify({ domain: "shop", base_domain_id: 31, default_destination: "global" }),
+  }, testEnv);
+
+  expect(res.status).toBe(200);
+  const created = await res.json<{ domain: string }>();
+  expect(created.domain).toBe("shop.second.example");
+});
+
+test("user cannot create subdomain under disabled global domain", async () => {
+  const app = createApp();
+  const db = env.DB as D1Database;
+  const h = { cookie, "Content-Type": "application/json" };
+
+  await db.prepare("UPDATE settings SET value = 'primary.example' WHERE key = 'main_global_domain'").run();
+  await db.prepare("INSERT INTO domains (id, user_id, is_global, domain, allow_subdomain_aliases, active, verified_at, created_at) VALUES (30, 1, 1, 'primary.example', 1, 1, 123, 123)").run();
+  await db.prepare("INSERT INTO domains (id, user_id, is_global, domain, allow_subdomain_aliases, active, verified_at, created_at) VALUES (31, 1, 1, 'second.example', 0, 1, 123, 123)").run();
+
+  const res = await app.request("/api/domains", {
+    method: "POST",
+    headers: h,
+    body: JSON.stringify({ domain: "shop", base_domain_id: 31, default_destination: "global" }),
+  }, testEnv);
+
+  expect(res.status).toBe(403);
 });
 
 test("users only see and use active verified global domains", async () => {
