@@ -18,7 +18,7 @@
 
 services:
   app:
-    image: ghcr.io/tilianb/hidemyemail:${IMAGE_TAG:-latest}
+    image: ${IMAGE:-docker.io/tilianb/hidemyemail}:${IMAGE_TAG:-latest}
     # Local build is the fallback when the image isn't in the registry yet,
     # and the target of `docker compose build` for development.
     build:
