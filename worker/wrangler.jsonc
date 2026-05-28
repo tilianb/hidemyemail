@@ -4,6 +4,7 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-05-01",
   "compatibility_flags": ["nodejs_compat"],
+  "keep_vars": true,
   "observability": { "enabled": true },
   "assets": {
     "directory": "../dashboard/dist",
@@ -24,7 +25,7 @@
   },
   // Secrets (wrangler secret put): SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY,
   // SESSION_SECRET, ACTION_SECRET, AUTH_PASSWORD_HASH, AUTH_PASSWORD_SALT,
-  // DESTINATION_ENCRYPTION_KEY, SNS_ALLOWED_TOPIC_ARN, SNS_INBOUND_TOPIC_ARN
+  // DESTINATION_ENCRYPTION_KEY, SNS_ALLOWED_TOPIC_ARN
   "env": {
     "preview": {
       "observability": { "enabled": true },

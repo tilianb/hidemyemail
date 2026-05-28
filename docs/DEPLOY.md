@@ -45,8 +45,9 @@ npx wrangler secret put DESTINATION_ENCRYPTION_KEY
 npx wrangler secret put SES_ACCESS_KEY_ID
 npx wrangler secret put SES_SECRET_ACCESS_KEY
 npx wrangler secret put SNS_ALLOWED_TOPIC_ARN
-npx wrangler secret put SNS_INBOUND_TOPIC_ARN
 ```
+
+Set `SES_REGION`, `S3_INBOUND_BUCKET`, and `SNS_INBOUND_TOPIC_ARN` as normal Cloudflare environment variables.
 
 `ACTION_SECRET` signs one-click unsubscribe addresses. Use a stable value; rotating it invalidates old unsubscribe links.
 
@@ -142,13 +143,31 @@ The Worker serves both API and dashboard through Wrangler Assets. You do not nee
 
 ## 8. Cloudflare automatic deploys
 
-If using Cloudflare Workers Git deployments, use:
+If using Cloudflare Workers Builds (Git-connected), the included `worker/scripts/cf-build.sh` builds the dashboard, installs Worker deps, and applies D1 migrations to the right database before Cloudflare runs `wrangler deploy`. The script is cwd-agnostic — it self-locates to `worker/`, so root directory can be either `worker` or the repo root.
 
-- Build command: `cd dashboard && npm ci && npm run build && cd ../worker && npm ci`
-- Deploy command: `cd worker && npx wrangler deploy`
+Migrations are branch-aware:
+
+- `main` → applies migrations to `hidemyemail` (production)
+- `dev` → applies migrations to `hidemyemail-env` (preview env)
+- other branches → migrations skipped
+
+This repo uses **two separate Workers Builds projects**:
+
+### `hidemyemail` (production, branch `main`)
+
+- Root directory: `worker`
+- Build command: `bash scripts/cf-build.sh`
+- Deploy command: `npx wrangler deploy`
+
+### `hidemyemail-preview` (preview, branch `dev`)
+
 - Root directory: repo root
+- Build command: `bash worker/scripts/cf-build.sh`
+- Deploy command: `cd worker && npx wrangler deploy --env preview`
 
-Store all secrets in Cloudflare. Do not commit `.dev.vars`.
+CF Builds injects an internal `CLOUDFLARE_API_TOKEN` for wrangler, so no extra secrets are needed for migrations or deploys.
+
+Store all Worker secrets in Cloudflare (`wrangler secret put …` or dashboard). Do not commit `.dev.vars`.
 
 ## 9. First-run dashboard setup
 
