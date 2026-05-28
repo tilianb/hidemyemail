@@ -202,8 +202,8 @@ export function Security() {
           <h1 className="page-title">Security</h1>
           <p className="page-subtitle">Manage your account security settings.</p>
         </div>
-        <div style={{ display: "flex", justifyContent: "center", padding: "48px", color: "var(--text-muted)" }}>
-          <Loader2 size={24} style={{ animation: "spin 1s linear infinite" }} />
+        <div className="loading-center">
+          <Loader2 size={24} className="spin" />
         </div>
       </div>
     );
@@ -218,53 +218,30 @@ export function Security() {
           <h1 className="page-title">Set Up Two-Factor Authentication</h1>
           <p className="page-subtitle">Step 1 of 2 — scan the QR code with your authenticator app.</p>
         </div>
-        <div className="card stagger-1" style={{ maxWidth: 520 }}>
+        <div className="card stagger-1 card-constrained">
           <div className="card-header">
             <span className="card-title">Scan QR Code</span>
           </div>
-          <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "20px" }}>
-            <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-muted)", lineHeight: 1.6 }}>
-              Open your authenticator app (Google Authenticator, Authy, 1Password, etc.) and scan the code below. Then click <strong style={{ color: "var(--text-secondary)" }}>Next</strong>.
+          <div className="card-body-lg stack">
+            <p className="muted-copy">
+              Open your authenticator app (Google Authenticator, Authy, 1Password, etc.) and scan the code below. Then click <strong className="text-secondary">Next</strong>.
             </p>
 
-            <div style={{
-              display: "flex",
-              justifyContent: "center",
-              padding: "20px",
-              background: "#fff",
-              borderRadius: "var(--radius)",
-              border: "1px solid var(--border)",
-            }}>
+            <div className="qr-frame">
               <QRCode value={setupUri} size={180} />
             </div>
 
             <div>
-              <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "6px", fontFamily: "var(--font-display)", letterSpacing: "0.05em" }}>
+              <div className="type-label">
                 OR ENTER MANUALLY
               </div>
-              <div style={{
-                display: "flex",
-                gap: 8,
-                alignItems: "center",
-                background: "var(--canvas)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius-sm)",
-                padding: "10px 12px",
-              }}>
-                <span style={{
-                  flex: 1,
-                  fontFamily: "var(--font-mono)",
-                  fontSize: "0.85rem",
-                  color: "var(--accent)",
-                  letterSpacing: "0.1em",
-                  wordBreak: "break-all",
-                }}>
+              <div className="secret-row">
+                <span>
                   {setupSecret.match(/.{1,4}/g)?.join(" ")}
                 </span>
                 <button
                   type="button"
-                  className="btn btn-ghost"
-                  style={{ padding: "4px 8px", flexShrink: 0 }}
+                  className="btn btn-ghost btn-compact shrink-0"
                   onClick={() => copyToClipboard(setupSecret, "Secret")}
                   title="Copy secret"
                 >
@@ -273,11 +250,11 @@ export function Security() {
               </div>
             </div>
 
-            <div style={{ display: "flex", gap: 10, paddingTop: 4, alignItems: "center" }}>
-              <button type="button" className="btn" onClick={cancelSetup} style={{ flex: 1, background: "var(--surface-2)", color: "var(--text-secondary)", justifyContent: "center" }}>
+            <div className="inline-actions-lg">
+              <button type="button" className="btn btn-soft flex-1 btn-center" onClick={cancelSetup}>
                 Cancel
               </button>
-              <button type="button" className="btn btn-primary" onClick={() => setSetupStep("verify")} style={{ flex: 2, justifyContent: "center" }}>
+              <button type="button" className="btn btn-primary flex-2 btn-center" onClick={() => setSetupStep("verify")}>
                 Next: Verify →
               </button>
             </div>
@@ -294,19 +271,18 @@ export function Security() {
           <h1 className="page-title">Set Up Two-Factor Authentication</h1>
           <p className="page-subtitle">Step 2 of 2 — verify the code from your authenticator app.</p>
         </div>
-        <div className="card stagger-1" style={{ maxWidth: 520 }}>
+        <div className="card stagger-1 card-constrained">
           <div className="card-header">
             <span className="card-title">Verify Code</span>
           </div>
-          <form onSubmit={verifySetup} style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "20px" }}>
-            <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-muted)", lineHeight: 1.6 }}>
+          <form onSubmit={verifySetup} className="card-body-lg stack">
+            <p className="muted-copy">
               Enter the 6-digit code currently shown in your authenticator app to confirm setup.
             </p>
             <div className="field">
               <label className="field-label" htmlFor="verify-code">Authentication code</label>
               <input
                 id="verify-code"
-                className="input"
                 type="text"
                 inputMode="numeric"
                 value={setupCode}
@@ -316,17 +292,17 @@ export function Security() {
                 autoComplete="one-time-code"
                 disabled={setupLoading}
                 maxLength={6}
-                style={{ fontFamily: "var(--font-mono)", fontSize: "1.2rem", letterSpacing: "0.2em", textAlign: "center" }}
+                className="input code-input"
               />
             </div>
-            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <button type="button" className="btn" onClick={() => setSetupStep("qr")} disabled={setupLoading} style={{ flex: 1, background: "var(--surface-2)", color: "var(--text-secondary)", justifyContent: "center" }}>
+            <div className="inline-actions-lg">
+              <button type="button" className="btn btn-soft flex-1 btn-center" onClick={() => setSetupStep("qr")} disabled={setupLoading}>
                 ← Back
               </button>
-              <button type="submit" className="btn btn-primary" disabled={setupLoading || setupCode.length !== 6} style={{ flex: 2, justifyContent: "center" }}>
+              <button type="submit" className="btn btn-primary flex-2 btn-center" disabled={setupLoading || setupCode.length !== 6}>
                 {setupLoading ? (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                    <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Verifying…
+                  <span className="inline-actions">
+                    <Loader2 size={14} className="spin" /> Verifying…
                   </span>
                 ) : "Enable 2FA"}
               </button>
@@ -344,47 +320,32 @@ export function Security() {
           <h1 className="page-title">2FA Enabled — Save Your Backup Codes</h1>
           <p className="page-subtitle">Store these codes safely. Each can only be used once if you lose access to your authenticator.</p>
         </div>
-        <div className="card stagger-1" style={{ maxWidth: 520 }}>
+        <div className="card stagger-1 card-constrained">
           <div className="card-header">
-            <span className="card-title" style={{ color: "var(--green, #4ade80)" }}>
-              <ShieldCheck size={16} style={{ display: "inline", marginRight: 6, verticalAlign: "text-bottom" }} />
+            <span className="card-title icon-green">
+              <ShieldCheck size={16} />
               Backup Codes
             </span>
           </div>
-          <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "20px" }}>
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "8px",
-              background: "var(--canvas)",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius)",
-              padding: "16px",
-            }}>
+          <div className="card-body-lg stack">
+            <div className="backup-code-grid">
               {setupBackupCodes.map((code, i) => (
-                <div key={i} style={{
-                  fontFamily: "var(--font-mono)",
-                  fontSize: "0.9rem",
-                  color: "var(--accent)",
-                  letterSpacing: "0.05em",
-                  padding: "4px 0",
-                }}>
+                <div key={i} className="backup-code">
                   {code}
                 </div>
               ))}
             </div>
             <button
               type="button"
-              className="btn"
+              className="btn btn-soft"
               onClick={() => copyToClipboard(setupBackupCodes.join("\n"), "Backup codes")}
-              style={{ background: "var(--surface-2)", color: "var(--text-secondary)", gap: 8 }}
             >
               <Copy size={14} /> Copy All Codes
             </button>
-            <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)", lineHeight: 1.5 }}>
+            <p className="muted-copy-sm">
               These codes will not be shown again. Save them in a password manager or a safe place.
             </p>
-            <button type="button" className="btn btn-primary" onClick={finishSetup} style={{ justifyContent: "center" }}>
+            <button type="button" className="btn btn-primary btn-center" onClick={finishSetup}>
               I've saved my backup codes →
             </button>
           </div>
@@ -403,36 +364,35 @@ export function Security() {
       </div>
 
       {/* 2FA status card */}
-      <div className="card stagger-1" style={{ marginBottom: 24 }}>
+      <div className="card stagger-1 card-spaced-bottom">
         <div className="card-header">
           <span className="card-title">Two-Factor Authentication (2FA)</span>
         </div>
-        <div style={{ padding: "20px 24px" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div className="card-body">
+          <div className="inline-actions-wrap">
+            <div className="security-status-media">
               {enabled ? (
-                <ShieldCheck size={20} style={{ color: "var(--green, #4ade80)", flexShrink: 0 }} />
+                <ShieldCheck size={20} className="icon-green" />
               ) : (
-                <ShieldOff size={20} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                <ShieldOff size={20} className="icon-muted" />
               )}
               <div>
-                <div style={{ fontWeight: 600, color: "var(--text-primary)", fontSize: "0.9rem" }}>
+                <div className="status-title">
                   Authenticator app (TOTP)
                 </div>
-                <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: 2 }}>
+                <div className="status-caption">
                   {enabled
                     ? "Active — required at each login."
                     : "Not configured. Add an extra layer of security to your account."}
                 </div>
               </div>
             </div>
-            <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            <div className="inline-actions shrink-0">
               {enabled ? (
                 <button
                   type="button"
-                  className="btn"
+                  className="btn btn-danger-soft"
                   onClick={() => { setShowDisable(true); setDisableCode(""); }}
-                  style={{ background: "var(--red-dim)", color: "var(--red)", border: "1px solid rgba(255,80,80,0.2)", gap: 6 }}
                 >
                   <ShieldOff size={14} /> Disable 2FA
                 </button>
@@ -442,10 +402,9 @@ export function Security() {
                   className="btn btn-primary"
                   onClick={beginSetup}
                   disabled={setupLoading}
-                  style={{ gap: 6 }}
                 >
                   {setupLoading ? (
-                    <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
+                    <Loader2 size={14} className="spin" />
                   ) : (
                     <KeyRound size={14} />
                   )}
@@ -457,20 +416,11 @@ export function Security() {
 
           {/* Disable dialog (inline) */}
           {showDisable && (
-            <form onSubmit={disableMfa} style={{
-              marginTop: 20,
-              padding: "16px",
-              background: "var(--canvas)",
-              border: "1px solid rgba(255,80,80,0.2)",
-              borderRadius: "var(--radius)",
-              display: "flex",
-              flexDirection: "column",
-              gap: 14,
-            }}>
-              <div style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
+            <form onSubmit={disableMfa} className="security-danger-form">
+              <div className="muted-copy">
                 Enter your current authentication code or a backup code to confirm.
               </div>
-              <div className="field" style={{ marginBottom: 0 }}>
+              <div className="field field-tight">
                 <input
                   className="input"
                   type="text"
@@ -484,12 +434,12 @@ export function Security() {
                   maxLength={20}
                 />
               </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <button type="button" className="btn" onClick={() => setShowDisable(false)} disabled={disableLoading} style={{ background: "var(--surface-2)", color: "var(--text-secondary)" }}>
+              <div className="inline-actions">
+                <button type="button" className="btn btn-soft" onClick={() => setShowDisable(false)} disabled={disableLoading}>
                   Cancel
                 </button>
-                <button type="submit" className="btn" disabled={disableLoading || !disableCode} style={{ background: "var(--red-dim)", color: "var(--red)", border: "1px solid rgba(255,80,80,0.2)" }}>
-                  {disableLoading ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : "Confirm Disable"}
+                <button type="submit" className="btn btn-danger-soft" disabled={disableLoading || !disableCode}>
+                  {disableLoading ? <Loader2 size={14} className="spin" /> : "Confirm Disable"}
                 </button>
               </div>
             </form>
@@ -504,43 +454,32 @@ export function Security() {
             <span className="card-title">Backup Codes</span>
             <span className="badge badge-muted">{backupCodesRemaining} remaining</span>
           </div>
-          <div style={{ padding: "20px 24px" }}>
-            <p style={{ margin: "0 0 16px 0", fontSize: "0.85rem", color: "var(--text-muted)", lineHeight: 1.6 }}>
+          <div className="card-body">
+            <p className="muted-copy card-spaced-bottom">
               Backup codes let you sign in if you lose access to your authenticator app. Each code can only be used once. Regenerating creates 8 new codes and invalidates all existing ones.
             </p>
 
             {newBackupCodes.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: "8px",
-                  background: "var(--canvas)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius)",
-                  padding: "16px",
-                  marginBottom: 8,
-                }}>
+              <div className="security-code-block">
+                <div className="backup-code-grid">
                   {newBackupCodes.map((code, i) => (
-                    <div key={i} style={{ fontFamily: "var(--font-mono)", fontSize: "0.9rem", color: "var(--accent)", letterSpacing: "0.05em", padding: "2px 0" }}>
+                    <div key={i} className="backup-code">
                       {code}
                     </div>
                   ))}
                 </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <div className="inline-actions">
                   <button
                     type="button"
-                    className="btn"
+                    className="btn btn-soft btn-compact"
                     onClick={() => copyToClipboard(newBackupCodes.join("\n"), "Backup codes")}
-                    style={{ background: "var(--surface-2)", color: "var(--text-secondary)", gap: 6, fontSize: "0.8rem" }}
                   >
                     <Copy size={12} /> Copy All
                   </button>
                   <button
                     type="button"
-                    className="btn btn-ghost"
+                    className="btn btn-ghost btn-compact"
                     onClick={() => setNewBackupCodes([])}
-                    style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}
                   >
                     Hide
                   </button>
@@ -549,13 +488,13 @@ export function Security() {
             )}
 
             {showRegen ? (
-              <form onSubmit={regenBackupCodes} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
+              <form onSubmit={regenBackupCodes} className="security-form-stack">
+                <div className="muted-copy-sm">
                   Enter your current authentication code to generate 8 new backup codes.
                 </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <div className="security-inline-form">
                   <input
-                    className="input"
+                    className="input code-input-small"
                     type="text"
                     inputMode="numeric"
                     value={regenCode}
@@ -565,13 +504,12 @@ export function Security() {
                     autoComplete="one-time-code"
                     disabled={regenLoading}
                     maxLength={6}
-                    style={{ fontFamily: "var(--font-mono)", letterSpacing: "0.15em", textAlign: "center", maxWidth: 140 }}
                   />
-                  <button type="submit" className="btn btn-primary" disabled={regenLoading || regenCode.length !== 6} style={{ gap: 6 }}>
-                    {regenLoading ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <RefreshCw size={14} />}
+                  <button type="submit" className="btn btn-primary" disabled={regenLoading || regenCode.length !== 6}>
+                    {regenLoading ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
                     Regenerate
                   </button>
-                  <button type="button" className="btn" onClick={() => { setShowRegen(false); setRegenCode(""); }} disabled={regenLoading} style={{ background: "var(--surface-2)", color: "var(--text-secondary)" }}>
+                  <button type="button" className="btn btn-soft" onClick={() => { setShowRegen(false); setRegenCode(""); }} disabled={regenLoading}>
                     Cancel
                   </button>
                 </div>
@@ -579,9 +517,8 @@ export function Security() {
             ) : (
               <button
                 type="button"
-                className="btn"
+                className="btn btn-soft"
                 onClick={() => { setShowRegen(true); setNewBackupCodes([]); }}
-                style={{ background: "var(--surface-2)", color: "var(--text-secondary)", gap: 6 }}
               >
                 <RefreshCw size={14} /> Regenerate Backup Codes
               </button>
@@ -591,52 +528,43 @@ export function Security() {
       )}
 
       {/* Passkeys card */}
-      <div className="card stagger-3" style={{ marginTop: 24 }}>
+      <div className="card stagger-3 card-spaced-top">
         <div className="card-header">
           <span className="card-title">Passkeys</span>
           <span className="badge badge-muted">{passkeys.length}</span>
         </div>
-        <div style={{ padding: "20px 24px" }}>
-          <p style={{ margin: "0 0 16px 0", fontSize: "0.85rem", color: "var(--text-muted)", lineHeight: 1.6 }}>
+        <div className="card-body">
+          <p className="muted-copy card-spaced-bottom">
             Sign in with biometrics or a hardware key — no passphrase needed. Works on any device where you've saved a passkey.
           </p>
 
           {passkeys.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+            <div className="passkey-list">
               {passkeys.map(pk => (
-                <div key={pk.id} style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "10px 12px",
-                  background: "var(--canvas)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius-sm)",
-                }}>
-                  <Fingerprint size={16} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                <div key={pk.id} className="passkey-row">
+                  <Fingerprint size={16} className="icon-muted" />
                   {editingPasskeyId === pk.id ? (
                     <form
                       onSubmit={e => { e.preventDefault(); renamePasskey(pk.id, editingPasskeyName); }}
-                      style={{ flex: 1, display: "flex", gap: 6, alignItems: "center" }}
+                      className="passkey-edit-form"
                     >
                       <input
-                        className="input"
+                        className="input flex-input btn-compact"
                         value={editingPasskeyName}
                         onChange={e => setEditingPasskeyName(e.target.value)}
                         autoFocus
                         maxLength={64}
-                        style={{ flex: 1, padding: "4px 8px", fontSize: "0.85rem" }}
                       />
-                      <button type="submit" className="btn btn-primary" style={{ padding: "4px 10px", fontSize: "0.8rem" }}>Save</button>
-                      <button type="button" className="btn" onClick={() => setEditingPasskeyId(null)} style={{ padding: "4px 8px", background: "var(--surface-2)", color: "var(--text-secondary)", fontSize: "0.8rem" }}>Cancel</button>
+                      <button type="submit" className="btn btn-primary btn-compact">Save</button>
+                      <button type="button" className="btn btn-soft btn-compact" onClick={() => setEditingPasskeyId(null)}>Cancel</button>
                     </form>
                   ) : (
                     <>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: "0.85rem", color: "var(--text-primary)", fontWeight: 500 }}>
+                      <div className="flex-1">
+                        <div className="passkey-name">
                           {pk.device_name || "Unnamed passkey"}
                         </div>
-                        <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                        <div className="passkey-meta">
                           Added {new Date(pk.created_at).toLocaleDateString()}
                         </div>
                       </div>
@@ -645,16 +573,14 @@ export function Security() {
                         className="btn btn-ghost"
                         onClick={() => { setEditingPasskeyId(pk.id); setEditingPasskeyName(pk.device_name || ""); }}
                         title="Rename"
-                        style={{ padding: "4px 6px" }}
                       >
                         <Pencil size={13} />
                       </button>
                       <button
                         type="button"
-                        className="btn btn-ghost"
+                        className="btn btn-ghost icon-red"
                         onClick={() => deletePasskey(pk.id)}
                         title="Remove"
-                        style={{ padding: "4px 6px", color: "var(--red)" }}
                       >
                         <Trash2 size={13} />
                       </button>
@@ -667,26 +593,25 @@ export function Security() {
 
           {passkeysSupported ? (
             showAddPasskey ? (
-              <form onSubmit={addPasskey} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
+              <form onSubmit={addPasskey} className="security-form-stack">
+                <div className="muted-copy-sm">
                   Give this passkey a name so you can recognise it later (optional).
                 </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <div className="security-inline-form">
                   <input
-                    className="input"
+                    className="input flex-input"
                     value={newPasskeyName}
                     onChange={e => setNewPasskeyName(e.target.value)}
                     placeholder="e.g. MacBook Touch ID, iPhone Face ID"
                     maxLength={64}
                     disabled={addingPasskey}
                     autoFocus
-                    style={{ flex: 1 }}
                   />
-                  <button type="submit" className="btn btn-primary" disabled={addingPasskey} style={{ gap: 6, flexShrink: 0 }}>
-                    {addingPasskey ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <Fingerprint size={14} />}
+                  <button type="submit" className="btn btn-primary shrink-0" disabled={addingPasskey}>
+                    {addingPasskey ? <Loader2 size={14} className="spin" /> : <Fingerprint size={14} />}
                     {addingPasskey ? "Registering…" : "Register"}
                   </button>
-                  <button type="button" className="btn" onClick={() => { setShowAddPasskey(false); setNewPasskeyName(""); }} disabled={addingPasskey} style={{ background: "var(--surface-2)", color: "var(--text-secondary)" }}>
+                  <button type="button" className="btn btn-soft" onClick={() => { setShowAddPasskey(false); setNewPasskeyName(""); }} disabled={addingPasskey}>
                     Cancel
                   </button>
                 </div>
@@ -696,25 +621,17 @@ export function Security() {
                 type="button"
                 className="btn btn-primary"
                 onClick={() => setShowAddPasskey(true)}
-                style={{ gap: 6 }}
               >
                 <Fingerprint size={14} /> Add Passkey
               </button>
             )
           ) : (
-            <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>
+            <p className="muted-copy-sm">
               Passkeys are not supported in this browser.
             </p>
           )}
         </div>
       </div>
-
-      <style>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to   { transform: rotate(360deg); }
-        }
-      `}</style>
     </div>
   );
 }

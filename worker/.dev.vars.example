@@ -1,0 +1,13 @@
+# Copy to worker/.dev.vars for local development. Never commit .dev.vars.
+ENVIRONMENT=local
+SES_REGION=ap-southeast-2
+S3_INBOUND_BUCKET=your-ses-inbound-raw-bucket
+SNS_ALLOWED_TOPIC_ARN=arn:aws:sns:ap-southeast-2:123456789012:your-outbound-topic
+SNS_INBOUND_TOPIC_ARN=arn:aws:sns:ap-southeast-2:123456789012:your-inbound-topic
+SES_ACCESS_KEY_ID=replace-with-aws-access-key-id
+SES_SECRET_ACCESS_KEY=replace-with-aws-secret-access-key
+SESSION_SECRET=replace-with-openssl-rand-hex-32
+ACTION_SECRET=replace-with-openssl-rand-hex-32
+AUTH_PASSWORD_SALT=replace-with-worker-scripts-hash-password-output
+AUTH_PASSWORD_HASH=replace-with-worker-scripts-hash-password-output
+DESTINATION_ENCRYPTION_KEY=replace-with-32-byte-hex-key
