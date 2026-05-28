@@ -14,6 +14,8 @@ export default defineConfig({
         miniflare: { 
           bindings: { 
             TEST_MIGRATIONS: migrations,
+            SESSION_SECRET: "test-session-secret",
+            ACTION_SECRET: "test-action-secret",
             DESTINATION_ENCRYPTION_KEY: "MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=" // 32-byte valid base64 key
           } 
         },
