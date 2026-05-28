@@ -106,7 +106,42 @@ test("disabled quota buffer blocks auto-create at admin alias limit", async () =
   await handleInbound(mkMessage("alice@store.com", "three@hidemyemail.dev", RAW.replace("shop@hidemyemail.dev", "three@hidemyemail.dev")), testEnv(sentinel));
 
   expect(await q.getAlias(DB(), "three@hidemyemail.dev")).toBeNull();
-  expect(sentinel.sent.length).toBe(0);
+  expect(sentinel.sent.length).toBe(1);
+  expect(sentinel.sent[0].from).toBe("HideMyEmail <noreply@example.com>");
+});
+
+test("quota notification uses MAIN_GLOBAL_DOMAIN env fallback", async () => {
+  const sentinel = { sent: [] as any[] };
+  await DB().prepare(
+    "INSERT INTO settings (key, value, updated_at) VALUES ('max_total_aliases', '0', 0), ('alias_quota_buffer_enabled', 'false', 0), ('main_global_domain', '', 0) " +
+    "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+  ).run();
+
+  await handleInbound(
+    mkMessage("alice@store.com", "shop@hidemyemail.dev", RAW),
+    { ...testEnv(sentinel), MAIN_GLOBAL_DOMAIN: "hidemyemail.dev" }
+  );
+
+  expect(sentinel.sent[0].from).toBe("HideMyEmail <noreply@hidemyemail.dev>");
+  expect(atob(sentinel.sent[0].rawBase64)).toContain("https://hidemyemail.dev");
+});
+
+test("quota notification escapes recipient address in HTML body", async () => {
+  const sentinel = { sent: [] as any[] };
+  await DB().prepare(
+    "INSERT INTO settings (key, value, updated_at) VALUES ('max_total_aliases', '0', 0), ('alias_quota_buffer_enabled', 'false', 0) " +
+    "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+  ).run();
+
+  await handleInbound(
+    mkMessage("alice@store.com", "<img src=x onerror=alert(1)>@hidemyemail.dev", RAW),
+    testEnv(sentinel)
+  );
+
+  const decoded = atob(sentinel.sent[0].rawBase64);
+  const htmlPart = decoded.slice(decoded.indexOf("<!DOCTYPE html>"));
+  expect(htmlPart).toContain("&lt;img src=x onerror=alert(1)&gt;@hidemyemail.dev");
+  expect(htmlPart).not.toContain("<img src=x onerror=alert(1)>");
 });
 
 test("unknown domain → dropped, no SES", async () => {

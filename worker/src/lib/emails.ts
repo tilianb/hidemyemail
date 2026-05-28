@@ -154,8 +154,8 @@ ${bodyText}
 
   const htmlBody = buildHtmlWrapper(
     subject,
-    heading,
-    bodyText,
+    escapeHtml(heading),
+    escapeHtml(bodyText),
     "",
     undefined,
     mainGlobalDomain,

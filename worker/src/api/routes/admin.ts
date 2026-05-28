@@ -241,7 +241,7 @@ export function adminRoutes() {
     const id = parseInt(c.req.param("id"), 10);
     if (isNaN(id)) return c.json({ error: "Invalid id" }, 400);
 
-    const row = await db.prepare("SELECT domain, verification_token, verified_at FROM domains WHERE id = ? AND is_global = 1").bind(id).first<{ domain: string; verification_token: string | null; verified_at: number | null }>();
+    const row = await db.prepare("SELECT domain, verification_token, verified_at, allow_subdomain_aliases FROM domains WHERE id = ? AND is_global = 1").bind(id).first<{ domain: string; verification_token: string | null; verified_at: number | null; allow_subdomain_aliases: number | null }>();
     if (!row) return c.json({ error: "Domain not found" }, 404);
     if (!row.verification_token) return c.json({ error: "No verification token" }, 400);
 
@@ -270,7 +270,7 @@ export function adminRoutes() {
       let verifyTxtOk = false;
       let mxOk = false;
       let spfOk = false;
-      let wildcardMxOk = false;
+      let wildcardMxOk = row.allow_subdomain_aliases !== 1;
 
       if (dnsTxt?.Status === 0 && dnsTxt.Answer) {
         verifyTxtOk = dnsTxt.Answer.some((a: any) => a.type === 16 && a.data.replace(/"/g, "") === tokenRecord);
@@ -289,7 +289,7 @@ export function adminRoutes() {
         });
       }
 
-      if (dnsWildcardMx?.Status === 0 && dnsWildcardMx.Answer) {
+      if (row.allow_subdomain_aliases === 1 && dnsWildcardMx?.Status === 0 && dnsWildcardMx.Answer) {
         wildcardMxOk = dnsWildcardMx.Answer.some((a: any) => a.type === 15 && a.data.includes(expectedMx));
       }
 
