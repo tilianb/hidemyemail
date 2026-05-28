@@ -44,9 +44,7 @@
         }
       ],
       "vars": {
-        "ENVIRONMENT": "preview",
-        "SES_REGION": "",
-        "S3_INBOUND_BUCKET": ""
+        "ENVIRONMENT": "preview"
       }
     },
   },
