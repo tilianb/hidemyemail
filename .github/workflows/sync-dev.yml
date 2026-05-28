@@ -1,0 +1,33 @@
+name: Sync Dev Branch
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+jobs:
+  sync-dev:
+    # Only run if the PR was actually merged (not just closed) AND the source branch was dev
+    if: github.event.pull_request.merged == true && github.event.pull_request.head.ref == 'dev'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          # We need a personal access token or the default token with sufficient permissions
+          # to push to the dev branch and bypass branch protections if applicable
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Reset dev to main
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          
+          # Force a local branch dev to track origin/main exactly
+          git checkout -B dev origin/main
+          
+          # Force push back to the remote dev branch
+          git push --force origin dev
