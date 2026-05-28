@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
+import { api, type Alias } from "../api";
 import { useToast, CopyButton, ConfirmDialog, TableSkeleton, EmptyState } from "../ui";
 import { ShieldAlert, Trash2 } from "lucide-react";
 
@@ -26,15 +26,28 @@ function formatDate(ts: number): string {
 export function Blocks() {
   const { toast } = useToast();
   const [rows, setRows] = useState<Block[]>([]);
+  const [aliases, setAliases] = useState<Alias[]>([]);
   const [loading, setLoading] = useState(true);
   const [pattern, setPattern] = useState("");
+  const [scope, setScope] = useState<"global" | "alias">("global");
+  const [aliasId, setAliasId] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+
+  const selectedAliasId = scope === "alias" ? aliasId ?? aliases[0]?.id ?? null : null;
+
+  function aliasLabel(id: number | null): string {
+    if (id === null) return "global";
+    return aliases.find(a => a.id === id)?.full_address ?? `alias #${id}`;
+  }
 
   async function load() {
     setLoading(true);
     try {
-      setRows(await api.blocks());
+      const [blockRows, aliasRows] = await Promise.all([api.blocks(), api.aliases()]);
+      setRows(blockRows);
+      setAliases(aliasRows);
+      setAliasId(current => current ?? aliasRows[0]?.id ?? null);
     } catch {
       toast("Failed to load blocks", "error");
     } finally {
@@ -49,9 +62,13 @@ export function Blocks() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!pattern.trim()) return;
+    if (scope === "alias" && selectedAliasId === null) {
+      toast("Create an alias before adding a per-alias block", "error");
+      return;
+    }
     setSubmitting(true);
     try {
-      await api.createBlock(pattern.trim());
+      await api.createBlock(pattern.trim(), selectedAliasId ?? undefined);
       setPattern("");
       await load();
       toast("Block added", "success");
@@ -79,13 +96,8 @@ export function Blocks() {
     <div>
       {/* Page header */}
       <div className="page-header">
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
+        <div className="page-title-row">
           <h1 className="page-title">Blocks</h1>
-          {!loading && (
-            <span className="badge badge-muted">
-              {rows.length}
-            </span>
-          )}
         </div>
         <p className="page-subtitle">
           Sender blocks — patterns matched against incoming mail before forwarding.
@@ -93,19 +105,19 @@ export function Blocks() {
       </div>
 
       {/* Explainer callout */}
-      <div className="callout stagger-1" style={{ marginBottom: 24 }}>
+      <div className="callout stagger-1 card-form-gap">
         <strong>How blocks work —</strong>{" "}
         <strong>Global blocks</strong> apply across all aliases — any matching sender is silently
         dropped before forwarding. <strong>Per-alias blocks</strong> scope to a single alias and
         appear with a labeled badge. Patterns support wildcards:{" "}
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.78em" }}>*@spam.com</span>{" "}
+        <code>*@spam.com</code>{" "}
         blocks an entire domain;{" "}
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.78em" }}>evil@badactor.org</span>{" "}
+        <code>evil@badactor.org</code>{" "}
         blocks a specific sender.
       </div>
 
       {/* Add block form */}
-      <div className="card stagger-2" style={{ marginBottom: 24 }}>
+      <div className="card stagger-2 card-form-gap">
         <div className="card-header">
           <span className="card-title">Add Block</span>
         </div>
@@ -126,11 +138,41 @@ export function Blocks() {
                 disabled={submitting}
               />
             </div>
+            <div className="field form-field-sm">
+              <label className="field-label" htmlFor="block-scope">Scope</label>
+              <select
+                id="block-scope"
+                className="input input-mono"
+                value={scope}
+                onChange={e => setScope(e.target.value === "alias" ? "alias" : "global")}
+                disabled={submitting}
+              >
+                <option value="global">Global</option>
+                <option value="alias">Per alias</option>
+              </select>
+            </div>
+            {scope === "alias" && (
+              <div className="field grow">
+                <label className="field-label" htmlFor="block-alias">Alias</label>
+                <select
+                  id="block-alias"
+                  className="input input-mono"
+                  value={selectedAliasId ?? ""}
+                  onChange={e => setAliasId(Number(e.target.value))}
+                  disabled={submitting || aliases.length === 0}
+                >
+                  {aliases.length === 0 ? (
+                    <option value="">No aliases available</option>
+                  ) : (
+                    aliases.map(a => <option key={a.id} value={a.id}>{a.full_address}</option>)
+                  )}
+                </select>
+              </div>
+            )}
             <button
-              className="btn btn-primary"
+              className="btn btn-primary form-submit"
               type="submit"
-              disabled={submitting || !pattern.trim()}
-              style={{ alignSelf: "flex-end" }}
+              disabled={submitting || !pattern.trim() || (scope === "alias" && selectedAliasId === null)}
             >
               {submitting ? "Blocking…" : "Block sender"}
             </button>
@@ -166,7 +208,7 @@ export function Blocks() {
                       {b.alias_id === null ? (
                         <span className="badge badge-muted">global</span>
                       ) : (
-                        <span className="badge badge-amber">alias #{b.alias_id}</span>
+                        <span className="badge badge-amber">{aliasLabel(b.alias_id)}</span>
                       )}
                     </td>
                     <td>

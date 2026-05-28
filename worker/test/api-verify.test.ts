@@ -69,6 +69,8 @@ test("GET and POST /api/verify email verification flow", async () => {
   expect(postHtml).toContain("Verification Successful");
   expect(postHtml).toContain("Your email address has been verified successfully");
   expect(postHtml).toContain(email);
+  expect(postHtml).not.toContain("<script>");
+  expect(postHtml).not.toContain("script-src 'unsafe-inline'");
 
   // Verify the database was updated with verified_at timestamp
   const afterPost = await db.prepare("SELECT verified_at FROM destinations WHERE token = ?").bind(token).first<{ verified_at: number | null }>();

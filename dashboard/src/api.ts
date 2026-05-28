@@ -5,7 +5,10 @@ export interface Domain {
   domain: string;
   default_destination: string | null;
   active: 0 | 1;
+  allow_custom_aliases: 0 | 1;
   created_at: number;
+  verified_at: number | null;
+  verification_token: string | null;
 }
 
 export interface Alias {
@@ -82,6 +85,7 @@ export interface Destination {
 }
 
 export const api = {
+  config: () => req<{ main_global_domain: string }>("/api/config"),
   login: (password: string) => req<{ ok: true; userId: number } | { mfa_required: true }>("/api/login", { method: "POST", body: JSON.stringify({ password }) }),
   completeMfa: (code: string) => req<{ ok: true; userId: number }>("/api/mfa/complete", { method: "POST", body: JSON.stringify({ code }) }),
   register: (password: string) => req<{ ok: true, userId: number }>("/api/register", { method: "POST", body: JSON.stringify({ password }) }),
@@ -114,6 +118,8 @@ export const api = {
   adminUpdateUser: (id: number, data: { active?: number; forwarding?: number; name?: string }) => req<{ ok: true }>(`/api/admin/users/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   adminRecoverUser: (id: number, sendEmail: boolean) => req<{ token: string; ok?: boolean }>(`/api/admin/users/${id}/recovery`, { method: "POST", body: JSON.stringify({ sendEmail }) }),
   adminCreateDomain: (domain: string) => req<{ ok: true }>("/api/admin/domains", { method: "POST", body: JSON.stringify({ domain }) }),
+  adminUpdateDomain: (id: number, data: { allow_custom_aliases?: number; active?: number }) => req<{ ok: true }>(`/api/admin/domains/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  adminVerifyDomain: (id: number) => req<{ ok: true; verified: boolean; error?: string }>(`/api/admin/domains/${id}/verify`, { method: "POST" }),
 
   // Passkey endpoints
   passkeyList: () => req<{ id: string; device_name: string | null; created_at: number }[]>("/api/settings/passkeys"),

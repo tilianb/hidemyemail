@@ -23,5 +23,5 @@ export function getRpFromOrigin(origin: string | null | undefined): { rpID: stri
       return { rpID: url.hostname, expectedOrigin: origin };
     } catch {}
   }
-  return { rpID: "hidemyemail.dev", expectedOrigin: "https://hidemyemail.dev" };
+  return { rpID: "example.com", expectedOrigin: "https://example.com" };
 }

@@ -91,6 +91,9 @@ test("disabled-account 403 does not consume rate limit budget", async () => {
 
   // Create a user, then deactivate them.
   const passphrase = "horse-staple-battery-disabled-1";
+  await (env.DB as D1Database).prepare(
+    "UPDATE settings SET value = 'true' WHERE key = 'registration_enabled'"
+  ).run();
   const reg = await app.request("/api/register", {
     method: "POST",
     body: JSON.stringify({ password: passphrase }),

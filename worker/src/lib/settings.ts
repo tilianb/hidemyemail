@@ -70,3 +70,12 @@ export async function getAllSettings(db: D1Database, env?: any): Promise<Record<
 
   return result;
 }
+
+/** 
+ * Resolve the main global domain, preferring DB override, then falling back to environment variable.
+ */
+export async function getMainGlobalDomain(db: D1Database, env: any): Promise<string> {
+  const dbVal = await getSetting(db, "main_global_domain", env);
+  if (dbVal) return dbVal;
+  return (env.MAIN_GLOBAL_DOMAIN as string) || SETTING_DEFAULTS.main_global_domain || "";
+}

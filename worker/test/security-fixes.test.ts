@@ -217,6 +217,9 @@ test("P4: inactive admin cannot use existing session cookies", async () => {
 
 test("P4: credentialed CORS only allows exact configured origins", async () => {
   const app = createApp();
+  await (env.DB as D1Database).prepare(
+    "UPDATE settings SET value = 'https://hidemyemail.dev,http://localhost:5173' WHERE key = 'cors_allowed_domains'"
+  ).run();
 
   const evil = await app.request("/api/aliases", { headers: { Origin: "https://foo.pages.dev" } }, testEnv);
   expect(evil.headers.get("access-control-allow-origin")).toBeNull();

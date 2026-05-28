@@ -1,91 +1,183 @@
-# Deploy — hidemyemail.dev
+# Deployment Guide
 
-## 1. D1
+This guide sets up a new HideMyEmail instance with your own domain.
+
+## 1. Create Cloudflare D1 databases
+
 ```bash
 cd worker
-npx wrangler d1 create hidemyemail          # paste database_id into wrangler.jsonc
-npx wrangler d1 migrations apply hidemyemail --remote
+npx wrangler d1 create hidemyemail
+npx wrangler d1 create hidemyemail-preview
 ```
 
-## 2. Secrets & Environment Variables (Worker)
-Add the following variables to your `wrangler.jsonc` or `.dev.vars` for local testing. Use `npx wrangler secret put` for production secrets:
+Paste the returned IDs into `worker/wrangler.jsonc` under `database_id` and `preview_database_id`. Keep the `assets` block intact so Cloudflare deploys the dashboard and Worker together.
+
+Apply migrations:
+
 ```bash
-node scripts/hash-password.mjs 'YOUR_PASSWORD'   # prints SALT + HASH
+npx wrangler d1 migrations apply DB --remote
+```
+
+## 2. Generate and set secrets
+
+Generate the admin password hash:
+
+```bash
+node scripts/hash-password.mjs 'your-admin-passphrase'
+```
+
+Generate random secrets:
+
+```bash
+openssl rand -hex 32      # SESSION_SECRET
+openssl rand -hex 32      # ACTION_SECRET
+openssl rand -hex 32      # DESTINATION_ENCRYPTION_KEY
+```
+
+Set Cloudflare Worker secrets:
+
+```bash
 npx wrangler secret put AUTH_PASSWORD_SALT
 npx wrangler secret put AUTH_PASSWORD_HASH
-npx wrangler secret put SESSION_SECRET           # e.g. openssl rand -hex 32
+npx wrangler secret put SESSION_SECRET
+npx wrangler secret put ACTION_SECRET
+npx wrangler secret put DESTINATION_ENCRYPTION_KEY
 npx wrangler secret put SES_ACCESS_KEY_ID
 npx wrangler secret put SES_SECRET_ACCESS_KEY
-npx wrangler secret put SNS_ALLOWED_TOPIC_ARN    # Outbound bounce/complaint topic ARN
-npx wrangler secret put SNS_INBOUND_TOPIC_ARN    # Inbound email receipt topic ARN
-npx wrangler secret put DESTINATION_ENCRYPTION_KEY # 32-byte hex string (e.g. openssl rand -hex 32)
+npx wrangler secret put SNS_ALLOWED_TOPIC_ARN
+npx wrangler secret put SNS_INBOUND_TOPIC_ARN
 ```
-Update `wrangler.jsonc` with your specific variables:
-```jsonc
-"vars": {
-  "SES_REGION": "ap-southeast-2",
-  "S3_INBOUND_BUCKET": "hidemyemail-inbound-raw"
+
+`ACTION_SECRET` signs one-click unsubscribe addresses. Use a stable value; rotating it invalidates old unsubscribe links.
+
+## 3. Create least-privilege AWS credentials
+
+Create an IAM user or role for the Worker with permissions limited to:
+
+- `ses:SendEmail`
+- `ses:SendRawEmail`
+- `s3:GetObject` on the inbound raw-email bucket
+
+Example policy shape:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["ses:SendEmail", "ses:SendRawEmail"],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::YOUR-INBOUND-BUCKET/*"
+    }
+  ]
 }
 ```
 
-## 3. Amazon S3 & SES Setup (Inbound & Outbound)
+## 4. Configure AWS SES receiving
 
-### Inbound (Receiving Emails)
-1. **S3 Bucket**: Create a private S3 bucket (e.g., `hidemyemail-inbound-raw`) to store raw incoming MIME emails.
-2. **SNS Topic (Inbound)**: Create an SNS topic for inbound email notifications. Set `SNS_INBOUND_TOPIC_ARN` in your secrets.
-3. **SES Receipt Rule**: Go to Amazon SES -> Email Receiving. Create a rule set and a receipt rule.
-   - **Condition**: Apply to your domains/subdomains (or leave empty for all verified identities).
-   - **Action 1 (S3)**: Deliver to the S3 bucket you created.
-   - **Action 2 (SNS)**: Publish to your Inbound SNS Topic.
-4. **SNS Webhook (Inbound)**: Subscribe your worker's webhook to the inbound topic:
-   `https://<worker-host>/api/ses/inbound`
-   The Worker verifies AWS SNS signatures and rejects any topic other than `SNS_INBOUND_TOPIC_ARN`.
+1. Verify your domain as an SES identity.
+2. Publish SES DKIM CNAME records in DNS.
+3. Create a private S3 bucket for raw inbound MIME.
+4. Add an S3 bucket policy that allows SES to write objects for your account and receipt rule.
+5. Create an SNS topic for inbound receipt notifications.
+6. Create an SES receipt rule:
+   - Recipients: your domain or subdomain.
+   - Action 1: S3 bucket, object key prefix optional.
+   - Action 2: SNS inbound topic.
+7. Subscribe SNS inbound topic to:
+   `https://YOUR-WORKER-HOST/api/ses/inbound`
 
-### Outbound (Replies & Deliverability)
-1. **Verify Domains**: Verify each sending domain D in SES and add the DKIM CNAMEs.
-2. **Custom MAIL FROM**: Configure a custom MAIL FROM subdomain for each sending domain, for example `bounce.D`. This keeps the Return-Path under your domain instead of `amazonses.com`, improving SPF alignment and reputation signals.
-   ```bash
-   aws sesv2 put-email-identity-mail-from-attributes \
-     --region ap-southeast-2 \
-     --email-identity D \
-     --mail-from-domain bounce.D \
-     --behavior-on-mx-failure USE_DEFAULT_VALUE
-   ```
-3. **SNS Topic (Outbound)**: Create a second SNS topic for bounce, delivery, and complaint events. Set `SNS_ALLOWED_TOPIC_ARN` in your secrets.
-4. **SNS Webhook (Outbound)**: Subscribe your worker's webhook to the outbound topic:
-   `https://<worker-host>/api/ses/notification`
-   The Worker verifies AWS SNS signatures and rejects any topic other than `SNS_ALLOWED_TOPIC_ARN`.
-5. **Confirm Subscriptions**: Check your worker's logs (`npx wrangler tail`) for the `SubscribeURL` upon creation and open it in your browser to confirm both SNS subscriptions.
-   Preview/dev deployments should use their own SNS topic ARNs; do not use query-string topic overrides.
-6. (Optional) Request SES production access if you need to send replies to unverified addresses.
+The inbound endpoint verifies SNS signatures, checks `SNS_INBOUND_TOPIC_ARN`, fetches the raw MIME from S3, then routes the message.
 
-## 4. DNS Configuration per domain
-Configure your domain's DNS records (e.g., in Cloudflare) to route emails to SES and ensure high deliverability:
-- **MX Record**: Point to the Amazon SES inbound endpoint for your region (e.g., `10 inbound-smtp.<your-region>.amazonaws.com`).
-- **SPF**: Add `v=spf1 include:amazonses.com ~all` as a TXT record.
-- **DMARC**: `_dmarc TXT "v=DMARC1; p=quarantine; rua=mailto:dmarc@<your-domain>"`
-- **DKIM**: Add the 3 DKIM CNAME records provided by Amazon SES during verification.
-- **Custom MAIL FROM**: For `bounce.<your-domain>`, publish exactly one MX record and one SPF TXT record:
-  - `bounce MX 10 feedback-smtp.<your-region>.amazonses.com`
-  - `bounce TXT "v=spf1 include:amazonses.com ~all"`
+## 5. Configure SES outbound notifications
 
-## 5. Deploy Worker + Dashboard
+1. Create a second SNS topic for bounces, complaints, and delivery events.
+2. Configure SES identity notifications to publish to that topic.
+3. Subscribe the topic to:
+   `https://YOUR-WORKER-HOST/api/ses/notification`
+4. Set `SNS_ALLOWED_TOPIC_ARN` to this outbound topic ARN.
+
+## 6. Configure DNS for each domain
+
+For each domain you want to use:
+
+- MX: `10 inbound-smtp.YOUR-SES-REGION.amazonaws.com`
+- SPF TXT: `v=spf1 include:amazonses.com ~all`
+- DKIM: the 3 SES-provided CNAME records
+- DMARC TXT at `_dmarc`: start with `v=DMARC1; p=quarantine; rua=mailto:dmarc@YOUR-DOMAIN`
+
+Recommended custom MAIL FROM:
+
 ```bash
-cd worker && npx wrangler deploy
-cd ../dashboard && npm run build && npx wrangler pages deploy dist --project-name hidemyemail-dashboard
+aws sesv2 put-email-identity-mail-from-attributes \
+  --region YOUR-SES-REGION \
+  --email-identity YOUR-DOMAIN \
+  --mail-from-domain bounce.YOUR-DOMAIN \
+  --behavior-on-mx-failure USE_DEFAULT_VALUE
 ```
-Serve the dashboard same-origin as the API: add a Worker route `app.hidemyemail.dev/api/*`
-to the Worker, and point `app.hidemyemail.dev` at the Pages project for the static SPA.
 
-## 6. Initial Configuration (Dashboard)
-After deploying the Worker and Dashboard, log in to your dashboard using the password you hashed in step 2.
-1. Navigate to **Destinations** to add and verify your real email inbox.
-2. The global domain (`hidemyemail.dev`) is seeded automatically. You can add your own subdomains or additional domains from the **Domains** tab.
-*(Note: Do not manually insert destinations into D1, as they must be verified and encrypted by the worker.)*
+DNS for `bounce.YOUR-DOMAIN`:
 
-## 7. Post-Deployment Verification
-- [ ] **Inbound Routing**: Send a test email from an external account to your newly created alias. Verify it successfully arrives in your real inbox.
-- [ ] **E2E Reply (Outbound)**: Reply to the forwarded test email from your real inbox. Verify the external sender receives the reply from your *alias address*, and ensure your real email address is completely absent from the email headers.
-- [ ] **SNS Webhooks**: Check the Cloudflare Worker logs (`npx wrangler tail`) while sending/receiving to ensure SNS notifications are processed without signature errors.
-- [ ] **Deliverability Check**: Send an email to a service like `mail-tester.com` to verify your SPF, DKIM, and DMARC configurations are passing correctly.
-- [ ] **SES Quota Monitoring**: Keep an eye on your SES sending quotas during your first week, as catch-all spam forwarded to your inbox will count against your daily SES limits.
+- MX: `10 feedback-smtp.YOUR-SES-REGION.amazonses.com`
+- TXT: `v=spf1 include:amazonses.com ~all`
+
+## 7. Deploy Worker and dashboard
+
+```bash
+cd dashboard
+npm ci
+npm run build
+
+cd ../worker
+npm ci
+npx wrangler deploy
+```
+
+The Worker serves both API and dashboard through Wrangler Assets. You do not need a separate Cloudflare Pages project.
+
+## 8. Cloudflare automatic deploys
+
+If using Cloudflare Workers Git deployments, use:
+
+- Build command: `cd dashboard && npm ci && npm run build && cd ../worker && npm ci`
+- Deploy command: `cd worker && npx wrangler deploy`
+- Root directory: repo root
+
+Store all secrets in Cloudflare. Do not commit `.dev.vars`.
+
+## 9. First-run dashboard setup
+
+1. Log in with the admin passphrase used in `AUTH_PASSWORD_HASH`.
+2. Go to Admin → Global domains.
+3. Add your domain.
+4. Publish the `_hidemyemail.YOUR-DOMAIN` TXT verification record shown by the dashboard.
+5. Verify the domain.
+6. Set it as the main global domain.
+7. Set SES region, S3 bucket, and topic ARNs in Admin settings if you left Worker vars blank.
+8. Add and verify your destination inbox in Destinations.
+9. Create a test alias.
+
+Public registration starts disabled. Enable it in Admin only if other users should register themselves.
+
+## 10. Smoke tests
+
+- Send mail from an external account to a new alias.
+- Confirm it arrives at your verified destination.
+- Reply from your inbox.
+- Confirm the external sender sees the alias as the sender and your real inbox address is absent from headers.
+- Check `npx wrangler tail` for SNS signature, S3, or SES errors.
+- Use mail-tester.com or equivalent to verify SPF, DKIM, and DMARC.
+
+## Troubleshooting
+
+- **SNS 401:** `SNS_*_TOPIC_ARN` does not match the posting topic or the SNS signature/cert region is wrong.
+- **S3 403/404:** Worker AWS credentials lack `s3:GetObject`, bucket name is wrong, or receipt rule stores under a prefix not matching message ID lookup.
+- **SES rejects outbound:** domain identity not verified, SES sandbox active, or MAIL FROM/DKIM not configured.
+- **Dashboard loads but API 401:** cookies require HTTPS because they use `__Host-` and `Secure`.
+- **New aliases do not auto-create:** check `catch_all_auto_create` and whether the domain is active/verified.
+- **Cannot set main global domain:** domain must be global, active, and verified.

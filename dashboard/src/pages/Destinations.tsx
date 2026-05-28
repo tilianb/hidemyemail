@@ -62,25 +62,20 @@ export function Destinations() {
   return (
     <div>
       <div className="page-header">
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
+        <div className="page-title-row">
           <h1 className="page-title">Destinations</h1>
-          {!loading && (
-            <span className="badge badge-muted">
-              {rows.length}
-            </span>
-          )}
         </div>
         <p className="page-subtitle">
-          Verified email addresses where your aliases can forward mail.
+          Verified email addresses where your aliases can forward mail. Your <strong>default</strong> destination is used for forwarding and account recovery.
         </p>
       </div>
 
-      <div className="card stagger-1" style={{ marginBottom: 24 }}>
+      <div className="card stagger-1 card-form-gap">
         <div className="card-header">
           <span className="card-title">Add Destination</span>
         </div>
         <form onSubmit={create}>
-          <div className="form-strip" style={{ gap: 12 }}>
+          <div className="form-strip">
             <div className="field grow">
               <label className="field-label" htmlFor="dest-email">Email Address</label>
               <input
@@ -94,7 +89,7 @@ export function Destinations() {
                 disabled={submitting}
               />
             </div>
-            <button className="btn btn-primary" type="submit" disabled={submitting} style={{ alignSelf: "flex-end" }}>
+            <button className="btn btn-primary form-submit" type="submit" disabled={submitting}>
               {submitting ? "Sending..." : "Send Verification"}
             </button>
           </div>
@@ -109,7 +104,7 @@ export function Destinations() {
                 <th>Email Address</th>
                 <th>Status</th>
                 <th>Added</th>
-                <th style={{ width: 40 }}></th>
+                <th className="th-actions"></th>
               </tr>
             </thead>
             {loading ? (
@@ -124,29 +119,29 @@ export function Destinations() {
                     <td>
                       {d.verified_at ? (
                         <span className="badge badge-green">
-                          <CheckCircle2 size={12} style={{ marginRight: 4 }} /> Verified
+                          <CheckCircle2 size={12} className="badge-icon" /> Verified
                         </span>
                       ) : (
                         <span className="badge badge-yellow">
-                          <Clock size={12} style={{ marginRight: 4 }} /> Pending
+                          <Clock size={12} className="badge-icon" /> Pending
                         </span>
                       )}
                       {d.is_default === 1 && (
-                        <span className="badge badge-accent" style={{ marginLeft: 8 }}>
+                        <span className="badge badge-accent badge-adjacent">
                           Default
                         </span>
                       )}
                     </td>
                     <td>
-                      <span className="font-mono text-muted" style={{ fontSize: "0.78rem" }}>
+                      <span className="font-mono text-muted">
                         {new Date(d.created_at > 1e11 ? d.created_at : d.created_at * 1000).toLocaleDateString()}
                       </span>
                     </td>
                     <td>
-                      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                      <div className="table-actions">
                         {d.verified_at && d.is_default !== 1 && (
-                          <button className="btn-icon" onClick={() => setDefault(d.id)} title="Set as default">
-                            <CheckCircle2 size={16} />
+                          <button className="btn btn-secondary btn-compact" onClick={() => setDefault(d.id)} title="Set as default">
+                            Set Default
                           </button>
                         )}
                         <button className="btn-icon danger" onClick={() => remove(d.id)} title="Remove destination">

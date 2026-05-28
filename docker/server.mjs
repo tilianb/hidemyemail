@@ -38,10 +38,27 @@ const HOST = env.HOST ?? "0.0.0.0";
 const D1_PERSIST_DIR = path.join(DATA_DIR, "d1");
 await mkdir(D1_PERSIST_DIR, { recursive: true });
 
+// Load worker bundle into memory and strip the inline sourceMappingURL
+// comment before handing it to workerd. The bundle ships with
+// `//# sourceMappingURL=index.js.map`; if workerd can see that comment AND
+// the sibling `.map` file (either through scriptPath or modulesRoot), it
+// resolves the map and aborts at boot with
+// `can't use ".." to break out of starting directory` because the map's
+// `sources` entries walk above the bundle directory.
+//
+// Passing the cleaned source via `script` + a synthetic `scriptPath` that
+// has no `.map` sibling means workerd never finds the map and never aborts.
+const workerScriptRaw = await readFile(WORKER_SCRIPT, "utf8");
+const workerScript = workerScriptRaw.replace(/^\/\/# sourceMappingURL=.*$/m, "");
+
 // ─── Boot Miniflare ─────────────────────────────────────────────────────────
 const mf = new Miniflare({
   // Mirrors wrangler.jsonc — keep compatibility settings aligned with prod.
-  scriptPath: WORKER_SCRIPT,
+  script: workerScript,
+  // Use a synthetic identity that isn't a real path so workerd can't locate
+  // the bundle's `.map` file from it. Miniflare only uses this string as a
+  // module name when `script` is provided.
+  scriptPath: "worker.mjs",
   modules: true,
   compatibilityDate: env.COMPATIBILITY_DATE ?? "2026-05-01",
   compatibilityFlags: ["nodejs_compat"],
