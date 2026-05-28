@@ -5,8 +5,8 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   rate_limit_global: "1000",
   max_inbound_bytes: String(25 * 1024 * 1024),
   catch_all_auto_create: "true",
-  registration_enabled: "true",
-  cors_allowed_domains: "https://hidemyemail.dev,http://localhost:5173",
+  registration_enabled: "false",
+  cors_allowed_domains: "http://localhost:5173",
   ses_region: "",
   ses_access_key_id: "",
   ses_secret_access_key: "",
@@ -14,6 +14,7 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   sns_allowed_topic_arn: "",
   sns_inbound_topic_arn: "",
   forwarded_from_format: "name_address_parens",
+  main_global_domain: "",
 };
 
 // Kept for backward-compat with any imports (tests, etc.)

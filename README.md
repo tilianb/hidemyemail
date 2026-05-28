@@ -1,14 +1,16 @@
 # HideMyEmail
 
-A personal, serverless email-alias service built with **Cloudflare Workers**, **Amazon SES/SNS/S3**, and **Cloudflare D1**. It includes a modern React dashboard hosted on Cloudflare Pages and fully supports two-way reply-from-alias functionality.
+A self-hosted, serverless email-alias service for your own domains. HideMyEmail runs as a Cloudflare Worker with a React dashboard, Cloudflare D1 for state, and AWS SES/S3/SNS for email receiving and sending.
 
-## Features
-- **Serverless Architecture**: Extremely cheap and scalable, running entirely on Cloudflare Workers and Amazon SES.
-- **Two-Way Replies**: Not only can you receive emails to your aliases, but you can also reply *from* your alias transparently.
-- **Modern Dashboard**: A clean React-based dashboard to manage aliases, domains, and view statistics.
-- **Blocks & Rules**: Block unwanted senders instantly from the dashboard.
-- **1-Click Unsubscribe**: Disable aliases instantly directly from your email client using `List-Unsubscribe` Quick Actions.
-- **Self-Hostable**: One-command Docker container for `linux/amd64` and `linux/arm64` (see below).
+## What it does
+
+- Create aliases on your own domain, for example `shop@example.com`.
+- Forward inbound mail to verified destination inboxes.
+- Reply from your inbox while recipients see the alias address.
+- Auto-create catch-all aliases on first inbound email.
+- Block senders and disable aliases from the dashboard.
+- Add one-click `List-Unsubscribe` headers so mail clients can disable aliases.
+- Support multiple users, verified destinations, TOTP MFA, passkeys, and admin controls.
 
 ## Self-host in 60 seconds
 
@@ -22,7 +24,7 @@ cp .env.example .env
 
 # Generate the four secrets and paste them into .env
 echo "SESSION_SECRET=$(openssl rand -hex 32)"
-echo "DESTINATION_ENCRYPTION_KEY=$(openssl rand -base64 32)"
+echo "DESTINATION_ENCRYPTION_KEY=$(openssl rand -hex 32)"
 node ../worker/scripts/hash-password.mjs '<choose-a-password>'  # prints SALT + HASH
 
 # Add your AWS SES creds (SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY, etc.)
@@ -36,63 +38,116 @@ Open <http://localhost:8787>. Put Caddy/nginx/Cloudflare Tunnel in front for
 TLS. See [`docker/README.md`](docker/README.md) for AWS setup, upgrades,
 volumes, and troubleshooting.
 
-## Architecture
-The system consists of two main components:
-1. `worker/`: A Cloudflare Worker that handles SES/SNS webhooks, processes inbound MIME fetched from S3, stores metadata in D1, and forwards mail through SES. It also provides the REST API for the dashboard.
-2. `dashboard/`: A React (Vite) Single Page Application hosted on Cloudflare Pages.
-
-### How it works
-- **Inbound Email**: AWS SES receives emails for your domains, stores raw MIME in S3, and sends a signed SNS notification to the Worker. The Worker verifies the SNS signature and exact topic ARN, fetches the raw MIME, rewrites headers, and forwards it to your real email.
-- **Outbound (Reply)**: When you reply to a forwarded email, it goes through Amazon SES. A webhook catches the SES bounce/delivery, or the Worker intercepts the outbound send, rewriting the `From` address back to your alias before it reaches the recipient.
-
-## AWS SES & SNS Setup
-
-To support outbound replies and monitor email health, you need an Amazon SES account and an SNS topic for bounce/delivery notifications.
-
-1. **Amazon SES Setup**:
-   - Verify your sending domain in Amazon SES.
-   - Configure SES to publish bounce and delivery events to an Amazon SNS topic.
-   - (Optional) Request production access if you are in the SES sandbox to send emails to unverified addresses.
-
-2. **Amazon SNS Webhooks**:
-   - Create HTTPS subscriptions for your SNS topics pointing to your worker webhooks:
-     - `https://<worker-domain>/api/ses/inbound`
-     - `https://<worker-domain>/api/ses/notification`
-   - Do not add shared-secret query parameters. The Worker verifies AWS SNS signatures and the exact configured topic ARNs.
-
-3. **Confirm Subscription**:
-   - When you create the SNS subscription, SNS will send a `SubscriptionConfirmation` message.
-   - Check your worker's logs (e.g., using `wrangler tail`) to find the printed `SubscribeURL`.
-   - Open that URL in your browser to manually confirm the SNS subscription.
-
-4. **Security & Validation**:
-   - Set `SNS_INBOUND_TOPIC_ARN` and `SNS_ALLOWED_TOPIC_ARN` in each Worker environment to the exact ARNs for that environment. Preview/dev should use their own topic ARNs rather than an `allowed_topic` URL override.
-
 ## Documentation
-- [Service Design & Architecture Spec](docs/superpowers/specs/2026-05-24-hidemyemail-alias-service-design.md)
-- [Implementation Plan](docs/superpowers/plans/2026-05-24-hidemyemail-alias-service.md)
-- [Deployment Guide](docs/DEPLOY.md)
 
-## Development Setup
+- [Getting started](docs/GETTING_STARTED.md)
+- [AWS SES setup](docs/AWS_SES_SETUP.md)
+- [Configuration](docs/CONFIGURATION.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Security notes](docs/SECURITY.md)
+- [Deployment guide](docs/DEPLOY.md)
 
-The project uses GitHub Actions for Continuous Integration. On every push and pull request, the CI pipeline automatically runs the worker test suite and builds the dashboard to ensure code stability.
+## Architecture
 
-### Worker (Backend)
-Navigate to the `worker` directory to develop and test the API and Email logic:
+```diagram
+╭──────────────╮   raw MIME   ╭────╮   SNS   ╭──────────────────╮
+│ AWS SES recv │─────────────▶│ S3 │────────▶│ Cloudflare Worker │
+╰──────┬───────╯              ╰────╯         ╰────────┬─────────╯
+       │                                             │
+       │                                  D1 state + dashboard API
+       │                                             │
+       │       SES SendRawEmail                      ▼
+       ╰────────────────────────────────────▶ verified inbox
+```
+
+The dashboard is served by the same Worker through Wrangler Assets. `/api/*` goes to the Worker; all other paths serve the React SPA from `dashboard/dist`.
+
+## Requirements
+
+- Cloudflare account with Workers and D1.
+- AWS account with SES receiving enabled in a supported region.
+- Domain DNS access.
+- Node.js 22+.
+- AWS SES production access if you want to send to unverified external recipients.
+
+## Quick start
+
+1. Fork or clone this repo.
+2. Create D1 databases and paste IDs into `worker/wrangler.jsonc`:
+   ```bash
+   cd worker
+   npx wrangler d1 create hidemyemail
+   npx wrangler d1 create hidemyemail-preview
+   ```
+3. Install dependencies:
+   ```bash
+   cd ../dashboard && npm ci && npm run build
+   cd ../worker && npm ci
+   ```
+4. Apply migrations:
+   ```bash
+   npx wrangler d1 migrations apply DB --remote
+   ```
+5. Set secrets:
+   ```bash
+   node scripts/hash-password.mjs 'your-admin-passphrase'
+   openssl rand -hex 32      # SESSION_SECRET and ACTION_SECRET
+   openssl rand -hex 32      # DESTINATION_ENCRYPTION_KEY
+
+   npx wrangler secret put AUTH_PASSWORD_SALT
+   npx wrangler secret put AUTH_PASSWORD_HASH
+   npx wrangler secret put SESSION_SECRET
+   npx wrangler secret put ACTION_SECRET
+   npx wrangler secret put DESTINATION_ENCRYPTION_KEY
+   npx wrangler secret put SES_ACCESS_KEY_ID
+   npx wrangler secret put SES_SECRET_ACCESS_KEY
+   npx wrangler secret put SNS_ALLOWED_TOPIC_ARN
+   npx wrangler secret put SNS_INBOUND_TOPIC_ARN
+   ```
+6. Deploy unified Worker + dashboard:
+   ```bash
+   cd dashboard && npm run build
+   cd ../worker && npx wrangler deploy
+   ```
+7. Configure AWS SES/S3/SNS and DNS using [Deployment Guide](docs/DEPLOY.md).
+8. Log in, add your global domain in Admin, verify it with the TXT record, set it as main global domain, then add and verify your destination inbox.
+
+## Cloudflare automatic deploys
+
+Cloudflare Workers Git deployments work with this repo. Use these build settings:
+
+- Root directory: repository root
+- Build command: `cd dashboard && npm ci && npm run build && cd ../worker && npm ci`
+- Deploy command: `cd worker && npx wrangler deploy`
+- Output directory: not needed; Worker Assets uses `dashboard/dist`
+
+Keep `worker/wrangler.jsonc` in the repo so Cloudflare can deploy the Worker and Assets binding. Put secrets in Cloudflare, not in git.
+
+## Security defaults
+
+- Public registration is disabled by default. Enable it in Admin only if you want a multi-user instance.
+- Destinations must be verified before they can receive forwarded mail.
+- Replies fail closed unless the sender matches a verified destination and SES reports SPF or DMARC `PASS` for the authenticated sender.
+- SNS webhooks require valid AWS SNS signatures and exact topic ARN matches.
+- Destination emails are encrypted in D1.
+
+See [SECURITY.md](SECURITY.md) for threat model and reporting.
+
+## Development
+
 ```bash
 cd worker
-npm install
-npm test             # Run the worker test suite
-npx wrangler dev     # Run local worker (handles API and email)
+npm ci
+npm test
+npx tsc --noEmit
+
+cd ../dashboard
+npm ci
+npm run build
 ```
 
-### Dashboard (Frontend)
-Navigate to the `dashboard` directory to develop the React UI:
-```bash
-cd dashboard
-npm install
-npm run dev          # Run the dashboard against the local worker
-```
+For local Worker development, copy `worker/.dev.vars.example` to `worker/.dev.vars` and fill in local values.
 
 ## License
-This project is licensed under the [MIT License](LICENSE).
+
+MIT. See [LICENSE](LICENSE).

@@ -4,7 +4,7 @@ import type { Context } from "hono";
 import type { AppEnv } from "../app";
 import { verifyPassword, signFreshAuth, signSession, derivePassphraseHash, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge } from "../../lib/auth";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
-import { getEnvWithOverride } from "../../lib/settings";
+import { getEnvWithOverride, getMainGlobalDomain } from "../../lib/settings";
 
 const SESSION_TTL = 60 * 60 * 24 * 7; // 7 days
 const FRESH_AUTH_TTL = 60 * 10; // 10 minutes
@@ -58,6 +58,11 @@ function randomSixDigitCode(): string {
 
 export function authRoutes() {
   const r = new Hono<AppEnv>();
+
+  r.get("/config", async (c) => {
+    const main_global_domain = await getMainGlobalDomain(c.env.DB, c.env);
+    return c.json({ main_global_domain });
+  });
 
   r.post("/login", async (c) => {
     const ip = c.req.header("cf-connecting-ip") || "unknown";
@@ -330,14 +335,15 @@ export function authRoutes() {
     const sesRegion = await getEnvWithOverride(db, c.env, "ses_region");
 
     if (sesAccessKeyId && sesSecretAccessKey && sesRegion) {
+      const mainGlobalDomain = await getMainGlobalDomain(db, c.env);
       await sendRaw({
         accessKeyId: sesAccessKeyId,
         secretAccessKey: sesSecretAccessKey,
         region: sesRegion
       }, {
-        from: "HideMyEmail <noreply@hidemyemail.dev>",
+        from: `HideMyEmail <noreply@${mainGlobalDomain}>`,
         to: email,
-        rawBase64: buildMfaEmail(email, code)
+        rawBase64: buildMfaEmail(email, code, mainGlobalDomain)
       });
     }
 

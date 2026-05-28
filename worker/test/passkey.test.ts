@@ -35,10 +35,10 @@ test("getRpFromOrigin handles preview URLs", () => {
   expect(rpID).toBe("hidemyemail-preview.tburg.workers.dev");
 });
 
-test("getRpFromOrigin falls back to production domain", () => {
+test("getRpFromOrigin falls back to a neutral example domain", () => {
   const { rpID, expectedOrigin } = getRpFromOrigin(null);
-  expect(rpID).toBe("hidemyemail.dev");
-  expect(expectedOrigin).toBe("https://hidemyemail.dev");
+  expect(rpID).toBe("example.com");
+  expect(expectedOrigin).toBe("https://example.com");
 });
 
 test("getRpFromOrigin handles localhost", () => {

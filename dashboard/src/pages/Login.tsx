@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { generatePassphrase } from "../lib/passphrase";
@@ -12,6 +12,11 @@ export function Login() {
   const [generated, setGenerated] = useState<string | null>(null);
   const [mfaRequired, setMfaRequired] = useState(false);
   const [mfaCode, setMfaCode] = useState("");
+  const [mainGlobalDomain, setMainGlobalDomain] = useState("");
+
+  useEffect(() => {
+    api.config().then(conf => setMainGlobalDomain(conf.main_global_domain)).catch(() => {});
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -85,157 +90,51 @@ export function Login() {
   }
 
   return (
-    <div style={{
-      display: "flex",
-      minHeight: "100dvh",
-      width: "100%",
-      background: "var(--canvas)",
-    }}>
+    <div className="login-shell">
       {/* Left: decorative panel */}
-      <div style={{
-        flex: "0 0 42%",
-        background: "var(--surface-0)",
-        borderRight: "1px solid var(--border)",
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "space-between",
-        padding: "48px",
-        position: "relative",
-        overflow: "hidden",
-      }} className="login-panel-left">
-        {/* Background pattern */}
-        <div style={{
-          position: "absolute",
-          inset: 0,
-          backgroundImage: `repeating-linear-gradient(
-            0deg,
-            transparent,
-            transparent 31px,
-            var(--border) 31px,
-            var(--border) 32px
-          ), repeating-linear-gradient(
-            90deg,
-            transparent,
-            transparent 31px,
-            var(--border) 31px,
-            var(--border) 32px
-          )`,
-          opacity: 0.35,
-        }} />
-
-        {/* Amber accent blob */}
-        <div style={{
-          position: "absolute",
-          width: 300,
-          height: 300,
-          borderRadius: "50%",
-          background: "radial-gradient(circle, rgba(255,179,0,0.08) 0%, transparent 70%)",
-          top: "30%",
-          left: "10%",
-          pointerEvents: "none",
-        }} />
-
-        <div style={{ position: "relative", zIndex: 1 }}>
-          <div style={{
-            fontFamily: "var(--font-display)",
-            fontSize: "0.72rem",
-            fontWeight: 600,
-            letterSpacing: "0.15em",
-            textTransform: "uppercase",
-            color: "var(--text-muted)",
-            marginBottom: "32px",
-          }}>
+      <div className="login-panel-left">
+        <div className="login-layer">
+          <div className="login-kicker brand-kicker">
             CLASSIFICATION: PRIVATE
           </div>
-          <div style={{
-            fontFamily: "var(--font-display)",
-            fontSize: "2.2rem",
-            fontWeight: 700,
-            letterSpacing: "-0.03em",
-            lineHeight: 1.1,
-            color: "var(--text-primary)",
-          }}>
-            hide<span className="brand-redact" title="hideMYemail" style={{ fontSize: "0.85em", padding: "0 6px", verticalAlign: "middle" }}>my</span>email
+          <div className="login-brand-title">
+            hide<span className="brand-redact login-brand-mark" title="hideMYemail">my</span>email
           </div>
-          <div style={{
-            fontFamily: "var(--font-body)",
-            fontStyle: "italic",
-            fontSize: "1rem",
-            color: "var(--text-muted)",
-            marginTop: "8px",
-          }}>
+          <div className="login-tagline">
             personal email alias console
           </div>
         </div>
 
-        <div style={{ position: "relative", zIndex: 1 }}>
+        <div className="login-layer">
           {["Catch-all auto-alias creation", "Full two-way reply-from-alias", "Sender blocks & rate limits", "Cloudflare + SES — zero infra"].map((line, i) => (
-            <div key={i} style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "10px",
-              marginBottom: "10px",
-              fontFamily: "var(--font-display)",
-              fontSize: "0.78rem",
-              color: "var(--text-muted)",
-              animation: `fade-up 400ms ease both ${120 + i * 80}ms`,
-            }}>
-              <span style={{ color: "var(--accent)", fontSize: "0.6rem" }}>◆</span>
+            <div key={i} className="login-feature-row">
+              <span className="login-feature-dot">◆</span>
               {line}
             </div>
           ))}
         </div>
 
-        <div style={{ position: "relative", zIndex: 1 }}>
-          <span style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "0.65rem",
-            color: "var(--text-muted)",
-            letterSpacing: "0.05em",
-          }}>
-            hidemyemail.dev
+        <div className="login-layer">
+          <span className="login-domain">
+            {mainGlobalDomain}
           </span>
         </div>
       </div>
 
       {/* Right: login form */}
-      <div className="login-form-pane" style={{
-        flex: 1,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "48px",
-      }}>
-        <div style={{
-          width: "100%",
-          maxWidth: 360,
-          animation: "fade-up 350ms ease both 100ms",
-        }}>
-          <div style={{
-            fontFamily: "var(--font-display)",
-            fontSize: "0.72rem",
-            fontWeight: 600,
-            letterSpacing: "0.15em",
-            textTransform: "uppercase",
-            color: "var(--text-muted)",
-            marginBottom: "28px",
-          }}>
+      <div className="login-form-pane">
+        <div className="login-card">
+          <div className="login-kicker">
             AUTHENTICATE
           </div>
 
           {mfaRequired ? (
-            <form onSubmit={submitMfa} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+            <form onSubmit={submitMfa} className="stack">
               <div>
-                <div style={{
-                  fontFamily: "var(--font-display)",
-                  fontSize: "1rem",
-                  fontWeight: 600,
-                  color: "var(--text-primary)",
-                  marginBottom: "6px",
-                }}>
+                <div className="status-title">
                   Two-Factor Authentication
                 </div>
-                <p style={{ margin: 0, fontFamily: "var(--font-body)", fontSize: "0.85rem", color: "var(--text-muted)", lineHeight: 1.5 }}>
+                <p className="muted-copy">
                   Enter the 6-digit code from your authenticator app, or one of your backup codes.
                 </p>
               </div>
@@ -256,38 +155,27 @@ export function Login() {
                 />
               </div>
               {err && (
-                <div style={{
-                  fontFamily: "var(--font-display)",
-                  fontSize: "0.8rem",
-                  color: "var(--red)",
-                  background: "var(--red-dim)",
-                  border: "1px solid rgba(255,80,80,0.2)",
-                  borderRadius: "var(--radius-sm)",
-                  padding: "8px 12px",
-                  animation: "fade-in 200ms ease",
-                }}>
+                <div className="auth-error">
                   {err}
                 </div>
               )}
-              <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+              <div className="inline-actions-lg">
                 <button
                   type="button"
-                  className="btn"
+                  className="btn btn-soft flex-1 btn-center"
                   onClick={() => { setMfaRequired(false); setMfaCode(""); setErr(""); }}
                   disabled={loading}
-                  style={{ flex: 1, justifyContent: "center", padding: "10px 16px", fontSize: "0.85rem", background: "var(--surface-2)", color: "var(--text-secondary)" }}
                 >
                   ← Back
                 </button>
                 <button
                   type="submit"
-                  className="btn btn-primary"
+                  className="btn btn-primary flex-2 btn-center"
                   disabled={loading || !mfaCode}
-                  style={{ flex: 2, justifyContent: "center", padding: "10px 16px", fontSize: "0.85rem" }}
                 >
                   {loading ? (
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>◌</span>
+                    <span className="inline-actions">
+                      <span className="inline-spinner">◌</span>
                       Verifying…
                     </span>
                   ) : "Verify"}
@@ -295,61 +183,44 @@ export function Login() {
               </div>
             </form>
           ) : generated ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-              <div style={{
-                background: "var(--surface-1)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius)",
-                padding: "20px",
-                textAlign: "center"
-              }}>
-                <h3 style={{ margin: "0 0 10px 0", color: "var(--text-primary)" }}>Account created!</h3>
-                <p style={{ margin: "0 0 15px 0", color: "var(--text-muted)", fontSize: "0.9rem" }}>
+            <div className="stack">
+              <div className="login-success-card">
+                <h3 className="login-success-title">Account created!</h3>
+                <p className="login-success-copy">
                   Please save this passphrase. You will need it to login in the future.
                 </p>
-                <div style={{
-                  fontFamily: "var(--font-mono)",
-                  background: "var(--canvas)",
-                  padding: "12px",
-                  borderRadius: "var(--radius-sm)",
-                  color: "var(--accent)",
-                  fontSize: "1.1rem",
-                  letterSpacing: "0.05em",
-                  border: "1px solid var(--border)"
-                }}>
+                <div className="login-secret">
                   {generated}
                 </div>
               </div>
               <button
-                className="btn btn-primary"
+                className="btn btn-primary btn-full btn-center"
                 onClick={() => refreshAuth()}
-                style={{ width: "100%", justifyContent: "center", padding: "10px 16px", fontSize: "0.85rem" }}
               >
                 I have saved it, take me to dashboard
               </button>
             </div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+            <div className="stack">
               {typeof window !== "undefined" && window.PublicKeyCredential && (
                 <>
                   <button
                     type="button"
-                    className="btn btn-primary"
+                    className="btn btn-primary btn-full btn-center"
                     onClick={loginWithPasskey}
                     disabled={loading}
-                    style={{ width: "100%", justifyContent: "center", padding: "10px 16px", fontSize: "0.85rem", gap: 8 }}
                   >
                     <Fingerprint size={16} />
                     {loading ? "Signing in…" : "Sign in with Passkey"}
                   </button>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-                    <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontFamily: "var(--font-display)", letterSpacing: "0.08em" }}>OR</span>
-                    <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                  <div className="login-divider">
+                    <div className="login-divider-line" />
+                    <span className="login-divider-text">OR</span>
+                    <div className="login-divider-line" />
                   </div>
                 </>
               )}
-            <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+            <form onSubmit={submit} className="stack">
               <div className="field">
                 <label className="field-label" htmlFor="login-pw">Access passphrase</label>
                 <input
@@ -366,30 +237,20 @@ export function Login() {
               </div>
 
               {err && (
-                <div style={{
-                  fontFamily: "var(--font-display)",
-                  fontSize: "0.8rem",
-                  color: "var(--red)",
-                  background: "var(--red-dim)",
-                  border: "1px solid rgba(255,80,80,0.2)",
-                  borderRadius: "var(--radius-sm)",
-                  padding: "8px 12px",
-                  animation: "fade-in 200ms ease",
-                }}>
+                <div className="auth-error">
                   {err}
                 </div>
               )}
 
-              <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+              <div className="inline-actions-lg">
                 <button
                   type="submit"
-                  className="btn btn-primary"
+                  className="btn btn-primary flex-1 btn-center"
                   disabled={loading || !pw}
-                  style={{ flex: 1, justifyContent: "center", padding: "10px 16px", fontSize: "0.85rem" }}
                 >
                   {loading ? (
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>◌</span>
+                    <span className="inline-actions">
+                      <span className="inline-spinner">◌</span>
                       Authenticating…
                     </span>
                   ) : "Gain access"}
@@ -397,9 +258,8 @@ export function Login() {
                 <button
                   type="button"
                   onClick={generate}
-                  className="btn"
+                  className="btn btn-soft flex-1 btn-center"
                   disabled={loading}
-                  style={{ flex: 1, justifyContent: "center", padding: "10px 16px", fontSize: "0.85rem", background: "var(--surface-2)", color: "var(--text-secondary)" }}
                 >
                   Generate New
                 </button>
@@ -409,17 +269,6 @@ export function Login() {
           )}
         </div>
       </div>
-
-      <style>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to   { transform: rotate(360deg); }
-        }
-        @media (max-width: 640px) {
-          .login-panel-left { display: none !important; }
-          .login-form-pane { padding: 24px !important; }
-        }
-      `}</style>
     </div>
   );
 }

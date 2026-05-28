@@ -1,6 +1,6 @@
 import type { ParsedReverse } from "../types";
 
-// addy-style reverse address: "shop+alice=store.com@hidemyemail.dev".
+// addy-style reverse address: "shop+alice=store.com@example.com".
 // The external sender is encoded inline (local=domain) — self-describing, no DB token.
 export function reverseAddress(aliasLocal: string, externalSender: string, domain: string): string {
   const at = externalSender.lastIndexOf("@");

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import { sendRaw } from "../../lib/ses";
 import { hashDestination, encryptDestination, decryptDestination } from "../../lib/crypto";
-import { getEnvWithOverride } from "../../lib/settings";
+import { getEnvWithOverride, getMainGlobalDomain } from "../../lib/settings";
 
 function escapeHtml(s: string): string {
   return s
@@ -54,9 +54,11 @@ export function destinationRoutes() {
       // Save destination first so the verification link exists before the
       // outbound send is handed off to SES in the background.
       const encryptedEmail = await encryptDestination(email, c.env.DESTINATION_ENCRYPTION_KEY);
+      const countRes = await c.env.DB.prepare("SELECT COUNT(*) as c FROM destinations WHERE user_id = ?").bind(userId).first<{ c: number }>();
+      const isDefault = countRes?.c === 0 ? 1 : 0;
       await c.env.DB.prepare(
-        "INSERT INTO destinations (user_id, email, email_hash, token, created_at) VALUES (?, ?, ?, ?, ?)"
-      ).bind(userId, encryptedEmail, emailHash, token, Date.now()).run();
+        "INSERT INTO destinations (user_id, email, email_hash, token, created_at, is_default) VALUES (?, ?, ?, ?, ?, ?)"
+      ).bind(userId, encryptedEmail, emailHash, token, Date.now(), isDefault).run();
 
       const sesAccessKeyId = await getEnvWithOverride(c.env.DB, c.env, "ses_access_key_id");
       const sesSecretAccessKey = await getEnvWithOverride(c.env.DB, c.env, "ses_secret_access_key");
@@ -64,7 +66,8 @@ export function destinationRoutes() {
 
       if (sesAccessKeyId && sesSecretAccessKey && sesRegion) {
         const verifyUrl = new URL(`/api/verify?token=${token}`, c.req.url).toString();
-        const rawBase64 = buildVerificationEmail(email, verifyUrl);
+        const mainGlobalDomain = await getMainGlobalDomain(c.env.DB, c.env);
+        const rawBase64 = buildVerificationEmail(email, verifyUrl, mainGlobalDomain);
         const sesSend: typeof sendRaw = (c.env as any).__sesSend ?? sendRaw;
 
         const startedAt = Date.now();
@@ -73,7 +76,7 @@ export function destinationRoutes() {
             secretAccessKey: sesSecretAccessKey,
             region: sesRegion
           }, {
-            from: "HideMyEmail <noreply@hidemyemail.dev>",
+            from: `HideMyEmail <noreply@${mainGlobalDomain}>`,
             to: email,
             rawBase64
           })
@@ -194,7 +197,7 @@ function renderBaseHtml(title: string, content: string): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${escapeHtml(title)} - HideMyEmail</title>
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'unsafe-inline'; frame-ancestors 'none';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'none'; frame-ancestors 'none';">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Inter:wght@400;500&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
@@ -434,14 +437,6 @@ function renderSuccessPage(email: string): string {
     <p class="subtitle">Your email address has been verified successfully. You can now use it to forward email aliases.</p>
     <div class="email-badge">${escapeHtml(email)}</div>
     <a href="/" class="btn btn-secondary">Return to Dashboard</a>
-    <div class="progress-bar-container">
-      <div class="progress-bar"></div>
-    </div>
-    <script>
-      setTimeout(() => {
-        window.location.href = '/';
-      }, 3000);
-    </script>
   `;
   return renderBaseHtml("Email Verified", content);
 }
@@ -466,7 +461,7 @@ function renderErrorPage(): string {
 // Outbound verification email builder
 // ---------------------------------------------------------------------------
 
-function buildVerificationEmail(to: string, verifyUrl: string): string {
+function buildVerificationEmail(to: string, verifyUrl: string, mainGlobalDomain: string = "example.com"): string {
   const boundary = `----=_Part_${Date.now().toString(36)}`;
 
   const htmlBody = `<!DOCTYPE html>
@@ -550,7 +545,7 @@ function buildVerificationEmail(to: string, verifyUrl: string): string {
                 This link was requested for HideMyEmail. If you did not request this, you can safely ignore this email.
               </p>
               <p style="margin:0;font-size:11px;color:#55555f;font-family:'Inter',sans-serif;">
-                &copy; ${new Date().getFullYear()} HideMyEmail &middot; <a href="https://hidemyemail.dev" style="color:#ffb300;text-decoration:none;font-weight:500;">hidemyemail.dev</a>
+                &copy; ${new Date().getFullYear()} HideMyEmail &middot; <a href="https://${escapeHtml(mainGlobalDomain)}" style="color:#ffb300;text-decoration:none;font-weight:500;">${escapeHtml(mainGlobalDomain)}</a>
               </p>
             </td>
           </tr>
@@ -573,16 +568,16 @@ ${verifyUrl}
 
 This link expires in 24 hours. If you did not request this, you can safely ignore this email.
 
-— HideMyEmail (https://hidemyemail.dev)`;
+— HideMyEmail (https://${mainGlobalDomain})`;
 
   // Build a MIME multipart/alternative message
   const msgLines = [
-    `From: HideMyEmail <noreply@hidemyemail.dev>`,
+    `From: HideMyEmail <noreply@${mainGlobalDomain}>`,
     `To: ${to}`,
     `Subject: Verify your email address`,
     `Date: ${new Date().toUTCString()}`,
-    `Message-ID: <${crypto.randomUUID()}@hidemyemail.dev>`,
-    `Reply-To: HideMyEmail <noreply@hidemyemail.dev>`,
+    `Message-ID: <${crypto.randomUUID()}@${mainGlobalDomain}>`,
+    `Reply-To: HideMyEmail <noreply@${mainGlobalDomain}>`,
     `MIME-Version: 1.0`,
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
     ``,

@@ -34,11 +34,14 @@ export function aliasRoutes() {
   r.post("/aliases", async (c) => {
     const userId = c.get("userId");
     const b = await c.req.json<{ domain_id: number; local_part: string; destination?: string; label?: string }>();
-    const dom = await c.env.DB.prepare("SELECT domain, is_global, user_id FROM domains WHERE id=?").bind(b.domain_id).first<{ domain: string, is_global: number, user_id: number }>();
+    const dom = await c.env.DB.prepare("SELECT domain, is_global, user_id, allow_custom_aliases, active, verified_at FROM domains WHERE id=?").bind(b.domain_id).first<{ domain: string, is_global: number, user_id: number, allow_custom_aliases: number, active: number, verified_at: number | null }>();
     if (!dom) return c.json({ error: "unknown domain" }, 400);
     
     if (dom.is_global === 0 && dom.user_id !== userId) {
       return c.json({ error: "not your domain" }, 403);
+    }
+    if (dom.is_global === 1 && (dom.active !== 1 || !dom.verified_at)) {
+      return c.json({ error: "domain unavailable" }, 400);
     }
 
     let destinationToUse = b.destination;
@@ -57,7 +60,7 @@ export function aliasRoutes() {
     }
 
     let localPart = b.local_part.toLowerCase();
-    if (dom.is_global === 1) {
+    if (dom.is_global === 1 && !dom.allow_custom_aliases) {
       const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
       const arr = new Uint8Array(8);
       crypto.getRandomValues(arr);

@@ -1,5 +1,9 @@
 import { toBase64, fromBase64, utf8 } from "./bytes";
 
+function looksLikeLegacyPlaintextEmail(value: string): boolean {
+  return /^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/.test(value);
+}
+
 /**
  * Hash an email using HMAC-SHA256 for deterministic lookups.
  */
@@ -62,7 +66,10 @@ export async function decryptDestination(encryptedBase64: string, keyBase64: str
     );
     return new TextDecoder().decode(plaintextBuf);
   } catch (err) {
-    console.warn("Failed to decrypt destination (might be unmigrated plaintext or invalid key):", encryptedBase64);
-    return encryptedBase64;
+    if (looksLikeLegacyPlaintextEmail(encryptedBase64)) {
+      console.warn("Using legacy plaintext destination row:", encryptedBase64);
+      return encryptedBase64;
+    }
+    throw new Error("Unable to decrypt stored value");
   }
 }
