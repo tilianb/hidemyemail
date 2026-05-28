@@ -9,6 +9,11 @@ dist/
 *.log
 .DS_Store
 
-# AI assistant files
+# Local assistant files
+CLAUDE.md
+.mcp.json*
+.mcp.json.map
 .claude/
 .antigravitycli/
+.playwright-mcp/
+.codebase-memory/

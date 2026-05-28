@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type Domain } from "../api";
-import { useToast, TableSkeleton, EmptyState, ConfirmDialog, PromptDialog, ChoiceDialog } from "../ui";
+import { useToast, TableSkeleton, EmptyState, ConfirmDialog, PromptDialog, ChoiceDialog, CopyButton } from "../ui";
 import { Users, Trash2, Globe, Cloud, Edit3, Key, Server, Settings } from "lucide-react";
 
 const FORWARDED_FROM_FORMATS = [
@@ -14,6 +14,41 @@ const FORWARDED_FROM_FORMATS = [
   { value: "via_hidemyemail", label: "Name via HideMyEmail", example: '"Alice via HideMyEmail" <alias@domain>' },
 ];
 
+function verificationRecords(domain: Domain, sesRegion: string) {
+  return {
+    txtHost: `_hidemyemail.${domain.domain}`,
+    txtValue: `hidemyemail-verify=${domain.verification_token ?? ""}`,
+    mxHost: domain.domain,
+    mxValue: `inbound-smtp.${sesRegion}.amazonaws.com`,
+    spfHost: domain.domain,
+    spfValue: "v=spf1 include:amazonses.com ~all",
+  };
+}
+
+function DnsField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="dns-field">
+      <div className="dns-field-label">{label}</div>
+      <div className="dns-field-value">
+        <code className="input-mono">{value}</code>
+        <CopyButton text={value} />
+      </div>
+    </div>
+  );
+}
+
+function DnsRecordRow({ type, fields }: { type: string; fields: { label: string; value: string }[] }) {
+  return (
+    <div className="dns-record-row">
+      <div className="dns-record-type">
+        <span>Type</span>
+        <code className="input-mono">{type}</code>
+      </div>
+      {fields.map(field => <DnsField key={`${type}-${field.label}`} label={field.label} value={field.value} />)}
+    </div>
+  );
+}
+
 export function Admin() {
   const { toast } = useToast();
   const [users, setUsers] = useState<{ id: number; created_at: number; alias_count: number; active: number; forwarding: number; name: string | null }[]>([]);
@@ -24,9 +59,13 @@ export function Admin() {
   const [submittingDomain, setSubmittingDomain] = useState(false);
   const [awsTab, setAwsTab] = useState<"auto" | "manual">("auto");
   const [showAwsSetup, setShowAwsSetup] = useState(false);
+  const [showDomains, setShowDomains] = useState(false);
+  const [showUsers, setShowUsers] = useState(false);
   const [confirmState, setConfirmState] = useState<{ title: string; body: string; confirmLabel?: string; onConfirm: () => void } | null>(null);
   const [promptState, setPromptState] = useState<{ title: string; body: string; defaultValue?: string; confirmLabel?: string; onConfirm: (val: string) => void } | null>(null);
   const [choiceState, setChoiceState] = useState<{ title: string; body: string; primaryLabel: string; secondaryLabel: string; onPrimary: () => void; onSecondary: () => void; } | null>(null);
+  const [expandedVerifyId, setExpandedVerifyId] = useState<number | null>(null);
+  const [verifyingDomain, setVerifyingDomain] = useState(false);
 
   const [envData, setEnvData] = useState<{ vars: Record<string, { value: string; secret: false }>; secrets: Record<string, { configured: boolean; preview?: string }> } | null>(null);
   const [settingsData, setSettingsData] = useState<Record<string, { value: string; updated_at: number }> | null>(null);
@@ -35,6 +74,16 @@ export function Admin() {
   const [showEnvVars, setShowEnvVars] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const workerOrigin = window.location.origin;
+  const currentMainGlobalDomain = editedSettings.main_global_domain || "";
+  const selectableMainGlobalDomains = globalDomains.filter(d => d.active === 1 && d.verified_at !== null);
+  const sesRegion = editedSettings.ses_region || envData?.vars.SES_REGION.value || "us-east-1";
+  const activeUserCount = users.filter(u => u.active === 1).length;
+  const forwardingUserCount = users.filter(u => u.forwarding === 1).length;
+  const sortedGlobalDomains = [...globalDomains].sort((a, b) => {
+    if (a.domain === currentMainGlobalDomain) return -1;
+    if (b.domain === currentMainGlobalDomain) return 1;
+    return a.domain.localeCompare(b.domain);
+  });
 
   async function load() {
     setLoading(true);
@@ -122,21 +171,41 @@ export function Admin() {
     }
   }
 
+  async function verifyDomain(domain: Domain) {
+    setVerifyingDomain(true);
+    try {
+      const res = await api.adminVerifyDomain(domain.id);
+      if (res.verified) {
+        toast("Domain verified successfully", "success");
+        setExpandedVerifyId(null);
+        await load();
+      } else {
+        toast(res.error || "Domain not yet verified", "error");
+      }
+    } catch (err: any) {
+      toast(err.message || "Failed to verify domain", "error");
+    } finally {
+      setVerifyingDomain(false);
+    }
+  }
+
   const isSettingsDirty = settingsData && Object.keys(editedSettings).some(k => settingsData[k]?.value !== editedSettings[k]);
 
   return (
-    <div>
-      <div className="page-header">
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
+    <div className="admin-control-room">
+      <div className="page-header admin-hero">
+        <div className="admin-hero-kicker">Control Room</div>
+        <div className="admin-hero-title-row">
           <h1 className="page-title">System Administration</h1>
+          <span className="badge badge-amber">Operator</span>
         </div>
         <p className="page-subtitle">
-          Manage system-wide settings, users, global domains, and AWS configuration.
+          Manage runtime policy, user access, global domains, and SES infrastructure from one coherent console.
         </p>
       </div>
 
       {stats && (
-        <div className="stagger-1" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 24 }}>
+        <div className="admin-stat-grid stagger-1">
           <div className="stat-card">
             <div className="stat-label">Total Users</div>
             <div className="stat-value">{stats.users.toLocaleString()}</div>
@@ -152,13 +221,712 @@ export function Admin() {
         </div>
       )}
 
+      <div className={`card admin-panel-card admin-domain-card stagger-2 ${showDomains ? "is-open" : ""}`}>
+        <div className="card-header admin-section-header admin-collapsible-header" onClick={() => setShowDomains(!showDomains)}>
+          <div>
+            <span className="card-title admin-section-title">
+              <Globe size={18} /> Domains
+            </span>
+            <p className="admin-section-subtitle">Domains all users can select after DNS and relay readiness checks pass.</p>
+          </div>
+          <button className="admin-panel-toggle" type="button" onClick={(e) => { e.stopPropagation(); setShowDomains(!showDomains); }}>
+            {showDomains ? "Hide" : "Show"}
+          </button>
+        </div>
+        {showDomains && (
+        <div className="card-body">
+          <form onSubmit={createGlobalDomain} className="form-strip admin-domain-form">
+            <div className="field grow">
+              <label className="field-label" htmlFor="global-dom">Add global domain</label>
+              <input
+                id="global-dom"
+                className="input input-mono"
+                type="text"
+                placeholder="example.com or aliases.example.net"
+                value={domainForm}
+                onChange={e => setDomainForm(e.target.value.toLowerCase())}
+                required
+                disabled={submittingDomain}
+              />
+            </div>
+            <button className="btn btn-primary" type="submit" disabled={submittingDomain} style={{ alignSelf: "flex-end" }}>
+              {submittingDomain ? "Adding..." : "Add Global Domain"}
+            </button>
+          </form>
+          
+          {globalDomains.length > 0 && (
+            <div className="domain-control-stack">
+              {sortedGlobalDomains.map(d => {
+                const records = verificationRecords(d, sesRegion);
+                const expanded = expandedVerifyId === d.id;
+                const isMain = d.domain === currentMainGlobalDomain;
+                return (
+                  <section key={d.id} className={`domain-module ${isMain ? "domain-module-main" : ""}`}>
+                    <div className="domain-module-mainline">
+                      <div className="domain-identity">
+                        <span className="domain-signal" aria-hidden="true" />
+                        <div>
+                          <div className="domain-name-line">
+                            <span className="font-mono domain-name">{d.domain}</span>
+                            {isMain && <span className="badge badge-amber">Primary</span>}
+                            {d.verified_at ? <span className="badge badge-green">Verified</span> : <span className="badge badge-muted">Pending DNS</span>}
+                          </div>
+                          <div className="domain-meta">
+                            {isMain ? "Pinned main global domain" : `Added ${new Date(d.created_at > 1e11 ? d.created_at : d.created_at * 1000).toLocaleDateString()}`}
+                            <span>•</span>
+                            <span>{d.active === 1 ? "Available to users" : "Disabled"}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="domain-actions">
+                        <button className="btn btn-outline btn-sm" type="button" onClick={() => setExpandedVerifyId(expanded ? null : d.id)}>
+                          {expanded ? "Hide DNS" : (d.verified_at ? "DNS records" : "Verify DNS")}
+                        </button>
+
+                        <label className="domain-toggle">
+                          <span>Active</span>
+                          <div className="switch">
+                              <input type="checkbox" checked={d.active === 1} disabled={d.domain === currentMainGlobalDomain} onChange={async (e) => {
+                                try {
+                                  await api.adminUpdateDomain(d.id, { active: e.target.checked ? 1 : 0 });
+                                  load();
+                                } catch (err: any) { toast(err.message, "error"); }
+                              }} />
+                              <span className="switch-track"></span>
+                            </div>
+                        </label>
+
+                        <label className="domain-toggle" style={{ opacity: d.active ? 1 : 0.5 }}>
+                          <span>Custom aliases</span>
+                          <div className="switch">
+                              <input type="checkbox" checked={d.allow_custom_aliases === 1} onChange={async (e) => {
+                                try {
+                                  await api.adminUpdateDomain(d.id, { allow_custom_aliases: e.target.checked ? 1 : 0 });
+                                  load();
+                                } catch (err: any) { toast(err.message, "error"); }
+                              }} />
+                              <span className="switch-track"></span>
+                            </div>
+                        </label>
+
+                        {d.domain !== currentMainGlobalDomain && (
+                            <button 
+                              className="btn-icon danger" 
+                              title="Delete global domain"
+                              onClick={() => {
+                                setConfirmState({
+                                  title: "Delete Global Domain",
+                                  body: `Delete ${d.domain} and ALL associated aliases for ALL users?`,
+                                  confirmLabel: "Delete Domain",
+                                  onConfirm: async () => {
+                                    try {
+                                      await api.deleteDomain(d.id);
+                                      toast("Global domain deleted", "success");
+                                      await load();
+                                    } catch (err: any) {
+                                      toast(err.message || "Failed to delete domain", "error");
+                                    }
+                                  }
+                                });
+                              }}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {expanded && (
+                      <div className="dns-panel">
+                        <div className="dns-panel-header">
+                          <div>
+                            <div className="dns-panel-title">DNS records for <span className="font-mono">{d.domain}</span></div>
+                            <p>Copy these exact provider-ready records. Use the full Host/FQDN shown below for your DNS host field.</p>
+                          </div>
+                        </div>
+                        <div className="dns-record-grid">
+                            <DnsRecordRow
+                              type="TXT"
+                              fields={[
+                                { label: "Host / FQDN", value: records.txtHost },
+                                { label: "Value", value: records.txtValue },
+                              ]}
+                            />
+                            <DnsRecordRow
+                              type="MX"
+                              fields={[
+                                { label: "Host / FQDN", value: records.mxHost },
+                                { label: "Priority", value: "10" },
+                                { label: "Value", value: records.mxValue },
+                              ]}
+                            />
+                            <DnsRecordRow
+                              type="TXT (SPF)"
+                              fields={[
+                                { label: "Host / FQDN", value: records.spfHost },
+                                { label: "Value", value: records.spfValue },
+                              ]}
+                            />
+                        </div>
+                          {!d.verified_at && (
+                            <div className="dns-panel-actions">
+                              <button 
+                                className="btn btn-primary" 
+                                onClick={() => verifyDomain(d)}
+                                disabled={verifyingDomain}
+                              >
+                                {verifyingDomain ? "Verifying..." : "Verify DNS"}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                  </section>
+                  );
+                })}
+            </div>
+          )}
+        </div>
+        )}
+      </div>
+
+      <div className={`card admin-panel-card admin-users-card stagger-3 ${showUsers ? "is-open" : ""}`}>
+        <div className="card-header admin-section-header admin-collapsible-header" onClick={() => setShowUsers(!showUsers)}>
+          <div>
+            <span className="card-title admin-section-title">
+              <Users size={18} /> Users
+            </span>
+            <p className="admin-section-subtitle">Login access, forwarding state, recovery, and account controls.</p>
+          </div>
+          <div className="admin-section-actions">
+            <button className="admin-panel-toggle" type="button" onClick={(e) => { e.stopPropagation(); setShowUsers(!showUsers); }}>
+              {users.length} users · {showUsers ? "Hide" : "Show"}
+            </button>
+          </div>
+        </div>
+        {showUsers && (
+        <div className="card-body">
+          <div className="admin-user-summary">
+            <span><strong>{activeUserCount}</strong> active</span>
+            <span><strong>{forwardingUserCount}</strong> forwarding</span>
+            <span><strong>{users.length - activeUserCount}</strong> disabled</span>
+          </div>
+          <div className="table-wrap table-wrap-stack admin-users-table">
+          <table className="dossier dossier-stack">
+            <thead>
+                <tr>
+                  <th style={{ width: 120 }}>User ID</th>
+                  <th>Name</th>
+                  <th>Joined</th>
+                  <th>Aliases</th>
+                  <th style={{ textAlign: "center" }}>Login</th>
+                  <th style={{ textAlign: "center" }}>Email</th>
+                  <th style={{ textAlign: "right" }}>Actions</th>
+                </tr>
+            </thead>
+            {loading ? (
+              <TableSkeleton cols={4} rows={3} />
+            ) : (
+              <tbody>
+                {users.map(u => (
+                  <tr key={u.id}>
+                    <td data-label="ID" className="font-mono text-muted">
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span>#{u.id}</span>
+                        {u.id === 1 && <span className="badge badge-amber">Admin</span>}
+                      </div>
+                    </td>
+                    <td data-label="Name">
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        {u.name || <span className="text-muted" style={{ fontStyle: "italic" }}>Anonymous</span>}
+                        {u.id !== 1 && (
+                          <button className="btn-icon" title="Rename user" onClick={() => {
+                            setPromptState({
+                              title: "Rename User",
+                              body: "Enter new name for User #" + u.id,
+                              defaultValue: u.name || "",
+                              onConfirm: async (newName) => {
+                                try {
+                                  await api.adminUpdateUser(u.id, { name: newName });
+                                  toast("User renamed", "success");
+                                  load();
+                                } catch (e: any) { toast(e.message, "error"); }
+                              }
+                            });
+                          }}>
+                            <Edit3 size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                    <td data-label="Joined">
+                      <span className="text-muted">
+                        {new Date(u.created_at > 1e11 ? u.created_at : u.created_at * 1000).toLocaleDateString()}
+                      </span>
+                    </td>
+                    <td data-label="Aliases">{u.alias_count}</td>
+                    <td data-label="Login" style={{ textAlign: "center" }}>
+                      <label className="switch" style={{ margin: "0 auto", opacity: u.id === 1 ? 0.5 : 1 }}>
+                        <input type="checkbox" checked={u.active === 1} disabled={u.id === 1} onChange={async (e) => {
+                          try {
+                            await api.adminUpdateUser(u.id, { active: e.target.checked ? 1 : 0 });
+                            load();
+                          } catch (err: any) { toast(err.message, "error"); }
+                        }} />
+                        <span className="switch-track"></span>
+                      </label>
+                    </td>
+                    <td data-label="Email" style={{ textAlign: "center" }}>
+                      <label className="switch" style={{ margin: "0 auto", opacity: u.id === 1 ? 0.5 : 1 }}>
+                        <input type="checkbox" checked={u.forwarding === 1} disabled={u.id === 1} onChange={async (e) => {
+                          try {
+                            await api.adminUpdateUser(u.id, { forwarding: e.target.checked ? 1 : 0 });
+                            load();
+                          } catch (err: any) { toast(err.message, "error"); }
+                        }} />
+                        <span className="switch-track"></span>
+                      </label>
+                    </td>
+                    <td data-label="Actions" style={{ textAlign: "right" }}>
+                      {u.id !== 1 && (
+                        <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                          <button className="btn-icon" title="Recover User" onClick={() => {
+                            setChoiceState({
+                              title: "Recover User",
+                              body: "How would you like to deliver the recovery link?",
+                              primaryLabel: "Send via Email",
+                              onPrimary: async () => {
+                                try {
+                                  await api.adminRecoverUser(u.id, true);
+                                  toast("Recovery email sent to user", "success");
+                                } catch (err: any) { toast(err.message, "error"); }
+                              },
+                              secondaryLabel: "Copy Link",
+                              onSecondary: async () => {
+                                try {
+                                  const { token } = await api.adminRecoverUser(u.id, false);
+                                  const url = `${window.location.origin}/recover?token=${token}`;
+                                  setPromptState({
+                                    title: "Recovery Link",
+                                    body: "Copy this secure 24-hour recovery link and send it to the user:",
+                                    defaultValue: url,
+                                    confirmLabel: "Done",
+                                    onConfirm: () => {}
+                                  });
+                                } catch (err: any) { toast(err.message, "error"); }
+                              }
+                            });
+                          }}>
+                            <Key size={16} />
+                          </button>
+                          <button className="btn-icon danger" onClick={() => requestRemoveUser(u.id)} title="Delete user">
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            )}
+          </table>
+          {!loading && users.length === 0 && (
+            <EmptyState
+              icon={<Users size={40} />}
+              title="No users"
+              body="No users have signed up yet."
+            />
+          )}
+          </div>
+        </div>
+        )}
+      </div>
+
+      {settingsData && (
+        <div className={`card admin-panel-card admin-settings-card stagger-4 ${showSettings ? "is-open" : ""}`}>
+          <div className="card-header admin-section-header admin-collapsible-header" onClick={() => setShowSettings(!showSettings)}>
+            <div>
+              <span className="card-title admin-section-title">
+                <Settings size={18} /> System Settings
+              </span>
+              <p className="admin-section-subtitle">Runtime policy, rate limits, registration, and relay behavior.</p>
+            </div>
+            <button className="admin-panel-toggle" type="button" onClick={(e) => { e.stopPropagation(); setShowSettings(!showSettings); }}>
+              {showSettings ? "Hide" : "Show"}
+            </button>
+          </div>
+          {showSettings && (
+          <div className="card-body">
+            <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 24 }}>
+              These settings are stored in the database and can be modified at runtime without redeploying the worker.
+            </p>
+            
+            <div className="settings-grid" style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-rate-alias" className="setting-label">Per-Alias Rate Limit (emails/hr)</label>
+                  <div className="setting-desc">Max forwards per alias per hour</div>
+                </div>
+                <div className="setting-control">
+                  <input
+                    id="setting-rate-alias"
+                    className="input"
+                    type="number"
+                    min="1"
+                    value={editedSettings.rate_limit_per_alias || ""}
+                    onChange={e => setEditedSettings({...editedSettings, rate_limit_per_alias: e.target.value})}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-rate-global" className="setting-label">Global Rate Limit (emails/hr)</label>
+                  <div className="setting-desc">Max total forwards per hour across all aliases</div>
+                </div>
+                <div className="setting-control">
+                  <input
+                    id="setting-rate-global"
+                    className="input"
+                    type="number"
+                    min="1"
+                    value={editedSettings.rate_limit_global || ""}
+                    onChange={e => setEditedSettings({...editedSettings, rate_limit_global: e.target.value})}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-max-bytes" className="setting-label">Max Inbound Email Size</label>
+                  <div className="setting-desc">Maximum email size accepted (in MB)</div>
+                </div>
+                <div className="setting-control">
+                  <input
+                    id="setting-max-bytes"
+                    className="input"
+                    type="number"
+                    min="1"
+                    value={editedSettings.max_inbound_bytes ? (parseInt(editedSettings.max_inbound_bytes, 10) / 1024 / 1024).toString() : ""}
+                    onChange={e => {
+                      const mb = parseInt(e.target.value, 10);
+                      if (!isNaN(mb)) {
+                        setEditedSettings({...editedSettings, max_inbound_bytes: (mb * 1024 * 1024).toString()});
+                      }
+                    }}
+                    style={{ width: 100 }}
+                  />
+                  <span className="text-muted font-mono" style={{ marginLeft: 8 }}>MB</span>
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <div className="setting-label">Catch-All Auto-Create</div>
+                  <div className="setting-desc">Automatically create aliases when receiving emails to unknown addresses</div>
+                </div>
+                <div className="setting-control">
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={editedSettings.catch_all_auto_create === "true"}
+                      onChange={e => setEditedSettings({...editedSettings, catch_all_auto_create: e.target.checked ? "true" : "false"})}
+                    />
+                    <span className="switch-track"></span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <div className="setting-label">User Registration</div>
+                  <div className="setting-desc">Allow new users to register accounts</div>
+                </div>
+                <div className="setting-control">
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={editedSettings.registration_enabled === "true"}
+                      onChange={e => setEditedSettings({...editedSettings, registration_enabled: e.target.checked ? "true" : "false"})}
+                    />
+                    <span className="switch-track"></span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-cors" className="setting-label">CORS Allowed Origins</label>
+                  <div className="setting-desc">Comma-separated exact origins allowed to access the API</div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <input
+                    id="setting-cors"
+                    className="input input-mono"
+                    type="text"
+                    value={editedSettings.cors_allowed_domains || ""}
+                    onChange={e => setEditedSettings({...editedSettings, cors_allowed_domains: e.target.value})}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-forwarded-from-format" className="setting-label">Forwarded Sender Display</label>
+                  <div className="setting-desc">
+                    How forwarded emails appear in your inbox. Default avoids raw @ signs for deliverability.
+                  </div>
+                  <div className="setting-desc input-mono" style={{ marginTop: 6 }}>
+                    {FORWARDED_FROM_FORMATS.find(f => f.value === editedSettings.forwarded_from_format)?.example || FORWARDED_FROM_FORMATS[0].example}
+                  </div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <select
+                    id="setting-forwarded-from-format"
+                    className="input"
+                    value={editedSettings.forwarded_from_format || "name_address_parens"}
+                    onChange={e => setEditedSettings({...editedSettings, forwarded_from_format: e.target.value})}
+                    style={{ width: "100%" }}
+                  >
+                    {FORWARDED_FROM_FORMATS.map(format => (
+                      <option key={format.value} value={format.value}>{format.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-main-global-domain" className="setting-label">Main Global Domain</label>
+                  <div className="setting-desc">The primary domain used for system emails and the default frontend display</div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <select
+                    id="setting-main-global-domain"
+                    className="input input-mono"
+                    value={currentMainGlobalDomain}
+                    onChange={e => setEditedSettings({...editedSettings, main_global_domain: e.target.value})}
+                    style={{ width: "100%" }}
+                  >
+                    {!selectableMainGlobalDomains.find(d => d.domain === currentMainGlobalDomain) && currentMainGlobalDomain && (
+                      <option value={currentMainGlobalDomain}>{currentMainGlobalDomain}</option>
+                    )}
+                    {selectableMainGlobalDomains.map(d => (
+                      <option key={d.id} value={d.domain}>{d.domain}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* AWS Config Overrides */}
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-ses-region" className="setting-label">SES Region (Override)</label>
+                  <div className="setting-desc">e.g. us-east-1</div>
+                </div>
+                <div className="setting-control">
+                  <input
+                    id="setting-ses-region"
+                    className="input input-mono"
+                    type="text"
+                    placeholder="Fallback to ENV if empty"
+                    value={editedSettings.ses_region || ""}
+                    onChange={e => setEditedSettings({...editedSettings, ses_region: e.target.value})}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-ses-key" className="setting-label">SES Access Key ID (Override)</label>
+                  <div className="setting-desc">AWS access key with SES permissions</div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <input
+                    id="setting-ses-key"
+                    className="input input-mono"
+                    type="text"
+                    placeholder="Fallback to ENV if empty"
+                    value={editedSettings.ses_access_key_id || ""}
+                    onChange={e => setEditedSettings({...editedSettings, ses_access_key_id: e.target.value})}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-ses-secret" className="setting-label">SES Secret Access Key (Override)</label>
+                  <div className="setting-desc">AWS secret key with SES permissions</div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <input
+                    id="setting-ses-secret"
+                    className="input input-mono"
+                    type="password"
+                    placeholder="Fallback to ENV if empty"
+                    value={editedSettings.ses_secret_access_key || ""}
+                    onChange={e => setEditedSettings({...editedSettings, ses_secret_access_key: e.target.value})}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-s3-bucket" className="setting-label">S3 Inbound Bucket (Override)</label>
+                  <div className="setting-desc">Bucket name where SES stores inbound emails</div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <input
+                    id="setting-s3-bucket"
+                    className="input input-mono"
+                    type="text"
+                    placeholder="Fallback to ENV if empty"
+                    value={editedSettings.s3_inbound_bucket || ""}
+                    onChange={e => setEditedSettings({...editedSettings, s3_inbound_bucket: e.target.value})}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-sns-topic" className="setting-label">SNS Inbound Topic ARN (Override)</label>
+                  <div className="setting-desc">Exact ARN of the SNS topic receiving SES inbound notifications</div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <input
+                    id="setting-sns-topic"
+                    className="input input-mono"
+                    type="text"
+                    placeholder="Fallback to ENV if empty"
+                    value={editedSettings.sns_inbound_topic_arn || ""}
+                    onChange={e => setEditedSettings({...editedSettings, sns_inbound_topic_arn: e.target.value})}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-sns-outbound-topic" className="setting-label">SNS Outbound Topic ARN (Override)</label>
+                  <div className="setting-desc">Exact ARN of the SNS topic sending SES bounce/complaint notifications</div>
+                </div>
+                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
+                  <input
+                    id="setting-sns-outbound-topic"
+                    className="input input-mono"
+                    type="text"
+                    placeholder="Fallback to ENV if empty"
+                    value={editedSettings.sns_allowed_topic_arn || ""}
+                    onChange={e => setEditedSettings({...editedSettings, sns_allowed_topic_arn: e.target.value})}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+              </div>
+
+            </div>
+            
+            <div style={{ marginTop: 32, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.05)", display: "flex", justifyContent: "flex-end", gap: 12 }}>
+              <button 
+                className="btn btn-ghost"
+                onClick={() => {
+                  setEditedSettings({
+                    rate_limit_per_alias: "200",
+                    rate_limit_global: "1000",
+                    max_inbound_bytes: "26214400",
+                    catch_all_auto_create: "true",
+                    registration_enabled: "false",
+                    main_global_domain: "",
+                    cors_allowed_domains: "http://localhost:5173",
+                    forwarded_from_format: "name_address_parens"
+                  });
+                }}
+                type="button"
+              >
+                Reset to Defaults
+              </button>
+              <button 
+                className="btn btn-primary"
+                onClick={saveSettings}
+                disabled={!isSettingsDirty || savingSettings}
+              >
+                {savingSettings ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </div>
+          )}
+        </div>
+      )}
+
+      {envData && (
+        <div className={`card admin-panel-card admin-env-card stagger-5 ${showEnvVars ? "is-open" : ""}`}>
+          <div className="card-header admin-section-header admin-collapsible-header" onClick={() => setShowEnvVars(!showEnvVars)}>
+            <div>
+              <span className="card-title admin-section-title">
+                <Server size={18} /> Environment
+              </span>
+              <p className="admin-section-subtitle">Read-only Worker variables and secret configuration status.</p>
+            </div>
+            <button className="admin-panel-toggle" type="button" onClick={(e) => { e.stopPropagation(); setShowEnvVars(!showEnvVars); }}>
+              {showEnvVars ? "Hide" : "Show"}
+            </button>
+          </div>
+          {showEnvVars && (
+            <div className="card-body">
+              <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 16 }}>
+                Read-only view of Cloudflare Worker environment variables and secrets. Note that secrets cannot be modified here.
+              </p>
+              <div className="table-wrap">
+                <table className="dossier">
+                  <thead>
+                    <tr>
+                      <th>Variable</th>
+                      <th>Value / Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(envData.vars).map(([k, v]) => (
+                      <tr key={k}>
+                        <td className="font-mono" style={{ fontSize: "0.85rem" }}>{k}</td>
+                        <td className="font-mono" style={{ fontSize: "0.85rem" }}>{v.value}</td>
+                      </tr>
+                    ))}
+                    {Object.entries(envData.secrets).map(([k, v]) => (
+                      <tr key={k}>
+                        <td className="font-mono" style={{ fontSize: "0.85rem" }}>{k}</td>
+                        <td>
+                          {v.configured ? (
+                            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                              <span className="badge badge-green">Configured</span>
+                              {v.preview && <span className="font-mono text-muted" style={{ fontSize: "0.85rem" }}>{v.preview}</span>}
+                            </div>
+                          ) : (
+                            <span className="badge badge-amber">Not Set</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* AWS Onboarding Wizard */}
-      <div className="card stagger-2" style={{ marginBottom: 24, borderLeft: "3px solid var(--accent-blue)" }}>
-        <div className="card-header" style={{ cursor: "pointer", marginBottom: showAwsSetup ? 24 : 0, borderBottom: showAwsSetup ? "1px solid var(--border)" : "none", paddingBottom: showAwsSetup ? 16 : 0 }} onClick={() => setShowAwsSetup(!showAwsSetup)}>
-          <span className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <Cloud size={18} /> AWS Setup Wizard
-          </span>
-          <button className="btn btn-ghost" type="button" onClick={(e) => { e.stopPropagation(); setShowAwsSetup(!showAwsSetup); }}>
+      <div className={`card admin-panel-card admin-aws-card stagger-6 ${showAwsSetup ? "is-open" : ""}`}>
+        <div className="card-header admin-section-header admin-collapsible-header" onClick={() => setShowAwsSetup(!showAwsSetup)}>
+          <div>
+            <span className="card-title admin-section-title">
+              <Cloud size={18} /> AWS Setup
+            </span>
+            <p className="admin-section-subtitle">One-time SES, SNS, and S3 provisioning templates.</p>
+          </div>
+          <button className="admin-panel-toggle" type="button" onClick={(e) => { e.stopPropagation(); setShowAwsSetup(!showAwsSetup); }}>
             {showAwsSetup ? "Hide" : "Show"}
           </button>
         </div>
@@ -304,554 +1072,6 @@ echo "SNS_ALLOWED_TOPIC_ARN=$OUTBOUND_TOPIC_ARN"`}
         )}
       </div>
 
-      {envData && (
-        <div className="card stagger-3" style={{ marginBottom: 24 }}>
-          <div className="card-header" style={{ cursor: "pointer", marginBottom: showEnvVars ? 24 : 0, borderBottom: showEnvVars ? "1px solid var(--border)" : "none", paddingBottom: showEnvVars ? 16 : 0 }} onClick={() => setShowEnvVars(!showEnvVars)}>
-            <span className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <Server size={18} /> Environment Variables
-            </span>
-            <button className="btn btn-ghost" type="button" onClick={(e) => { e.stopPropagation(); setShowEnvVars(!showEnvVars); }}>
-              {showEnvVars ? "Hide" : "Show"}
-            </button>
-          </div>
-          {showEnvVars && (
-            <div className="card-body">
-              <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 16 }}>
-                Read-only view of Cloudflare Worker environment variables and secrets. Note that secrets cannot be modified here.
-              </p>
-              <div className="table-wrap">
-                <table className="dossier">
-                  <thead>
-                    <tr>
-                      <th>Variable</th>
-                      <th>Value / Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.entries(envData.vars).map(([k, v]) => (
-                      <tr key={k}>
-                        <td className="font-mono" style={{ fontSize: "0.85rem" }}>{k}</td>
-                        <td className="font-mono" style={{ fontSize: "0.85rem" }}>{v.value}</td>
-                      </tr>
-                    ))}
-                    {Object.entries(envData.secrets).map(([k, v]) => (
-                      <tr key={k}>
-                        <td className="font-mono" style={{ fontSize: "0.85rem" }}>{k}</td>
-                        <td>
-                          {v.configured ? (
-                            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                              <span className="badge badge-green">Configured</span>
-                              {v.preview && <span className="font-mono text-muted" style={{ fontSize: "0.85rem" }}>{v.preview}</span>}
-                            </div>
-                          ) : (
-                            <span className="badge badge-amber">Not Set</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {settingsData && (
-        <div className="card stagger-4" style={{ marginBottom: 24 }}>
-          <div className="card-header" style={{ cursor: "pointer", marginBottom: showSettings ? 24 : 0, borderBottom: showSettings ? "1px solid var(--border)" : "none", paddingBottom: showSettings ? 16 : 0 }} onClick={() => setShowSettings(!showSettings)}>
-            <span className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <Settings size={18} /> Runtime Settings
-            </span>
-            <button className="btn btn-ghost" type="button" onClick={(e) => { e.stopPropagation(); setShowSettings(!showSettings); }}>
-              {showSettings ? "Hide" : "Show"}
-            </button>
-          </div>
-          {showSettings && (
-          <div className="card-body">
-            <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 24 }}>
-              These settings are stored in the database and can be modified at runtime without redeploying the worker.
-            </p>
-            
-            <div className="settings-grid" style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-              <div className="setting-row">
-                <div className="setting-info">
-                  <label htmlFor="setting-rate-alias" className="setting-label">Per-Alias Rate Limit (emails/hr)</label>
-                  <div className="setting-desc">Max forwards per alias per hour</div>
-                </div>
-                <div className="setting-control">
-                  <input
-                    id="setting-rate-alias"
-                    className="input"
-                    type="number"
-                    min="1"
-                    value={editedSettings.rate_limit_per_alias || ""}
-                    onChange={e => setEditedSettings({...editedSettings, rate_limit_per_alias: e.target.value})}
-                  />
-                </div>
-              </div>
-
-              <div className="setting-row">
-                <div className="setting-info">
-                  <label htmlFor="setting-rate-global" className="setting-label">Global Rate Limit (emails/hr)</label>
-                  <div className="setting-desc">Max total forwards per hour across all aliases</div>
-                </div>
-                <div className="setting-control">
-                  <input
-                    id="setting-rate-global"
-                    className="input"
-                    type="number"
-                    min="1"
-                    value={editedSettings.rate_limit_global || ""}
-                    onChange={e => setEditedSettings({...editedSettings, rate_limit_global: e.target.value})}
-                  />
-                </div>
-              </div>
-
-              <div className="setting-row">
-                <div className="setting-info">
-                  <label htmlFor="setting-max-bytes" className="setting-label">Max Inbound Email Size</label>
-                  <div className="setting-desc">Maximum email size accepted (in MB)</div>
-                </div>
-                <div className="setting-control">
-                  <input
-                    id="setting-max-bytes"
-                    className="input"
-                    type="number"
-                    min="1"
-                    value={editedSettings.max_inbound_bytes ? (parseInt(editedSettings.max_inbound_bytes, 10) / 1024 / 1024).toString() : ""}
-                    onChange={e => {
-                      const mb = parseInt(e.target.value, 10);
-                      if (!isNaN(mb)) {
-                        setEditedSettings({...editedSettings, max_inbound_bytes: (mb * 1024 * 1024).toString()});
-                      }
-                    }}
-                    style={{ width: 100 }}
-                  />
-                  <span className="text-muted font-mono" style={{ marginLeft: 8 }}>MB</span>
-                </div>
-              </div>
-
-              <div className="setting-row">
-                <div className="setting-info">
-                  <div className="setting-label">Catch-All Auto-Create</div>
-                  <div className="setting-desc">Automatically create aliases when receiving emails to unknown addresses</div>
-                </div>
-                <div className="setting-control">
-                  <label className="switch">
-                    <input
-                      type="checkbox"
-                      checked={editedSettings.catch_all_auto_create === "true"}
-                      onChange={e => setEditedSettings({...editedSettings, catch_all_auto_create: e.target.checked ? "true" : "false"})}
-                    />
-                    <span className="switch-track"></span>
-                  </label>
-                </div>
-              </div>
-
-              <div className="setting-row">
-                <div className="setting-info">
-                  <div className="setting-label">User Registration</div>
-                  <div className="setting-desc">Allow new users to register accounts</div>
-                </div>
-                <div className="setting-control">
-                  <label className="switch">
-                    <input
-                      type="checkbox"
-                      checked={editedSettings.registration_enabled === "true"}
-                      onChange={e => setEditedSettings({...editedSettings, registration_enabled: e.target.checked ? "true" : "false"})}
-                    />
-                    <span className="switch-track"></span>
-                  </label>
-                </div>
-              </div>
-
-              <div className="setting-row">
-                <div className="setting-info">
-                  <label htmlFor="setting-cors" className="setting-label">CORS Allowed Origins</label>
-                  <div className="setting-desc">Comma-separated exact origins allowed to access the API</div>
-                </div>
-                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
-                  <input
-                    id="setting-cors"
-                    className="input input-mono"
-                    type="text"
-                    value={editedSettings.cors_allowed_domains || ""}
-                    onChange={e => setEditedSettings({...editedSettings, cors_allowed_domains: e.target.value})}
-                    style={{ width: "100%" }}
-                  />
-                </div>
-              </div>
-
-              <div className="setting-row">
-                <div className="setting-info">
-                  <label htmlFor="setting-forwarded-from-format" className="setting-label">Forwarded Sender Display</label>
-                  <div className="setting-desc">
-                    How forwarded emails appear in your inbox. Default avoids raw @ signs for deliverability.
-                  </div>
-                  <div className="setting-desc input-mono" style={{ marginTop: 6 }}>
-                    {FORWARDED_FROM_FORMATS.find(f => f.value === editedSettings.forwarded_from_format)?.example || FORWARDED_FROM_FORMATS[0].example}
-                  </div>
-                </div>
-                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
-                  <select
-                    id="setting-forwarded-from-format"
-                    className="input"
-                    value={editedSettings.forwarded_from_format || "name_address_parens"}
-                    onChange={e => setEditedSettings({...editedSettings, forwarded_from_format: e.target.value})}
-                    style={{ width: "100%" }}
-                  >
-                    {FORWARDED_FROM_FORMATS.map(format => (
-                      <option key={format.value} value={format.value}>{format.label}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* AWS Config Overrides */}
-              <div className="setting-row">
-                <div className="setting-info">
-                  <label htmlFor="setting-ses-region" className="setting-label">SES Region (Override)</label>
-                  <div className="setting-desc">e.g. us-east-1</div>
-                </div>
-                <div className="setting-control">
-                  <input
-                    id="setting-ses-region"
-                    className="input input-mono"
-                    type="text"
-                    placeholder="Fallback to ENV if empty"
-                    value={editedSettings.ses_region || ""}
-                    onChange={e => setEditedSettings({...editedSettings, ses_region: e.target.value})}
-                  />
-                </div>
-              </div>
-
-              <div className="setting-row">
-                <div className="setting-info">
-                  <label htmlFor="setting-ses-key" className="setting-label">SES Access Key ID (Override)</label>
-                  <div className="setting-desc">AWS access key with SES permissions</div>
-                </div>
-                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
-                  <input
-                    id="setting-ses-key"
-                    className="input input-mono"
-                    type="text"
-                    placeholder="Fallback to ENV if empty"
-                    value={editedSettings.ses_access_key_id || ""}
-                    onChange={e => setEditedSettings({...editedSettings, ses_access_key_id: e.target.value})}
-                    style={{ width: "100%" }}
-                  />
-                </div>
-              </div>
-
-              <div className="setting-row">
-                <div className="setting-info">
-                  <label htmlFor="setting-ses-secret" className="setting-label">SES Secret Access Key (Override)</label>
-                  <div className="setting-desc">AWS secret key with SES permissions</div>
-                </div>
-                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
-                  <input
-                    id="setting-ses-secret"
-                    className="input input-mono"
-                    type="password"
-                    placeholder="Fallback to ENV if empty"
-                    value={editedSettings.ses_secret_access_key || ""}
-                    onChange={e => setEditedSettings({...editedSettings, ses_secret_access_key: e.target.value})}
-                    style={{ width: "100%" }}
-                  />
-                </div>
-              </div>
-
-              <div className="setting-row">
-                <div className="setting-info">
-                  <label htmlFor="setting-s3-bucket" className="setting-label">S3 Inbound Bucket (Override)</label>
-                  <div className="setting-desc">Bucket name where SES stores inbound emails</div>
-                </div>
-                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
-                  <input
-                    id="setting-s3-bucket"
-                    className="input input-mono"
-                    type="text"
-                    placeholder="Fallback to ENV if empty"
-                    value={editedSettings.s3_inbound_bucket || ""}
-                    onChange={e => setEditedSettings({...editedSettings, s3_inbound_bucket: e.target.value})}
-                    style={{ width: "100%" }}
-                  />
-                </div>
-              </div>
-
-              <div className="setting-row">
-                <div className="setting-info">
-                  <label htmlFor="setting-sns-topic" className="setting-label">SNS Inbound Topic ARN (Override)</label>
-                  <div className="setting-desc">Exact ARN of the SNS topic receiving SES inbound notifications</div>
-                </div>
-                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
-                  <input
-                    id="setting-sns-topic"
-                    className="input input-mono"
-                    type="text"
-                    placeholder="Fallback to ENV if empty"
-                    value={editedSettings.sns_inbound_topic_arn || ""}
-                    onChange={e => setEditedSettings({...editedSettings, sns_inbound_topic_arn: e.target.value})}
-                    style={{ width: "100%" }}
-                  />
-                </div>
-              </div>
-
-              <div className="setting-row">
-                <div className="setting-info">
-                  <label htmlFor="setting-sns-outbound-topic" className="setting-label">SNS Outbound Topic ARN (Override)</label>
-                  <div className="setting-desc">Exact ARN of the SNS topic sending SES bounce/complaint notifications</div>
-                </div>
-                <div className="setting-control" style={{ flexGrow: 1, maxWidth: 400 }}>
-                  <input
-                    id="setting-sns-outbound-topic"
-                    className="input input-mono"
-                    type="text"
-                    placeholder="Fallback to ENV if empty"
-                    value={editedSettings.sns_allowed_topic_arn || ""}
-                    onChange={e => setEditedSettings({...editedSettings, sns_allowed_topic_arn: e.target.value})}
-                    style={{ width: "100%" }}
-                  />
-                </div>
-              </div>
-
-            </div>
-            
-            <div style={{ marginTop: 32, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.05)", display: "flex", justifyContent: "flex-end", gap: 12 }}>
-              <button 
-                className="btn btn-ghost"
-                onClick={() => {
-                  setEditedSettings({
-                    rate_limit_per_alias: "200",
-                    rate_limit_global: "1000",
-                    max_inbound_bytes: "26214400",
-                    catch_all_auto_create: "true",
-                    registration_enabled: "true",
-                    cors_allowed_domains: "https://hidemyemail.dev,http://localhost:5173",
-                    forwarded_from_format: "name_address_parens"
-                  });
-                }}
-                type="button"
-              >
-                Reset to Defaults
-              </button>
-              <button 
-                className="btn btn-primary"
-                onClick={saveSettings}
-                disabled={!isSettingsDirty || savingSettings}
-              >
-                {savingSettings ? "Saving..." : "Save Changes"}
-              </button>
-            </div>
-          </div>
-          )}
-        </div>
-      )}
-
-      <div className="card stagger-5" style={{ marginBottom: 24 }}>
-        <div className="card-header">
-          <span className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <Globe size={18} /> Global Domains
-          </span>
-        </div>
-        <div className="card-body">
-          <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 16 }}>
-            Add domains that are available to all users on the platform.
-          </p>
-          <form onSubmit={createGlobalDomain} className="form-strip" style={{ gap: 12 }}>
-            <div className="field grow">
-              <label className="field-label" htmlFor="global-dom">Domain Name (e.g., example.com)</label>
-              <input
-                id="global-dom"
-                className="input input-mono"
-                type="text"
-                value={domainForm}
-                onChange={e => setDomainForm(e.target.value.toLowerCase())}
-                required
-                disabled={submittingDomain}
-              />
-            </div>
-            <button className="btn btn-primary" type="submit" disabled={submittingDomain} style={{ alignSelf: "flex-end" }}>
-              {submittingDomain ? "Adding..." : "Add Global Domain"}
-            </button>
-          </form>
-          
-          {globalDomains.length > 0 && (
-            <div style={{ marginTop: 24, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 16 }}>
-              <h3 style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-muted)", marginBottom: 12 }}>Active Global Domains</h3>
-              <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-                {globalDomains.map(d => (
-                  <li key={d.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "rgba(255,255,255,0.02)", borderRadius: 4 }}>
-                    <div>
-                      <span className="font-mono" style={{ fontSize: "0.85rem", display: "block" }}>{d.domain}</span>
-                      <span className="text-muted" style={{ fontSize: "0.75rem" }}>Added {new Date(d.created_at > 1e11 ? d.created_at : d.created_at * 1000).toLocaleDateString()}</span>
-                    </div>
-                    {d.domain !== "hidemyemail.dev" && (
-                      <button 
-                        className="btn-icon danger" 
-                        title="Delete global domain"
-                        onClick={() => {
-                          setConfirmState({
-                            title: "Delete Global Domain",
-                            body: `Delete ${d.domain} and ALL associated aliases for ALL users?`,
-                            confirmLabel: "Delete Domain",
-                            onConfirm: async () => {
-                              try {
-                                await api.deleteDomain(d.id);
-                                toast("Global domain deleted", "success");
-                                await load();
-                              } catch (err: any) {
-                                toast(err.message || "Failed to delete domain", "error");
-                              }
-                            }
-                          });
-                        }}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="stagger-6">
-        <h2 className="section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <Users size={18} /> Users
-        </h2>
-        <div className="table-wrap table-wrap-stack">
-          <table className="dossier dossier-stack">
-            <thead>
-                <tr>
-                  <th style={{ width: 120 }}>User ID</th>
-                  <th>Name</th>
-                  <th>Joined</th>
-                  <th>Aliases</th>
-                  <th style={{ textAlign: "center" }}>Login</th>
-                  <th style={{ textAlign: "center" }}>Email</th>
-                  <th style={{ textAlign: "right" }}>Actions</th>
-                </tr>
-            </thead>
-            {loading ? (
-              <TableSkeleton cols={4} rows={3} />
-            ) : (
-              <tbody>
-                {users.map(u => (
-                  <tr key={u.id}>
-                    <td data-label="ID" className="font-mono text-muted">
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span>#{u.id}</span>
-                        {u.id === 1 && <span className="badge badge-amber">Admin</span>}
-                      </div>
-                    </td>
-                    <td data-label="Name">
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        {u.name || <span className="text-muted" style={{ fontStyle: "italic" }}>Anonymous</span>}
-                        {u.id !== 1 && (
-                          <button className="btn-icon" title="Rename user" onClick={() => {
-                            setPromptState({
-                              title: "Rename User",
-                              body: "Enter new name for User #" + u.id,
-                              defaultValue: u.name || "",
-                              onConfirm: async (newName) => {
-                                try {
-                                  await api.adminUpdateUser(u.id, { name: newName });
-                                  toast("User renamed", "success");
-                                  load();
-                                } catch (e: any) { toast(e.message, "error"); }
-                              }
-                            });
-                          }}>
-                            <Edit3 size={14} />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                    <td data-label="Joined">
-                      <span className="text-muted">
-                        {new Date(u.created_at > 1e11 ? u.created_at : u.created_at * 1000).toLocaleDateString()}
-                      </span>
-                    </td>
-                    <td data-label="Aliases">{u.alias_count}</td>
-                    <td data-label="Login" style={{ textAlign: "center" }}>
-                      <label className="switch" style={{ margin: "0 auto", opacity: u.id === 1 ? 0.5 : 1 }}>
-                        <input type="checkbox" checked={u.active === 1} disabled={u.id === 1} onChange={async (e) => {
-                          try {
-                            await api.adminUpdateUser(u.id, { active: e.target.checked ? 1 : 0 });
-                            load();
-                          } catch (err: any) { toast(err.message, "error"); }
-                        }} />
-                        <span className="switch-track"></span>
-                      </label>
-                    </td>
-                    <td data-label="Email" style={{ textAlign: "center" }}>
-                      <label className="switch" style={{ margin: "0 auto", opacity: u.id === 1 ? 0.5 : 1 }}>
-                        <input type="checkbox" checked={u.forwarding === 1} disabled={u.id === 1} onChange={async (e) => {
-                          try {
-                            await api.adminUpdateUser(u.id, { forwarding: e.target.checked ? 1 : 0 });
-                            load();
-                          } catch (err: any) { toast(err.message, "error"); }
-                        }} />
-                        <span className="switch-track"></span>
-                      </label>
-                    </td>
-                    <td data-label="Actions" style={{ textAlign: "right" }}>
-                      {u.id !== 1 && (
-                        <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
-                          <button className="btn-icon" title="Recover User" onClick={() => {
-                            setChoiceState({
-                              title: "Recover User",
-                              body: "How would you like to deliver the recovery link?",
-                              primaryLabel: "Send via Email",
-                              onPrimary: async () => {
-                                try {
-                                  await api.adminRecoverUser(u.id, true);
-                                  toast("Recovery email sent to user", "success");
-                                } catch (err: any) { toast(err.message, "error"); }
-                              },
-                              secondaryLabel: "Copy Link",
-                              onSecondary: async () => {
-                                try {
-                                  const { token } = await api.adminRecoverUser(u.id, false);
-                                  const url = `${window.location.origin}/recover?token=${token}`;
-                                  setPromptState({
-                                    title: "Recovery Link",
-                                    body: "Copy this secure 24-hour recovery link and send it to the user:",
-                                    defaultValue: url,
-                                    confirmLabel: "Done",
-                                    onConfirm: () => {}
-                                  });
-                                } catch (err: any) { toast(err.message, "error"); }
-                              }
-                            });
-                          }}>
-                            <Key size={16} />
-                          </button>
-                          <button className="btn-icon danger" onClick={() => requestRemoveUser(u.id)} title="Delete user">
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            )}
-          </table>
-          {!loading && users.length === 0 && (
-            <EmptyState
-              icon={<Users size={40} />}
-              title="No users"
-              body="No users have signed up yet."
-            />
-          )}
-        </div>
-      </div>
-      
       {confirmState && (
         <ConfirmDialog
           title={confirmState.title}

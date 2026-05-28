@@ -54,7 +54,7 @@ export function App() {
         width: "100%",
         background: "#0a0a0f",
         color: "#f3f4f6",
-        fontFamily: "Outfit, Inter, system-ui, sans-serif"
+        fontFamily: "var(--font-display)"
       }}>
         <div style={{
           fontSize: "24px",

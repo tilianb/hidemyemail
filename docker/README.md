@@ -27,7 +27,7 @@ If you don't have `gen-secrets.sh` yet, run these and paste the output into
 
 ```bash
 echo "SESSION_SECRET=$(openssl rand -hex 32)"
-echo "DESTINATION_ENCRYPTION_KEY=$(openssl rand -base64 32)"
+echo "DESTINATION_ENCRYPTION_KEY=$(openssl rand -hex 32)"
 node ../worker/scripts/hash-password.mjs '<your-password>'
 # prints AUTH_PASSWORD_SALT=... and AUTH_PASSWORD_HASH=...
 ```

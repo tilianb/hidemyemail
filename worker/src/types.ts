@@ -12,9 +12,10 @@ export interface Env {
   S3_INBOUND_BUCKET: string;        // S3 bucket where SES stores raw inbound emails
   TEST_MIGRATIONS?: unknown;
   DESTINATION_ENCRYPTION_KEY: string;
+  ACTION_SECRET?: string;
 }
 
-export interface DomainRow { id: number; domain: string; default_destination: string; active: number; created_at: number; }
+export interface DomainRow { id: number; domain: string; default_destination: string; active: number; created_at: number; verified_at: number | null; verification_token: string | null; }
 export interface AliasRow {
   id: number; user_id: number; domain_id: number; local_part: string; full_address: string;
   destination: string | null; label: string | null; active: number; source: string;
