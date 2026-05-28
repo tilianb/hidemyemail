@@ -114,15 +114,16 @@ The dashboard is served by the same Worker through Wrangler Assets. `/api/*` goe
 
 ## Cloudflare automatic deploys
 
-Cloudflare Workers Builds (Git-connected) is supported via `worker/scripts/cf-build.sh`, which builds the dashboard, installs Worker deps, and applies the matching D1 migrations before Cloudflare runs the deploy command. Configure in **Workers → hidemyemail → Settings → Builds**:
+Cloudflare Workers Builds (Git-connected) is supported via `worker/scripts/cf-build.sh`, which builds the dashboard, installs Worker deps, and applies the matching D1 migrations before Cloudflare runs the deploy command. The script is cwd-agnostic — it self-locates to `worker/`, so either root directory works.
 
-- Root directory: `worker`
-- Build command: `bash scripts/cf-build.sh`
-- Production branch `main` — Deploy command: `npx wrangler deploy` (applies migrations to `hidemyemail`)
-- Preview branch `dev` — Deploy command: `npx wrangler deploy --env preview` (applies migrations to `hidemyemail-env`)
-- Output directory: not needed; Worker Assets uses `dashboard/dist`
+This repo uses **two separate Workers Builds projects** (one per environment):
 
-CF Builds supplies wrangler with an implicit `CLOUDFLARE_API_TOKEN`, so no extra repo secrets are needed for migrations or deploys. Keep `worker/wrangler.jsonc` in the repo so Cloudflare can deploy the Worker and Assets binding. Put Worker secrets and deployment-specific variables in Cloudflare, not in git. The config preserves Cloudflare-managed variables during deploys.
+| Worker | Branch | D1 database | Build command | Deploy command |
+|--------|--------|-------------|---------------|----------------|
+| `hidemyemail` | `main` | `hidemyemail` | `bash scripts/cf-build.sh` (root: `worker`) | `npx wrangler deploy` |
+| `hidemyemail-preview` | `dev` | `hidemyemail-env` | `bash worker/scripts/cf-build.sh` (root: repo root) | `cd worker && npx wrangler deploy --env preview` |
+
+Output directory is not needed; Worker Assets uses `dashboard/dist`. CF Builds supplies wrangler with an implicit `CLOUDFLARE_API_TOKEN`, so no extra repo secrets are needed for migrations or deploys. Keep `worker/wrangler.jsonc` in the repo so Cloudflare can deploy the Worker and Assets binding. Put Worker secrets and deployment-specific variables in Cloudflare, not in git. The config preserves Cloudflare-managed variables during deploys.
 
 ## Security defaults
 

@@ -136,14 +136,14 @@ npm run deploy:preview
 
 ### Automatic deploys (Cloudflare Workers Builds)
 
-Connect the repo in **Workers → hidemyemail → Settings → Builds**:
+This repo deploys via **two separate Workers Builds projects** so prod and preview stay fully isolated:
 
-- Root directory: `worker`
-- Build command: `bash scripts/cf-build.sh`
-- Production branch: `main` — Deploy command: `npx wrangler deploy`
-- Preview branch: `dev` — Deploy command: `npx wrangler deploy --env preview`
+| Worker | Branch | Root dir | Build command | Deploy command |
+|--------|--------|----------|---------------|----------------|
+| `hidemyemail` | `main` | `worker` | `bash scripts/cf-build.sh` | `npx wrangler deploy` |
+| `hidemyemail-preview` | `dev` | repo root | `bash worker/scripts/cf-build.sh` | `cd worker && npx wrangler deploy --env preview` |
 
-`worker/scripts/cf-build.sh` builds the dashboard and runs `wrangler d1 migrations apply --remote` against the correct DB before Cloudflare runs the deploy command, so the schema is always in sync with the code being deployed. No GitHub secrets required — CF Builds provides wrangler auth implicitly.
+`worker/scripts/cf-build.sh` is cwd-agnostic. It builds the dashboard and runs `wrangler d1 migrations apply --remote` against the correct D1 (`hidemyemail` for main, `hidemyemail-env` for dev) before Cloudflare runs the deploy command, so the schema is always in sync with the code being deployed. No GitHub secrets required — CF Builds provides wrangler auth implicitly.
 
 ## 8. First dashboard setup
 

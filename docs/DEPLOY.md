@@ -143,18 +143,27 @@ The Worker serves both API and dashboard through Wrangler Assets. You do not nee
 
 ## 8. Cloudflare automatic deploys
 
-If using Cloudflare Workers Builds (Git-connected), the included `worker/scripts/cf-build.sh` builds the dashboard, installs Worker deps, and applies D1 migrations to the right database before Cloudflare runs `wrangler deploy`. Migrations are branch-aware:
+If using Cloudflare Workers Builds (Git-connected), the included `worker/scripts/cf-build.sh` builds the dashboard, installs Worker deps, and applies D1 migrations to the right database before Cloudflare runs `wrangler deploy`. The script is cwd-agnostic — it self-locates to `worker/`, so root directory can be either `worker` or the repo root.
+
+Migrations are branch-aware:
 
 - `main` → applies migrations to `hidemyemail` (production)
 - `dev` → applies migrations to `hidemyemail-env` (preview env)
 - other branches → migrations skipped
 
-Configure in **Workers → hidemyemail → Settings → Builds**:
+This repo uses **two separate Workers Builds projects**:
+
+### `hidemyemail` (production, branch `main`)
 
 - Root directory: `worker`
 - Build command: `bash scripts/cf-build.sh`
-- Deploy command (production branch `main`): `npx wrangler deploy`
-- Deploy command (preview branches, e.g. `dev`): `npx wrangler deploy --env preview`
+- Deploy command: `npx wrangler deploy`
+
+### `hidemyemail-preview` (preview, branch `dev`)
+
+- Root directory: repo root
+- Build command: `bash worker/scripts/cf-build.sh`
+- Deploy command: `cd worker && npx wrangler deploy --env preview`
 
 CF Builds injects an internal `CLOUDFLARE_API_TOKEN` for wrangler, so no extra secrets are needed for migrations or deploys.
 
