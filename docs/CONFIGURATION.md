@@ -22,8 +22,9 @@ These are deployment-specific but not secrets. Store them in Cloudflare dashboar
 | `ENVIRONMENT` | yes | `production`, `preview`, or `local`. |
 | `SES_REGION` | yes for mail | AWS SES/S3/SNS region, for example `ap-southeast-2`. |
 | `S3_INBOUND_BUCKET` | yes for inbound | Bucket where SES stores raw MIME. |
+| `SNS_INBOUND_TOPIC_ARN` | yes for inbound SNS | Exact SNS topic for SES receipt notifications. |
 
-The npm deploy scripts use `--keep-vars` so dashboard-managed variables are preserved.
+`worker/wrangler.jsonc` sets `keep_vars: true` so dashboard-managed variables are preserved even when Cloudflare Git deploys run plain `wrangler deploy`.
 
 ## Worker secrets
 
@@ -39,7 +40,6 @@ Set with `wrangler secret put`.
 | `AUTH_PASSWORD_HASH` | first user bootstrap | PBKDF2 hash from `hash-password.mjs`. |
 | `DESTINATION_ENCRYPTION_KEY` | yes | 32-byte hex key for encrypted destination emails. |
 | `SNS_ALLOWED_TOPIC_ARN` | yes for outbound SNS | Exact SNS topic for bounces/complaints. |
-| `SNS_INBOUND_TOPIC_ARN` | yes for inbound SNS | Exact SNS topic for SES receipt notifications. |
 
 ## Generate secret values
 
@@ -76,7 +76,7 @@ Use these settings for Workers Git deployments:
 - Deploy command: `cd worker && npm run deploy`
 - Output directory: not needed
 
-Keep Cloudflare-managed variables in the dashboard. The deploy script uses `--keep-vars`.
+Keep Cloudflare-managed variables in the dashboard. The Wrangler config sets `keep_vars: true`, and the npm deploy script also uses `--keep-vars`.
 
 ## Preview environment
 
