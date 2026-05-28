@@ -143,13 +143,22 @@ The Worker serves both API and dashboard through Wrangler Assets. You do not nee
 
 ## 8. Cloudflare automatic deploys
 
-If using Cloudflare Workers Git deployments, use:
+If using Cloudflare Workers Builds (Git-connected), the included `worker/scripts/cf-build.sh` builds the dashboard, installs Worker deps, and applies D1 migrations to the right database before Cloudflare runs `wrangler deploy`. Migrations are branch-aware:
 
-- Build command: `cd dashboard && npm ci && npm run build && cd ../worker && npm ci`
-- Deploy command: `cd worker && npx wrangler deploy`
-- Root directory: repo root
+- `main` → applies migrations to `hidemyemail` (production)
+- `dev` → applies migrations to `hidemyemail-env` (preview env)
+- other branches → migrations skipped
 
-Store all secrets in Cloudflare. Do not commit `.dev.vars`.
+Configure in **Workers → hidemyemail → Settings → Builds**:
+
+- Root directory: `worker`
+- Build command: `bash scripts/cf-build.sh`
+- Deploy command (production branch `main`): `npx wrangler deploy`
+- Deploy command (preview branches, e.g. `dev`): `npx wrangler deploy --env preview`
+
+CF Builds injects an internal `CLOUDFLARE_API_TOKEN` for wrangler, so no extra secrets are needed for migrations or deploys.
+
+Store all Worker secrets in Cloudflare (`wrangler secret put …` or dashboard). Do not commit `.dev.vars`.
 
 ## 9. First-run dashboard setup
 

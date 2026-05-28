@@ -117,6 +117,8 @@ Continue with [AWS SES setup](AWS_SES_SETUP.md). You need SES domain verificatio
 
 ## 7. Deploy
 
+Manual deploy from your machine:
+
 ```bash
 cd dashboard
 npm run build
@@ -131,6 +133,17 @@ Preview:
 cd worker
 npm run deploy:preview
 ```
+
+### Automatic deploys (Cloudflare Workers Builds)
+
+Connect the repo in **Workers → hidemyemail → Settings → Builds**:
+
+- Root directory: `worker`
+- Build command: `bash scripts/cf-build.sh`
+- Production branch: `main` — Deploy command: `npx wrangler deploy`
+- Preview branch: `dev` — Deploy command: `npx wrangler deploy --env preview`
+
+`worker/scripts/cf-build.sh` builds the dashboard and runs `wrangler d1 migrations apply --remote` against the correct DB before Cloudflare runs the deploy command, so the schema is always in sync with the code being deployed. No GitHub secrets required — CF Builds provides wrangler auth implicitly.
 
 ## 8. First dashboard setup
 

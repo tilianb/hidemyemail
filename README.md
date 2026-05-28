@@ -114,14 +114,15 @@ The dashboard is served by the same Worker through Wrangler Assets. `/api/*` goe
 
 ## Cloudflare automatic deploys
 
-Cloudflare Workers Git deployments work with this repo. Use these build settings:
+Cloudflare Workers Builds (Git-connected) is supported via `worker/scripts/cf-build.sh`, which builds the dashboard, installs Worker deps, and applies the matching D1 migrations before Cloudflare runs the deploy command. Configure in **Workers → hidemyemail → Settings → Builds**:
 
-- Root directory: repository root
-- Build command: `cd dashboard && npm ci && npm run build && cd ../worker && npm ci`
-- Deploy command: `cd worker && npx wrangler deploy`
+- Root directory: `worker`
+- Build command: `bash scripts/cf-build.sh`
+- Production branch `main` — Deploy command: `npx wrangler deploy` (applies migrations to `hidemyemail`)
+- Preview branch `dev` — Deploy command: `npx wrangler deploy --env preview` (applies migrations to `hidemyemail-env`)
 - Output directory: not needed; Worker Assets uses `dashboard/dist`
 
-Keep `worker/wrangler.jsonc` in the repo so Cloudflare can deploy the Worker and Assets binding. Put secrets and deployment-specific variables in Cloudflare, not in git. The config preserves Cloudflare-managed variables during deploys.
+CF Builds supplies wrangler with an implicit `CLOUDFLARE_API_TOKEN`, so no extra repo secrets are needed for migrations or deploys. Keep `worker/wrangler.jsonc` in the repo so Cloudflare can deploy the Worker and Assets binding. Put Worker secrets and deployment-specific variables in Cloudflare, not in git. The config preserves Cloudflare-managed variables during deploys.
 
 ## Security defaults
 
