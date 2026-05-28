@@ -11,11 +11,11 @@ export function blockRoutes() {
   r.post("/blocks", async (c) => {
     const userId = c.get("userId");
     const b = await c.req.json<{ alias_id?: number | null; pattern: string }>();
-    if (!b.pattern) return c.json({ error: "missing pattern" }, 400);
+    if (!b.pattern) return c.json({ error: "Missing pattern" }, 400);
     
     if (b.alias_id) {
       const alias = await c.env.DB.prepare("SELECT id FROM aliases WHERE id = ? AND user_id = ?").bind(b.alias_id, userId).first();
-      if (!alias) return c.json({ error: "alias not found" }, 403);
+      if (!alias) return c.json({ error: "Alias not found" }, 403);
     }
     
     const row = await c.env.DB.prepare("INSERT INTO blocks (user_id, alias_id, pattern, created_at) VALUES (?,?,?,?) RETURNING *")

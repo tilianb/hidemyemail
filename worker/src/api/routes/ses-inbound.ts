@@ -10,27 +10,27 @@ export function sesInboundRoutes() {
 
   r.post("/ses/inbound", async (c) => {
     const body = await c.req.json<any>().catch(() => null);
-    if (!body) return c.json({ error: "bad body" }, 400);
+    if (!body) return c.json({ error: "Bad body" }, 400);
 
     const sesRegion = await getEnvWithOverride(c.env.DB, c.env, "ses_region");
     const verified = await verifySnsMessage(body, {
       region: sesRegion,
       fetchCert: (c.env as any).__snsCertFetch ?? fetch,
     });
-    if (!verified.ok) return c.json({ error: "invalid sns signature" }, 401);
+    if (!verified.ok) return c.json({ error: "Invalid sns signature" }, 401);
 
     // Guard: only accept the configured inbound SNS topic.
     const snsInboundTopic = await getEnvWithOverride(c.env.DB, c.env, "sns_inbound_topic_arn");
-    if (!snsInboundTopic) return c.json({ error: "missing SNS_INBOUND_TOPIC_ARN configuration" }, 500);
+    if (!snsInboundTopic) return c.json({ error: "Missing SNS_INBOUND_TOPIC_ARN configuration" }, 500);
     if (body.TopicArn !== snsInboundTopic) {
-      return c.json({ error: "forbidden topic" }, 403);
+      return c.json({ error: "Forbidden topic" }, 403);
     }
 
     // SNS subscription handshake — log URL for manual confirmation
     if (body.Type === "SubscriptionConfirmation") {
       const subscribeUrl = body.SubscribeURL;
       if (typeof subscribeUrl !== "string" || !/^https:\/\/sns\.[a-z0-9-]+\.amazonaws\.com\//i.test(subscribeUrl)) {
-        return c.json({ error: "invalid subscribe url" }, 400);
+        return c.json({ error: "Invalid subscribe url" }, 400);
       }
       console.log("SNS inbound SubscribeURL (auto-confirming):", subscribeUrl);
       
@@ -52,7 +52,7 @@ export function sesInboundRoutes() {
     try {
       msg = JSON.parse(body.Message);
     } catch {
-      return c.json({ error: "invalid Message JSON" }, 400);
+      return c.json({ error: "Invalid Message JSON" }, 400);
     }
 
     // Only process inbound email receipts; ignore bounce/complaint/etc
@@ -62,7 +62,7 @@ export function sesInboundRoutes() {
     const from: string | undefined = msg.mail?.source;
     const messageId: string | undefined = msg.mail?.messageId;
     if (!to || !from || !messageId) {
-      return c.json({ error: "missing required fields" }, 400);
+      return c.json({ error: "Missing required fields" }, 400);
     }
 
     // SES receipt verdicts — used as the anti-spoof gate for reverse-alias replies.
@@ -87,7 +87,7 @@ export function sesInboundRoutes() {
       raw = await s3Fetch(creds, s3InboundBucket, messageId);
     } catch (err) {
       console.error("S3 fetch failed for", messageId, String(err));
-      return c.json({ error: "s3 unavailable" }, 500); // 5xx → SNS retries for up to 23 days
+      return c.json({ error: "S3 unavailable" }, 500); // 5xx → SNS retries for up to 23 days
     }
 
     // Wrap bytes in a minimal ForwardableEmailMessage for handleInbound()
@@ -114,7 +114,7 @@ export function sesInboundRoutes() {
       await routeEmail(fakeMessage, c.env, undefined, auth);
     } catch (err) {
       console.error("routeEmail failed for", messageId, String(err));
-      return c.json({ error: "processing failed" }, 500); // 5xx → SNS retries
+      return c.json({ error: "Processing failed" }, 500); // 5xx → SNS retries
     }
 
     return c.json({ ok: true });

@@ -77,9 +77,9 @@ export function createApp() {
       p === "/api/ses/inbound"
     ) return next();
     const token = getCookie(c, "__Host-session");
-    if (!token) return c.json({ error: "unauthorized" }, 401);
+    if (!token) return c.json({ error: "Unauthorized" }, 401);
     const userId = await verifySession(c.env.SESSION_SECRET, token);
-    if (userId === null) return c.json({ error: "unauthorized" }, 401);
+    if (userId === null) return c.json({ error: "Unauthorized" }, 401);
     const user = await c.env.DB.prepare("SELECT active FROM users WHERE id = ?")
       .bind(userId).first<{ active: number }>();
     if (!user || user.active === 0) return c.json({ error: "Account is disabled" }, 403);

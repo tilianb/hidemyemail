@@ -1,3 +1,6 @@
+import { createMimeMessage } from "mimetext";
+import { toBase64 } from "./bytes";
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -7,7 +10,7 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-function buildHtmlWrapper(title: string, heading: string, bodyText: string, actionHtml: string, fallbackUrl?: string, mainGlobalDomain: string = "example.com"): string {
+function buildHtmlWrapper(title: string, heading: string, bodyText: string, actionHtml: string, fallbackUrl?: string, mainGlobalDomain: string = "example.com", footerText?: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -52,7 +55,7 @@ function buildHtmlWrapper(title: string, heading: string, bodyText: string, acti
           <tr>
             <td style="padding:24px 0 0;text-align:center;">
               <p style="margin:0 0 6px;font-size:11px;color:#55555f;font-family:'Inter',sans-serif;line-height:1.5;">
-                This link was requested for HideMyEmail. If you did not request this, you can safely ignore this email.
+                ${footerText !== undefined ? escapeHtml(footerText) : "This link was requested for HideMyEmail. If you did not request this, you can safely ignore this email."}
               </p>
               <p style="margin:0;font-size:11px;color:#55555f;font-family:'Inter',sans-serif;">
                 &copy; ${new Date().getFullYear()} HideMyEmail &middot; <a href="https://${escapeHtml(mainGlobalDomain)}" style="color:#ffb300;text-decoration:none;font-weight:500;">${escapeHtml(mainGlobalDomain)}</a>
@@ -67,9 +70,17 @@ function buildHtmlWrapper(title: string, heading: string, bodyText: string, acti
 </html>`;
 }
 
+function buildMultipartEmail(to: string, subject: string, textBody: string, htmlBody: string, mainGlobalDomain: string): string {
+  const msg = createMimeMessage();
+  msg.setSender({ name: "HideMyEmail", addr: `noreply@${mainGlobalDomain}` });
+  msg.setTo(to);
+  msg.setSubject(subject);
+  msg.addMessage({ contentType: "text/plain", data: textBody });
+  msg.addMessage({ contentType: "text/html", data: htmlBody });
+  return toBase64(new TextEncoder().encode(msg.asRaw()));
+}
+
 export function buildRecoveryEmail(to: string, url: string, mainGlobalDomain: string = "example.com"): string {
-  const boundary = `----=_Part_${Date.now().toString(36)}`;
-  
   const textBody = `HideMyEmail Account Recovery
 ==============================
 
@@ -103,33 +114,10 @@ This link expires in 24 hours.
     mainGlobalDomain
   );
 
-  const msgLines = [
-    `From: HideMyEmail <noreply@${mainGlobalDomain}>`,
-    `To: ${to}`,
-    `Subject: Account Recovery Link`,
-    `MIME-Version: 1.0`,
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
-    ``,
-    `--${boundary}`,
-    `Content-Type: text/plain; charset=UTF-8`,
-    `Content-Transfer-Encoding: quoted-printable`,
-    ``,
-    textBody,
-    ``,
-    `--${boundary}`,
-    `Content-Type: text/html; charset=UTF-8`,
-    `Content-Transfer-Encoding: base64`,
-    ``,
-    btoa(unescape(encodeURIComponent(htmlBody))),
-    ``,
-    `--${boundary}--`,
-  ];
-  return btoa(unescape(encodeURIComponent(msgLines.join("\r\n"))));
+  return buildMultipartEmail(to, "Account Recovery Link", textBody, htmlBody, mainGlobalDomain);
 }
 
 export function buildMfaEmail(to: string, code: string, mainGlobalDomain: string = "example.com"): string {
-  const boundary = `----=_Part_${Date.now().toString(36)}`;
-  
   const textBody = `Your HideMyEmail Authentication Code
 =======================================
 
@@ -153,26 +141,26 @@ Enter this code on the recovery page to complete the process. This code expires 
     mainGlobalDomain
   );
 
-  const msgLines = [
-    `From: HideMyEmail <noreply@${mainGlobalDomain}>`,
-    `To: ${to}`,
-    `Subject: Your Authentication Code`,
-    `MIME-Version: 1.0`,
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
-    ``,
-    `--${boundary}`,
-    `Content-Type: text/plain; charset=UTF-8`,
-    `Content-Transfer-Encoding: quoted-printable`,
-    ``,
-    textBody,
-    ``,
-    `--${boundary}`,
-    `Content-Type: text/html; charset=UTF-8`,
-    `Content-Transfer-Encoding: base64`,
-    ``,
-    btoa(unescape(encodeURIComponent(htmlBody))),
-    ``,
-    `--${boundary}--`,
-  ];
-  return btoa(unescape(encodeURIComponent(msgLines.join("\r\n"))));
+  return buildMultipartEmail(to, "Your Authentication Code", textBody, htmlBody, mainGlobalDomain);
+}
+
+export function buildNotificationEmail(to: string, subject: string, heading: string, bodyText: string, mainGlobalDomain: string = "example.com"): string {
+  const textBody = `${subject}
+=======================================
+
+${bodyText}
+
+— HideMyEmail (https://${mainGlobalDomain})`;
+
+  const htmlBody = buildHtmlWrapper(
+    subject,
+    heading,
+    bodyText,
+    "",
+    undefined,
+    mainGlobalDomain,
+    "This is an automated system notification from HideMyEmail."
+  );
+
+  return buildMultipartEmail(to, subject, textBody, htmlBody, mainGlobalDomain);
 }
