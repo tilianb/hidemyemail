@@ -46,3 +46,20 @@ test("register and login with new passphrase", async () => {
 test("public defaults keep registration disabled until admin enables it", async () => {
   expect(SETTING_DEFAULTS.registration_enabled).toBe("false");
 });
+
+test("public config exposes alias quota buffer flag", async () => {
+  const app = createApp();
+
+  const res = await app.request("/api/config", {}, testEnv);
+
+  expect(res.status).toBe(200);
+  expect(await res.json()).toMatchObject({ alias_quota_buffer_enabled: true });
+});
+
+test("seeded per-alias rate limit matches fallback default", async () => {
+  const row = await (env.DB as D1Database).prepare(
+    "SELECT value FROM settings WHERE key = 'rate_limit_per_alias'"
+  ).first<{ value: string }>();
+
+  expect(row?.value).toBe(SETTING_DEFAULTS.rate_limit_per_alias);
+});

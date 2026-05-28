@@ -47,6 +47,11 @@ export async function handleReply(
     return;
   }
 
+  if (alias.source === "auto_over_quota") {
+    await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: parsed.externalSender, detail: "quota_exceeded", ts: now });
+    return;
+  }
+
   // SECURITY: reverse addresses are self-describing and therefore guessable (no random
   // token). The relay gate must bind the *authenticated* principal to a verified owner
   // destination. Each SES verdict authenticates a different RFC5322 field:
@@ -55,10 +60,11 @@ export async function handleReply(
   // Accepting `spf || dmarc` while only matching the envelope lets an attacker spoof
   // MAIL FROM=owner and DKIM-sign with their own header-From to slip past. Match each
   // signal against the principal it actually authenticates. Fail closed.
-  const raw = await streamToBytes(message.raw);
-  let mime = parseMime(raw);
+  const rawBytes = await streamToBytes(message.raw);
+  let mime = parseMime(rawBytes);
   const subject = getHeader(mime, "Subject") ?? "";
-  const headerFrom = extractEmailAddress(getHeader(mime, "From") ?? "").toLowerCase();
+  const rawFromHeader = getHeader(mime, "From") ?? "";
+  const headerFrom = extractEmailAddress(rawFromHeader).toLowerCase();
   const envelopeFrom = message.from.toLowerCase();
   const owners = await q.ownerDestinations(db, alias.user_id, env.DESTINATION_ENCRYPTION_KEY);
   const spfOwner = auth?.spf === "PASS" && owners.has(envelopeFrom);
@@ -73,7 +79,7 @@ export async function handleReply(
 
   mime = removeHeaders(mime, ["From", "Sender", "Reply-To", "Return-Path", "DKIM-Signature", "Message-ID", "X-Reinjected", "Received"]);
   mime = setHeader(mime, "From", alias.full_address);
-  mime = setHeader(mime, "To", parsed.externalSender);
+  mime = setHeader(mime, "To", parsed.externalSender || message.to);
   mime = setHeader(mime, "Message-ID", `<${crypto.randomUUID()}@${domainName}>`);
 
   const rawBase64 = toBase64(serializeMime(mime));

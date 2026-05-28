@@ -61,13 +61,17 @@ export function authRoutes() {
 
   r.get("/config", async (c) => {
     const main_global_domain = await getMainGlobalDomain(c.env.DB, c.env);
-    return c.json({ main_global_domain });
+    const { getBoolSetting, getNumericSetting } = await import("../../lib/settings");
+    const max_subdomains = await getNumericSetting(c.env.DB, "max_subdomains");
+    const max_total_aliases = await getNumericSetting(c.env.DB, "max_total_aliases");
+    const alias_quota_buffer_enabled = await getBoolSetting(c.env.DB, "alias_quota_buffer_enabled");
+    return c.json({ main_global_domain, max_subdomains, max_total_aliases, alias_quota_buffer_enabled });
   });
 
   r.post("/login", async (c) => {
     const ip = c.req.header("cf-connecting-ip") || "unknown";
     if (!(await canAttempt(ip, c.env.DB))) {
-      return c.json({ error: "too many attempts" }, 429);
+      return c.json({ error: "Too many attempts" }, 429);
     }
 
     const { password } = await c.req.json<{ password: string }>().catch(() => ({ password: "" }));
@@ -96,7 +100,7 @@ export function authRoutes() {
 
     if (!userId) {
       await recordFailedAttempt(ip, c.env.DB);
-      return c.json({ error: "invalid" }, 401);
+      return c.json({ error: "Invalid" }, 401);
     }
 
     // Fail open only for missing-table (migration not yet applied); re-throw all other errors
@@ -121,7 +125,7 @@ export function authRoutes() {
   r.post("/register", async (c) => {
     const ip = c.req.header("cf-connecting-ip") || "unknown";
     if (!(await canAttempt(ip, c.env.DB))) {
-      return c.json({ error: "too many attempts" }, 429);
+      return c.json({ error: "Too many attempts" }, 429);
     }
 
     // Check if registration is enabled
@@ -133,7 +137,7 @@ export function authRoutes() {
 
     const { password } = await c.req.json<{ password: string }>().catch(() => ({ password: "" }));
     if (!password || password.length < 16) {
-      return c.json({ error: "passphrase too weak" }, 400);
+      return c.json({ error: "Passphrase too weak" }, 400);
     }
 
     const hash = await derivePassphraseHash(password, c.env.AUTH_PASSWORD_SALT);
@@ -149,9 +153,9 @@ export function authRoutes() {
     } catch (err: any) {
       if (err.message && err.message.includes("UNIQUE constraint failed")) {
         await recordFailedAttempt(ip, c.env.DB);
-        return c.json({ error: "already exists" }, 409);
+        return c.json({ error: "Already exists" }, 409);
       }
-      return c.json({ error: "internal error" }, 500);
+      return c.json({ error: "Internal error" }, 500);
     }
   });
 
@@ -164,17 +168,17 @@ export function authRoutes() {
   r.post("/mfa/complete", async (c) => {
     const ip = c.req.header("cf-connecting-ip") || "unknown";
     if (!(await canAttempt(ip, c.env.DB))) {
-      return c.json({ error: "too many attempts" }, 429);
+      return c.json({ error: "Too many attempts" }, 429);
     }
 
     const challenge = getCookie(c, "__Host-mfa-challenge");
-    if (!challenge) return c.json({ error: "no challenge" }, 401);
+    if (!challenge) return c.json({ error: "No challenge" }, 401);
 
     const userId = await verifyMfaChallenge(c.env.SESSION_SECRET, challenge);
-    if (!userId) return c.json({ error: "challenge expired" }, 401);
+    if (!userId) return c.json({ error: "Challenge expired" }, 401);
 
     const { code } = await c.req.json<{ code: string }>().catch(() => ({ code: "" }));
-    if (!code) return c.json({ error: "missing code" }, 400);
+    if (!code) return c.json({ error: "Missing code" }, 400);
 
     const mfa = await c.env.DB.prepare(
       "SELECT totp_secret, totp_backup_codes FROM mfa WHERE user_id = ? AND totp_enabled = 1"
@@ -240,17 +244,17 @@ export function authRoutes() {
   r.post("/passkey/verify", async (c) => {
     const ip = c.req.header("cf-connecting-ip") || "unknown";
     if (!(await canAttempt(ip, c.env.DB))) {
-      return c.json({ error: "too many attempts" }, 429);
+      return c.json({ error: "Too many attempts" }, 429);
     }
 
     const cookie = getCookie(c, "__Host-passkey-challenge");
-    if (!cookie) return c.json({ error: "no challenge" }, 401);
+    if (!cookie) return c.json({ error: "No challenge" }, 401);
 
     const expectedChallenge = await verifyPasskeyAuthChallenge(c.env.SESSION_SECRET, cookie);
-    if (!expectedChallenge) return c.json({ error: "challenge expired" }, 401);
+    if (!expectedChallenge) return c.json({ error: "Challenge expired" }, 401);
 
     const response = await c.req.json<AuthenticationResponseJSON>().catch(() => null);
-    if (!response?.id) return c.json({ error: "invalid request" }, 400);
+    if (!response?.id) return c.json({ error: "Invalid request" }, 400);
 
     const cred = await c.env.DB.prepare(
       "SELECT user_id, public_key, sign_count, transports FROM passkey_credentials WHERE id = ?"
@@ -258,7 +262,7 @@ export function authRoutes() {
 
     if (!cred) {
       await recordFailedAttempt(ip, c.env.DB);
-      return c.json({ error: "unknown credential" }, 401);
+      return c.json({ error: "Unknown credential" }, 401);
     }
 
     const { verifyAuthenticationResponse } = await import("@simplewebauthn/server");
@@ -281,7 +285,7 @@ export function authRoutes() {
 
     if (!result.verified || !result.authenticationInfo) {
       await recordFailedAttempt(ip, c.env.DB);
-      return c.json({ error: "verification failed" }, 401);
+      return c.json({ error: "Verification failed" }, 401);
     }
 
     if (cred.user_id !== 1) {
@@ -302,11 +306,11 @@ export function authRoutes() {
   r.post("/recover/send-code", async (c) => {
     const ip = c.req.header("cf-connecting-ip") || "unknown";
     if (!(await canAttempt(ip, c.env.DB))) {
-      return c.json({ error: "too many attempts" }, 429);
+      return c.json({ error: "Too many attempts" }, 429);
     }
 
     const { token } = await c.req.json<{ token: string }>().catch(() => ({ token: "" }));
-    if (!token) return c.json({ error: "invalid request" }, 400);
+    if (!token) return c.json({ error: "Invalid request" }, 400);
 
     const db = c.env.DB;
     const user = await db.prepare(
@@ -353,11 +357,11 @@ export function authRoutes() {
   r.post("/recover/verify", async (c) => {
     const ip = c.req.header("cf-connecting-ip") || "unknown";
     if (!(await canAttempt(ip, c.env.DB))) {
-      return c.json({ error: "too many attempts" }, 429);
+      return c.json({ error: "Too many attempts" }, 429);
     }
 
     const { token, code } = await c.req.json<{ token: string; code: string }>().catch(() => ({ token: "", code: "" }));
-    if (!token || !code) return c.json({ error: "invalid request" }, 400);
+    if (!token || !code) return c.json({ error: "Invalid request" }, 400);
 
     const db = c.env.DB;
     const user = await db.prepare(

@@ -8,9 +8,9 @@ export function Domains() {
   const [rows, setRows] = useState<Domain[]>([]);
   const [destinations, setDestinations] = useState<Destination[]>([]);
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({ prefix: "", default_destination: "" });
+  const [form, setForm] = useState({ prefix: "", default_destination: "", base_domain_id: 0 });
   const [submitting, setSubmitting] = useState(false);
-  const [mainGlobalDomain, setMainGlobalDomain] = useState("");
+  const [maxSubdomains, setMaxSubdomains] = useState(-1);
 
   async function load() {
     setLoading(true);
@@ -21,8 +21,17 @@ export function Domains() {
         api.config(),
       ]);
       setRows(doms);
-      setDestinations(dests.filter(d => d.verified_at !== null));
-      setMainGlobalDomain(conf.main_global_domain);
+      const allowedBaseDomains = doms.filter(d => d.is_global === 1 && d.active === 1 && d.verified_at !== null && d.allow_subdomain_aliases === 1);
+      const validDests = dests.filter(d => d.verified_at !== null);
+      setDestinations(validDests);
+      
+      setForm(f => ({
+        ...f,
+        default_destination: f.default_destination || "global",
+        base_domain_id: allowedBaseDomains.some(d => d.id === f.base_domain_id) ? f.base_domain_id : (allowedBaseDomains[0]?.id ?? 0),
+      }));
+      
+      setMaxSubdomains(conf.max_subdomains);
     } catch {
       toast("Failed to load domains", "error");
     } finally {
@@ -33,13 +42,14 @@ export function Domains() {
   useEffect(() => { load(); }, []);
 
   const myDomainsCount = rows.filter(d => d.is_global === 0).length;
+  const allowedBaseDomains = rows.filter(d => d.is_global === 1 && d.active === 1 && d.verified_at !== null && d.allow_subdomain_aliases === 1);
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await api.createDomain(form.prefix, form.default_destination);
-      setForm({ prefix: "", default_destination: "" });
+      await api.createDomain(form.prefix, form.default_destination, form.base_domain_id || undefined);
+      setForm(f => ({ ...f, prefix: "", default_destination: "global" }));
       await load();
       toast(`Subdomain created`, "success");
     } catch (err: any) {
@@ -73,26 +83,35 @@ export function Domains() {
 
       <div className="card stagger-1 card-form-gap">
         <div className="card-header">
-          <span className="card-title">Add Subdomain ({myDomainsCount} / 5 used)</span>
+          <span className="card-title">Add Subdomain {maxSubdomains >= 0 ? `(${myDomainsCount} / ${maxSubdomains} used)` : `(${myDomainsCount} used)`}</span>
         </div>
         <form onSubmit={create}>
           <div className="form-strip">
-            <div className="field form-field-lg">
-              <label className="field-label" htmlFor="dom-prefix">Subdomain prefix</label>
-              <div className="input-group">
+            <div className="field domain-builder-field">
+              <label className="field-label" htmlFor="dom-prefix">Subdomain</label>
+              <div className="input-group domain-builder">
                 <input
                   id="dom-prefix"
-                  className="input input-mono"
+                  className="input input-mono domain-prefix-input"
                   type="text"
                   placeholder="name"
                   value={form.prefix}
                   onChange={e => setForm(f => ({ ...f, prefix: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") }))}
                   required
-                  disabled={submitting || myDomainsCount >= 5}
+                  disabled={submitting || allowedBaseDomains.length === 0}
                 />
-                <div className="input-suffix">
-                  .{mainGlobalDomain}
-                </div>
+                <div className="domain-dot font-mono">.</div>
+                <select
+                  id="dom-base"
+                  className="input input-mono domain-base-select"
+                  value={form.base_domain_id}
+                  onChange={e => setForm(f => ({ ...f, base_domain_id: Number(e.target.value) }))}
+                  disabled={submitting || allowedBaseDomains.length === 0}
+                >
+                  {allowedBaseDomains.map(d => (
+                    <option key={d.id} value={d.id}>{d.domain}</option>
+                  ))}
+                </select>
               </div>
             </div>
             <div className="field grow">
@@ -102,18 +121,23 @@ export function Domains() {
                 className="input"
                 value={form.default_destination}
                 onChange={e => setForm(f => ({ ...f, default_destination: e.target.value }))}
-                disabled={submitting || destinations.length === 0 || myDomainsCount >= 5}
+                disabled={submitting || destinations.length === 0}
               >
-                <option value="">-- None (Drop email) --</option>
+                <option value="global">-- Global Default --</option>
                 {destinations.map(d => (
                   <option key={d.id} value={d.email}>{d.email}</option>
                 ))}
               </select>
             </div>
-            <button className="btn btn-primary form-submit" type="submit" disabled={submitting || destinations.length === 0 || myDomainsCount >= 5}>
+            <button className="btn btn-primary form-submit" type="submit" disabled={submitting || destinations.length === 0 || allowedBaseDomains.length === 0}>
               {submitting ? "Adding…" : "Add"}
             </button>
           </div>
+          {allowedBaseDomains.length === 0 && (
+            <div className="form-help">
+              No global domains currently allow subdomain aliases.
+            </div>
+          )}
           {destinations.length === 0 && (
             <div className="form-help">
               You must verify a destination email first.
@@ -154,7 +178,9 @@ export function Domains() {
                       )}
                     </td>
                     <td data-label="Default destination">
-                      {d.default_destination ? (
+                      {d.default_destination === "global" ? (
+                        <span className="muted-italic">Global Default</span>
+                      ) : d.default_destination ? (
                         <div className="addr-cell">
                           <span
                             title={d.default_destination}

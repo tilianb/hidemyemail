@@ -6,6 +6,7 @@ export interface Domain {
   default_destination: string | null;
   active: 0 | 1;
   allow_custom_aliases: 0 | 1;
+  allow_subdomain_aliases: 0 | 1;
   created_at: number;
   verified_at: number | null;
   verification_token: string | null;
@@ -25,6 +26,7 @@ export interface Alias {
   reply_count: number;
   created_at: number;
   last_seen_at: number | null;
+  muted_until: number | null;
 }
 
 export interface Block {
@@ -85,7 +87,7 @@ export interface Destination {
 }
 
 export const api = {
-  config: () => req<{ main_global_domain: string }>("/api/config"),
+  config: () => req<{ main_global_domain: string; max_subdomains: number; max_total_aliases: number; alias_quota_buffer_enabled: boolean }>("/api/config"),
   login: (password: string) => req<{ ok: true; userId: number } | { mfa_required: true }>("/api/login", { method: "POST", body: JSON.stringify({ password }) }),
   completeMfa: (code: string) => req<{ ok: true; userId: number }>("/api/mfa/complete", { method: "POST", body: JSON.stringify({ code }) }),
   register: (password: string) => req<{ ok: true, userId: number }>("/api/register", { method: "POST", body: JSON.stringify({ password }) }),
@@ -98,7 +100,7 @@ export const api = {
   setDefaultDestination: (id: number) => req<{ ok: true }>(`/api/destinations/${id}/default`, { method: "PATCH" }),
 
   domains: () => req<Domain[]>("/api/domains"),
-  createDomain: (domain: string, default_destination: string) => req<Domain>("/api/domains", { method: "POST", body: JSON.stringify({ domain, default_destination }) }),
+  createDomain: (domain: string, default_destination: string, base_domain_id?: number) => req<Domain>("/api/domains", { method: "POST", body: JSON.stringify({ domain, default_destination, base_domain_id }) }),
   deleteDomain: (id: number) => req<{ ok: true }>(`/api/domains/${id}`, { method: "DELETE" }),
 
   aliases: (q = "") => req<Alias[]>(`/api/aliases${q ? `?q=${encodeURIComponent(q)}` : ""}`),
@@ -118,8 +120,8 @@ export const api = {
   adminUpdateUser: (id: number, data: { active?: number; forwarding?: number; name?: string }) => req<{ ok: true }>(`/api/admin/users/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   adminRecoverUser: (id: number, sendEmail: boolean) => req<{ token: string; ok?: boolean }>(`/api/admin/users/${id}/recovery`, { method: "POST", body: JSON.stringify({ sendEmail }) }),
   adminCreateDomain: (domain: string) => req<{ ok: true }>("/api/admin/domains", { method: "POST", body: JSON.stringify({ domain }) }),
-  adminUpdateDomain: (id: number, data: { allow_custom_aliases?: number; active?: number }) => req<{ ok: true }>(`/api/admin/domains/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
-  adminVerifyDomain: (id: number) => req<{ ok: true; verified: boolean; error?: string }>(`/api/admin/domains/${id}/verify`, { method: "POST" }),
+  adminUpdateDomain: (id: number, data: { allow_custom_aliases?: number; allow_subdomain_aliases?: number; active?: number }) => req<{ ok: true }>(`/api/admin/domains/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  adminVerifyDomain: (id: number) => req<{ ok: true; verified: boolean; error?: string; results?: { verify_txt: boolean; mx: boolean; spf: boolean; wildcard_mx: boolean } }>(`/api/admin/domains/${id}/verify`, { method: "POST" }),
 
   // Passkey endpoints
   passkeyList: () => req<{ id: string; device_name: string | null; created_at: number }[]>("/api/settings/passkeys"),
@@ -129,6 +131,17 @@ export const api = {
   passkeyDelete: (id: string) => req<{ ok: true }>(`/api/settings/passkeys/${encodeURIComponent(id)}`, { method: "DELETE" }),
   passkeyLoginChallenge: () => req<Record<string, unknown>>("/api/passkey/challenge", { method: "POST" }),
   passkeyLoginVerify: (response: unknown) => req<{ ok: true; userId: number }>("/api/passkey/verify", { method: "POST", body: JSON.stringify(response) }),
+
+  // User preferences
+  preferences: () => req<{
+    inline_actions_pref: "on" | "off" | null;
+    inline_actions_position: "header" | "footer" | null;
+    defaults: { inline_actions_enabled: boolean; inline_actions_position: string };
+  }>("/api/settings/preferences"),
+  updatePreferences: (data: {
+    inline_actions_pref?: "on" | "off" | null;
+    inline_actions_position?: "header" | "footer" | null;
+  }) => req<{ ok: true }>("/api/settings/preferences", { method: "PATCH", body: JSON.stringify(data) }),
 
   // MFA settings endpoints
   mfaStatus: () => req<{ enabled: boolean; backupCodesRemaining: number }>("/api/settings/mfa"),
@@ -145,4 +158,5 @@ export const api = {
   adminEnv: () => req<{ vars: Record<string, { value: string; secret: false }>; secrets: Record<string, { configured: boolean; preview?: string }> }>("/api/admin/env"),
   adminSettings: () => req<{ settings: Record<string, { value: string; updated_at: number }> }>("/api/admin/settings"),
   adminUpdateSettings: (data: Record<string, string>) => req<{ ok: true; updated: number }>("/api/admin/settings", { method: "PATCH", body: JSON.stringify(data) }),
+  adminSendTestEmail: (data: { type: string; to: string }) => req<{ ok: true; type: string; to: string }>("/api/admin/test-email", { method: "POST", body: JSON.stringify(data) }),
 };

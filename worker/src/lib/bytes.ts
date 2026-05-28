@@ -24,6 +24,15 @@ export function toBase64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
+export function toBase64Mime(bytes: Uint8Array): string {
+  const b64 = toBase64(bytes);
+  const lines = [];
+  for (let i = 0; i < b64.length; i += 76) {
+    lines.push(b64.slice(i, i + 76));
+  }
+  return lines.join("\r\n");
+}
+
 export function fromBase64(b64: string): Uint8Array {
   const bin = atob(b64);
   const out = new Uint8Array(bin.length);

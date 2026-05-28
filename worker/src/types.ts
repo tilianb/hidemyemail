@@ -20,7 +20,7 @@ export interface AliasRow {
   id: number; user_id: number; domain_id: number; local_part: string; full_address: string;
   destination: string | null; label: string | null; active: number; source: string;
   fwd_count: number; blocked_count: number; reply_count: number;
-  created_at: number; last_seen_at: number | null;
+  created_at: number; last_seen_at: number | null; muted_until: number | null;
 }
 export interface ReverseRow { id: number; token: string; alias_id: number; external_sender: string; created_at: number; last_used_at: number | null; }
 

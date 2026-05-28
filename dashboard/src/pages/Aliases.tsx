@@ -17,6 +17,7 @@ interface Alias {
   reply_count: number;
   created_at: number;
   last_seen_at: number | null;
+  muted_until: number | null;
 }
 
 interface DeleteTarget { id: number; full_address: string }
@@ -32,6 +33,8 @@ export function Aliases() {
   const [submitting, setSubmitting] = useState(false);
   const [togglingId, setTogglingId] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [maxTotalAliases, setMaxTotalAliases] = useState(-1);
+  const [aliasQuotaBufferEnabled, setAliasQuotaBufferEnabled] = useState(true);
 
   async function load() {
     setLoading(true);
@@ -45,11 +48,13 @@ export function Aliases() {
   }
 
   useEffect(() => {
-    Promise.all([api.domains(), api.destinations()]).then(([doms, dests]) => {
+    Promise.all([api.domains(), api.destinations(), api.config()]).then(([doms, dests, conf]) => {
       const availableDomains = doms.filter(d => d.is_global === 0 || (d.active === 1 && d.verified_at !== null));
       setDomains(availableDomains);
       setDestinations(dests.filter(d => d.verified_at !== null));
       setForm(f => ({ ...f, domain_id: availableDomains[0]?.id ?? 0 }));
+      setMaxTotalAliases(conf.max_total_aliases);
+      setAliasQuotaBufferEnabled(conf.alias_quota_buffer_enabled);
     });
   }, []);
 
@@ -106,6 +111,10 @@ export function Aliases() {
     }
   }
 
+  const isOverQuota = maxTotalAliases >= 0 && rows.length > maxTotalAliases;
+  const hardLimit = maxTotalAliases >= 0 ? maxTotalAliases + (aliasQuotaBufferEnabled ? 1 : 0) : -1;
+  const isAtHardLimit = hardLimit >= 0 && rows.length >= hardLimit;
+
   return (
     <div>
       {/* Page header */}
@@ -117,6 +126,19 @@ export function Aliases() {
           Email aliases — forward, reply, and block senders without exposing your real inbox.
         </p>
       </div>
+
+      {isOverQuota && (
+        <div className="stagger-1" style={{ marginBottom: "24px" }}>
+          <div className="banner danger" style={{ borderRadius: "8px", padding: "16px", backgroundColor: "rgba(255, 60, 60, 0.1)", border: "1px solid rgba(255, 60, 60, 0.2)", color: "#ff8b8b" }}>
+            <strong style={{ fontSize: "16px", fontWeight: "600", display: "block", marginBottom: "4px" }}>Quota Exceeded ({rows.length} / {maxTotalAliases})</strong>
+            <p style={{ margin: "0", fontSize: "14px", lineHeight: "1.5" }}>
+              {isAtHardLimit 
+                ? `You have reached your absolute hard limit of ${hardLimit} aliases. No new catch-all emails can be received until you delete some aliases.` 
+                : `You are over your alias limit. New catch-all aliases have a 1-hour grace period before inbound emails are blocked. Please delete old aliases.`}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Reply hint callout */}
       <div className="callout stagger-1 card-form-gap">
@@ -134,7 +156,7 @@ export function Aliases() {
       {/* Create alias form */}
       <div className="card stagger-2 card-form-gap">
         <div className="card-header">
-          <span className="card-title">New Alias</span>
+          <span className="card-title">New Alias {maxTotalAliases >= 0 ? `(${rows.length} / ${maxTotalAliases} used)` : `(${rows.length} used)`}</span>
         </div>
         <form onSubmit={create}>
           <div className="form-strip">
@@ -233,7 +255,7 @@ export function Aliases() {
             ) : (
               <tbody>
                 {rows.map(a => (
-                  <tr key={a.id}>
+                  <tr key={a.id} style={a.source === "auto_over_quota" ? { backgroundColor: "rgba(255, 60, 60, 0.06)", boxShadow: "inset 0 0 0 1px rgba(255, 60, 60, 0.15)" } : {}}>
                     <td>
                       <div className="addr-cell addr-stack">
                         <div className="addr-cell">
@@ -272,9 +294,19 @@ export function Aliases() {
                       </span>
                     </td>
                     <td>
-                      <span className={`badge badge-${a.source === "manual" ? "amber" : "muted"}`}>
-                        {a.source}
-                      </span>
+                      {a.source === "auto_over_quota" ? (
+                        <span className="badge" style={{ backgroundColor: "rgba(255, 60, 60, 0.15)", color: "#ff8b8b", border: "1px solid rgba(255, 60, 60, 0.3)" }}>
+                          {Date.now() - a.created_at > 3600000 ? "Blocked (Grace Expired)" : "Over Quota (1hr Grace)"}
+                        </span>
+                      ) : a.muted_until && a.muted_until > Date.now() ? (
+                        <span className="badge badge-amber" title={`Muted until ${new Date(a.muted_until).toLocaleString()}`}>
+                          Muted
+                        </span>
+                      ) : (
+                        <span className={`badge badge-${a.source === "manual" ? "amber" : "muted"}`}>
+                          {a.source}
+                        </span>
+                      )}
                     </td>
                     <td>
                       <Switch

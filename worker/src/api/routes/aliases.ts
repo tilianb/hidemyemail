@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import { hashDestination, encryptDestination, decryptDestination } from "../../lib/crypto";
+import { getNumericSetting } from "../../lib/settings";
 
 // Validate email local part (RFC 5321 safe subset)
 function isValidLocalPart(s: string): boolean {
@@ -35,20 +36,28 @@ export function aliasRoutes() {
     const userId = c.get("userId");
     const b = await c.req.json<{ domain_id: number; local_part: string; destination?: string; label?: string }>();
     const dom = await c.env.DB.prepare("SELECT domain, is_global, user_id, allow_custom_aliases, active, verified_at FROM domains WHERE id=?").bind(b.domain_id).first<{ domain: string, is_global: number, user_id: number, allow_custom_aliases: number, active: number, verified_at: number | null }>();
-    if (!dom) return c.json({ error: "unknown domain" }, 400);
+    if (!dom) return c.json({ error: "Unknown domain" }, 400);
     
+    const maxTotal = await getNumericSetting(c.env.DB, "max_total_aliases");
+    if (maxTotal >= 0) {
+      const totalCount = await c.env.DB.prepare("SELECT COUNT(*) as count FROM aliases WHERE user_id = ?").bind(userId).first<{ count: number }>();
+      if (totalCount && totalCount.count >= maxTotal) {
+        return c.json({ error: "Total alias quota exceeded" }, 400);
+      }
+    }
+
     if (dom.is_global === 0 && dom.user_id !== userId) {
-      return c.json({ error: "not your domain" }, 403);
+      return c.json({ error: "Not your domain" }, 403);
     }
     if (dom.is_global === 1 && (dom.active !== 1 || !dom.verified_at)) {
-      return c.json({ error: "domain unavailable" }, 400);
+      return c.json({ error: "Domain unavailable" }, 400);
     }
 
     let destinationToUse = b.destination;
     if (!destinationToUse && dom.is_global === 1) {
       const defaultDest = await c.env.DB.prepare("SELECT email FROM destinations WHERE user_id = ? AND is_default = 1").bind(userId).first<{ email: string }>();
       if (!defaultDest) {
-        return c.json({ error: "you must select a destination or set a default destination" }, 400);
+        return c.json({ error: "You must select a destination or set a default destination" }, 400);
       }
       destinationToUse = await decryptDestination(defaultDest.email, c.env.DESTINATION_ENCRYPTION_KEY);
     }
@@ -56,7 +65,7 @@ export function aliasRoutes() {
     if (destinationToUse) {
       const emailHash = await hashDestination(destinationToUse.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY);
       const destVerified = await c.env.DB.prepare("SELECT id FROM destinations WHERE user_id = ? AND email_hash = ? AND verified_at IS NOT NULL").bind(userId, emailHash).first();
-      if (!destVerified) return c.json({ error: "destination email not verified" }, 400);
+      if (!destVerified) return c.json({ error: "Destination email not verified" }, 400);
     }
 
     let localPart = b.local_part.toLowerCase();
@@ -66,9 +75,9 @@ export function aliasRoutes() {
       crypto.getRandomValues(arr);
       localPart = Array.from(arr).map(x => chars[x % chars.length]).join("");
     } else {
-      if (localPart.startsWith("r.")) return c.json({ error: "reserved prefix" }, 400);
+      if (localPart.startsWith("r.")) return c.json({ error: "Reserved prefix" }, 400);
       if (!isValidLocalPart(localPart)) {
-        return c.json({ error: "invalid local part — use only letters, numbers, dots, hyphens" }, 400);
+        return c.json({ error: "Invalid local part — use only letters, numbers, dots, hyphens" }, 400);
       }
     }
     
@@ -89,9 +98,9 @@ export function aliasRoutes() {
       return c.json(row);
     } catch (err: any) {
       if (err.message && err.message.includes("UNIQUE constraint failed")) {
-        return c.json({ error: "alias already exists" }, 409);
+        return c.json({ error: "Alias already exists" }, 409);
       }
-      return c.json({ error: "internal error" }, 500);
+      return c.json({ error: "Internal error" }, 500);
     }
   });
 
@@ -103,12 +112,12 @@ export function aliasRoutes() {
     if (b.destination) {
       const emailHash = await hashDestination(b.destination.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY);
       const destVerified = await c.env.DB.prepare("SELECT id FROM destinations WHERE user_id = ? AND email_hash = ? AND verified_at IS NOT NULL").bind(userId, emailHash).first();
-      if (!destVerified) return c.json({ error: "destination email not verified" }, 400);
+      if (!destVerified) return c.json({ error: "Destination email not verified" }, 400);
     }
 
     const sets: string[] = []; const vals: unknown[] = [];
     if (b.active !== undefined) {
-      if (b.active !== 0 && b.active !== 1) return c.json({ error: "active must be 0 or 1" }, 400);
+      if (b.active !== 0 && b.active !== 1) return c.json({ error: "Active must be 0 or 1" }, 400);
       sets.push("active=?"); vals.push(b.active);
     }
     if (b.destination !== undefined) {
@@ -118,7 +127,7 @@ export function aliasRoutes() {
         if (aliasInfo?.is_global === 1) {
           const defaultDest = await c.env.DB.prepare("SELECT email FROM destinations WHERE user_id = ? AND is_default = 1").bind(userId).first<{ email: string }>();
           if (!defaultDest) {
-            return c.json({ error: "you must select a destination or set a default destination" }, 400);
+            return c.json({ error: "You must select a destination or set a default destination" }, 400);
           }
           destinationToUse = await decryptDestination(defaultDest.email, c.env.DESTINATION_ENCRYPTION_KEY);
         }
@@ -133,21 +142,21 @@ export function aliasRoutes() {
       }
     }
     if (b.label !== undefined) { sets.push("label=?"); vals.push(b.label); }
-    if (!sets.length) return c.json({ error: "no fields" }, 400);
+    if (!sets.length) return c.json({ error: "No fields" }, 400);
     vals.push(id, userId);
     
     const res = await c.env.DB.prepare(`UPDATE aliases SET ${sets.join(", ")} WHERE id=? AND user_id=?`).bind(...vals).run();
-    if (res.meta.changes === 0) return c.json({ error: "not found" }, 404);
+    if (res.meta.changes === 0) return c.json({ error: "Not found" }, 404);
     return c.json({ ok: true });
   });
 
   r.delete("/aliases/:id", async (c) => {
     const userId = c.get("userId");
     const id = Number(c.req.param("id"));
-    if (isNaN(id)) return c.json({ error: "invalid id" }, 400);
+    if (isNaN(id)) return c.json({ error: "Invalid id" }, 400);
     try {
       const exists = await c.env.DB.prepare("SELECT id FROM aliases WHERE id=? AND user_id=?").bind(id, userId).first();
-      if (!exists) return c.json({ error: "alias not found" }, 404);
+      if (!exists) return c.json({ error: "Alias not found" }, 404);
       await c.env.DB.batch([
         c.env.DB.prepare("DELETE FROM reverse_map WHERE alias_id=?").bind(id),
         c.env.DB.prepare("DELETE FROM blocks WHERE alias_id=?").bind(id),
@@ -157,7 +166,7 @@ export function aliasRoutes() {
       return c.json({ ok: true });
     } catch (err) {
       console.error("alias delete failed:", err);
-      return c.json({ error: "delete failed" }, 500);
+      return c.json({ error: "Delete failed" }, 500);
     }
   });
 
