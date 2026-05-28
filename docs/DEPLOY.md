@@ -45,8 +45,9 @@ npx wrangler secret put DESTINATION_ENCRYPTION_KEY
 npx wrangler secret put SES_ACCESS_KEY_ID
 npx wrangler secret put SES_SECRET_ACCESS_KEY
 npx wrangler secret put SNS_ALLOWED_TOPIC_ARN
-npx wrangler secret put SNS_INBOUND_TOPIC_ARN
 ```
+
+Set `SES_REGION`, `S3_INBOUND_BUCKET`, and `SNS_INBOUND_TOPIC_ARN` as normal Cloudflare environment variables.
 
 `ACTION_SECRET` signs one-click unsubscribe addresses. Use a stable value; rotating it invalidates old unsubscribe links.
 

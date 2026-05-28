@@ -102,8 +102,8 @@ The dashboard is served by the same Worker through Wrangler Assets. `/api/*` goe
    npx wrangler secret put SES_ACCESS_KEY_ID
    npx wrangler secret put SES_SECRET_ACCESS_KEY
    npx wrangler secret put SNS_ALLOWED_TOPIC_ARN
-   npx wrangler secret put SNS_INBOUND_TOPIC_ARN
    ```
+   Set `SES_REGION`, `S3_INBOUND_BUCKET`, and `SNS_INBOUND_TOPIC_ARN` as normal Cloudflare environment variables.
 6. Deploy unified Worker + dashboard:
    ```bash
    cd dashboard && npm run build
@@ -121,7 +121,7 @@ Cloudflare Workers Git deployments work with this repo. Use these build settings
 - Deploy command: `cd worker && npx wrangler deploy`
 - Output directory: not needed; Worker Assets uses `dashboard/dist`
 
-Keep `worker/wrangler.jsonc` in the repo so Cloudflare can deploy the Worker and Assets binding. Put secrets in Cloudflare, not in git.
+Keep `worker/wrangler.jsonc` in the repo so Cloudflare can deploy the Worker and Assets binding. Put secrets and deployment-specific variables in Cloudflare, not in git. The config preserves Cloudflare-managed variables during deploys.
 
 ## Security defaults
 

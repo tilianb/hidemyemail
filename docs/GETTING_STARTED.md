@@ -97,7 +97,6 @@ npx wrangler secret put DESTINATION_ENCRYPTION_KEY --env=""
 npx wrangler secret put SES_ACCESS_KEY_ID --env=""
 npx wrangler secret put SES_SECRET_ACCESS_KEY --env=""
 npx wrangler secret put SNS_ALLOWED_TOPIC_ARN --env=""
-npx wrangler secret put SNS_INBOUND_TOPIC_ARN --env=""
 ```
 
 Repeat with `--env preview` for preview secrets you actually use.
@@ -108,8 +107,9 @@ These are not secrets, but they are deployment-specific:
 
 - `SES_REGION`
 - `S3_INBOUND_BUCKET`
+- `SNS_INBOUND_TOPIC_ARN`
 
-Set them in Cloudflare dashboard or via Wrangler deploy flags. The repo deploy scripts use `--keep-vars` so Cloudflare-managed vars are preserved.
+Set them in Cloudflare dashboard or via Wrangler deploy flags. The Wrangler config sets `keep_vars: true` so Cloudflare-managed vars are preserved.
 
 ## 6. Configure AWS and DNS
 
