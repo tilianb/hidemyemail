@@ -31,7 +31,7 @@ Generate random secrets:
 ```bash
 openssl rand -hex 32      # SESSION_SECRET
 openssl rand -hex 32      # ACTION_SECRET
-openssl rand -base64 32   # DESTINATION_ENCRYPTION_KEY
+openssl rand -hex 32      # DESTINATION_ENCRYPTION_KEY
 ```
 
 Set Cloudflare Worker secrets:

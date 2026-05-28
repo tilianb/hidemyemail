@@ -83,7 +83,7 @@ The dashboard is served by the same Worker through Wrangler Assets. `/api/*` goe
    ```bash
    node scripts/hash-password.mjs 'your-admin-passphrase'
    openssl rand -hex 32      # SESSION_SECRET and ACTION_SECRET
-   openssl rand -base64 32   # DESTINATION_ENCRYPTION_KEY
+   openssl rand -hex 32      # DESTINATION_ENCRYPTION_KEY
 
    npx wrangler secret put AUTH_PASSWORD_SALT
    npx wrangler secret put AUTH_PASSWORD_HASH
