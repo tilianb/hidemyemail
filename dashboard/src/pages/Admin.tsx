@@ -223,13 +223,16 @@ export function Admin() {
     try {
       const res = await api.adminVerifyDomain(domain.id);
       if (res.results) {
+        const wildcardStatus = domain.allow_subdomain_aliases === 1
+          ? (res.results.wildcard_mx ? "success" : "error")
+          : undefined;
         setHealthStatus(prev => ({
           ...prev,
           [domain.id]: {
             verify_txt: res.results!.verify_txt ? "success" : "error",
             mx: res.results!.mx ? "success" : "error",
             spf: res.results!.spf ? "success" : "error",
-            wildcard_mx: res.results!.wildcard_mx ? "success" : "error",
+            wildcard_mx: wildcardStatus,
           }
         }));
       }
@@ -326,7 +329,12 @@ export function Admin() {
                           let dotColor = "var(--text-muted)";
                           let shadowColor = "transparent";
                           const dh = healthStatus[d.id];
-                          const hasHealthError = dh && Object.values(dh).some(v => v === "error");
+                          const hasHealthError = dh && (
+                            dh.verify_txt === "error" ||
+                            dh.mx === "error" ||
+                            dh.spf === "error" ||
+                            (d.allow_subdomain_aliases === 1 && dh.wildcard_mx === "error")
+                          );
                           if (hasHealthError) {
                             dotColor = "#ef4444";
                             shadowColor = "rgba(239, 68, 68, 0.45)";

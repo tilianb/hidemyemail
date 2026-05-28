@@ -169,3 +169,39 @@ test("admin cannot delete the configured main global domain", async () => {
   const stillThere = await db.prepare("SELECT id FROM domains WHERE id = 20").first<{ id: number }>();
   expect(stillThere?.id).toBe(20);
 });
+
+test("admin verify does not require wildcard MX when subdomain aliases are disabled", async () => {
+  const app = createApp();
+  const db = env.DB as D1Database;
+  const h = { cookie, "Content-Type": "application/json" };
+
+  await db.prepare(
+    "INSERT INTO domains (id, user_id, is_global, domain, allow_subdomain_aliases, active, verification_token, created_at) VALUES (40, 1, 1, 'hide.example', 0, 1, 'tok123', 123)"
+  ).run();
+
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    const name = url.searchParams.get("name");
+    const type = url.searchParams.get("type");
+    if (name === "_hidemyemail.hide.example" && type === "TXT") {
+      return Response.json({ Status: 0, Answer: [{ type: 16, data: "hidemyemail-verify=tok123" }] });
+    }
+    if (name === "hide.example" && type === "MX") {
+      return Response.json({ Status: 0, Answer: [{ type: 15, data: "10 inbound-smtp.us-east-1.amazonaws.com." }] });
+    }
+    if (name === "hide.example" && type === "TXT") {
+      return Response.json({ Status: 0, Answer: [{ type: 16, data: "v=spf1 include:amazonses.com ~all" }] });
+    }
+    if (name === "_hidemyemail-probe.hide.example" && type === "MX") {
+      return Response.json({ Status: 0, Answer: [] });
+    }
+    return Response.json({ Status: 3 });
+  }) as any;
+
+  const res = await app.request("/api/admin/domains/40/verify", { method: "POST", headers: h }, testEnv);
+
+  expect(res.status).toBe(200);
+  const body = await res.json<{ verified: boolean; results: { wildcard_mx: boolean } }>();
+  expect(body.verified).toBe(true);
+  expect(body.results.wildcard_mx).toBe(true);
+});

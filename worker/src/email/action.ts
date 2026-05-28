@@ -59,11 +59,12 @@ export async function handleAction(message: ForwardableEmailMessage, env: Env, a
       // Payload: "<aliasId>_<encodedSender>_<sig>". encodedSender is base64url(message.from-time-of-send).
       // Signing the sender into the payload binds the action to the exact "From" the forwarded
       // email surfaced — stops a leaked link from blocking some other sender.
-      const parts = payload.split("_");
-      if (parts.length < 3) return;
-      const sig = parts.pop()!;
-      const encSender = parts.pop()!;
-      const idStr = parts.join("_");
+      const firstSep = payload.indexOf("_");
+      const lastSep = payload.lastIndexOf("_");
+      if (firstSep <= 0 || lastSep <= firstSep) return;
+      const idStr = payload.slice(0, firstSep);
+      const encSender = payload.slice(firstSep + 1, lastSep);
+      const sig = payload.slice(lastSep + 1);
       const aliasId = parseInt(idStr, 10);
       if (isNaN(aliasId)) return;
       if (!await verify("block", `${aliasId}:${encSender}`, sig, env)) {
