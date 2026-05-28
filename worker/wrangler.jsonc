@@ -20,9 +20,7 @@
     }
   ],
   "vars": {
-    "ENVIRONMENT": "production",
-    "SES_REGION": "",
-    "S3_INBOUND_BUCKET": ""
+    "ENVIRONMENT": "production"
   },
   // Secrets (wrangler secret put): SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY,
   // SESSION_SECRET, ACTION_SECRET, AUTH_PASSWORD_HASH, AUTH_PASSWORD_SALT,
