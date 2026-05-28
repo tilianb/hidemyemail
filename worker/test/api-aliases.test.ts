@@ -16,6 +16,9 @@ test("create domain, create + list + patch + delete alias", async () => {
 
   const encReal = await encryptDestination("real@me.com", testEnv.DESTINATION_ENCRYPTION_KEY);
   const hashReal = await hashDestination("real@me.com", testEnv.DESTINATION_ENCRYPTION_KEY);
+  await (env.DB as D1Database).prepare(
+    "UPDATE settings SET value = 'hidemyemail.dev' WHERE key = 'main_global_domain'"
+  ).run();
   await (env.DB as D1Database).prepare("INSERT INTO destinations (user_id, email, email_hash, token, verified_at, created_at) VALUES (1, ?, ?, 'tok1', 123, 123)").bind(encReal, hashReal).run();
 
   const encWork = await encryptDestination("work@me.com", testEnv.DESTINATION_ENCRYPTION_KEY);

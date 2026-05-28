@@ -1189,12 +1189,6 @@ table.dossier tbody td {
   gap: var(--space-4);
   margin-bottom: 0;
 }
-.admin-control-room > .admin-stat-grid { order: 1; }
-.admin-control-room > .admin-domain-card { order: 2; }
-.admin-control-room > .admin-users-card { order: 3; }
-.admin-control-room > .admin-settings-card { order: 4; }
-.admin-control-room > .admin-env-card { order: 5; }
-.admin-control-room > .admin-aws-card { order: 6; }
 .admin-section-header {
   align-items: flex-start;
   gap: var(--space-4);
@@ -1522,7 +1516,7 @@ table.dossier tbody td {
 }
 
 @media (max-width: 900px) {
-  .admin-stat-grid { grid-template-columns: 1fr; }
+  .admin-stat-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .domain-module-mainline {
     flex-direction: column;
     align-items: stretch;

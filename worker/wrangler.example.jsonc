@@ -11,12 +11,12 @@
     "run_worker_first": ["/api/*"]
   },
   "d1_databases": [
-    { 
-      "binding": "DB", 
-      "database_name": "hidemyemail", 
-      "database_id": "bb183c55-092f-4b63-85c0-e9d457eed8fa",
-      "preview_database_id": "16892446-d27c-44ac-b9e1-dec80a64c987",
-      "migrations_dir": "migrations" 
+    {
+      "binding": "DB",
+      "database_name": "hidemyemail",
+      "database_id": "paste-your-production-d1-id",
+      "preview_database_id": "paste-your-preview-d1-id",
+      "migrations_dir": "migrations"
     }
   ],
   "vars": {
@@ -24,9 +24,6 @@
     "SES_REGION": "",
     "S3_INBOUND_BUCKET": ""
   },
-  // Secrets (wrangler secret put): SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY,
-  // SESSION_SECRET, ACTION_SECRET, AUTH_PASSWORD_HASH, AUTH_PASSWORD_SALT,
-  // DESTINATION_ENCRYPTION_KEY, SNS_ALLOWED_TOPIC_ARN, SNS_INBOUND_TOPIC_ARN
   "env": {
     "preview": {
       "observability": { "enabled": true },
@@ -38,8 +35,8 @@
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "hidemyemail-env",
-          "database_id": "4afc57ba-5e51-48a0-80ea-98de3855de08",
+          "database_name": "hidemyemail-preview",
+          "database_id": "paste-your-preview-d1-id",
           "migrations_dir": "migrations"
         }
       ],
@@ -48,6 +45,6 @@
         "SES_REGION": "",
         "S3_INBOUND_BUCKET": ""
       }
-    },
-  },
+    }
+  }
 }

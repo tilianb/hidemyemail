@@ -12,7 +12,7 @@ export function Login() {
   const [generated, setGenerated] = useState<string | null>(null);
   const [mfaRequired, setMfaRequired] = useState(false);
   const [mfaCode, setMfaCode] = useState("");
-  const [mainGlobalDomain, setMainGlobalDomain] = useState("hidemyemail.dev");
+  const [mainGlobalDomain, setMainGlobalDomain] = useState("");
 
   useEffect(() => {
     api.config().then(conf => setMainGlobalDomain(conf.main_global_domain)).catch(() => {});

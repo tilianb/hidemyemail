@@ -10,8 +10,7 @@ function buf2hex(buffer: ArrayBuffer) {
 
 export async function signAction(action: string, aliasId: number, env: Env): Promise<string> {
   const encoder = new TextEncoder();
-  // Using DESTINATION_ENCRYPTION_KEY as it's a guaranteed stable secret in the environment
-  const keyData = encoder.encode(env.DESTINATION_ENCRYPTION_KEY);
+  const keyData = encoder.encode(env.ACTION_SECRET || env.SESSION_SECRET);
   const key = await crypto.subtle.importKey("raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const signature = await crypto.subtle.sign("HMAC", key, utf8(`${action}:${aliasId}`));
   return buf2hex(signature).slice(0, 32); // 32 hex chars is enough entropy for this

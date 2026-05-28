@@ -37,6 +37,7 @@ export function domainRoutes() {
     if (!prefix || prefix.length > 63) return c.json({ error: "invalid prefix" }, 400);
 
     const mainGlobalDomain = await getMainGlobalDomain(c.env.DB, c.env);
+    if (!mainGlobalDomain) return c.json({ error: "main global domain is not configured" }, 400);
     const fullDomain = `${prefix}.${mainGlobalDomain}`;
 
     const count = await c.env.DB.prepare("SELECT COUNT(*) as count FROM domains WHERE user_id = ? AND is_global = 0").bind(userId).first<{ count: number }>();

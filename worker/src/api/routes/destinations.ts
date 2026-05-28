@@ -197,7 +197,7 @@ function renderBaseHtml(title: string, content: string): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${escapeHtml(title)} - HideMyEmail</title>
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'unsafe-inline'; frame-ancestors 'none';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'none'; frame-ancestors 'none';">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Inter:wght@400;500&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
@@ -437,14 +437,6 @@ function renderSuccessPage(email: string): string {
     <p class="subtitle">Your email address has been verified successfully. You can now use it to forward email aliases.</p>
     <div class="email-badge">${escapeHtml(email)}</div>
     <a href="/" class="btn btn-secondary">Return to Dashboard</a>
-    <div class="progress-bar-container">
-      <div class="progress-bar"></div>
-    </div>
-    <script>
-      setTimeout(() => {
-        window.location.href = '/';
-      }, 3000);
-    </script>
   `;
   return renderBaseHtml("Email Verified", content);
 }
@@ -469,7 +461,7 @@ function renderErrorPage(): string {
 // Outbound verification email builder
 // ---------------------------------------------------------------------------
 
-function buildVerificationEmail(to: string, verifyUrl: string, mainGlobalDomain: string = "hidemyemail.dev"): string {
+function buildVerificationEmail(to: string, verifyUrl: string, mainGlobalDomain: string = "example.com"): string {
   const boundary = `----=_Part_${Date.now().toString(36)}`;
 
   const htmlBody = `<!DOCTYPE html>

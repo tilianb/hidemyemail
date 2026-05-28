@@ -10,7 +10,7 @@ export function Domains() {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ prefix: "", default_destination: "" });
   const [submitting, setSubmitting] = useState(false);
-  const [mainGlobalDomain, setMainGlobalDomain] = useState("hidemyemail.dev");
+  const [mainGlobalDomain, setMainGlobalDomain] = useState("");
 
   async function load() {
     setLoading(true);

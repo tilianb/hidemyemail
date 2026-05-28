@@ -7,7 +7,7 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-function buildHtmlWrapper(title: string, heading: string, bodyText: string, actionHtml: string, fallbackUrl?: string, mainGlobalDomain: string = "hidemyemail.dev"): string {
+function buildHtmlWrapper(title: string, heading: string, bodyText: string, actionHtml: string, fallbackUrl?: string, mainGlobalDomain: string = "example.com"): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -67,7 +67,7 @@ function buildHtmlWrapper(title: string, heading: string, bodyText: string, acti
 </html>`;
 }
 
-export function buildRecoveryEmail(to: string, url: string, mainGlobalDomain: string = "hidemyemail.dev"): string {
+export function buildRecoveryEmail(to: string, url: string, mainGlobalDomain: string = "example.com"): string {
   const boundary = `----=_Part_${Date.now().toString(36)}`;
   
   const textBody = `HideMyEmail Account Recovery
@@ -127,7 +127,7 @@ This link expires in 24 hours.
   return btoa(unescape(encodeURIComponent(msgLines.join("\r\n"))));
 }
 
-export function buildMfaEmail(to: string, code: string, mainGlobalDomain: string = "hidemyemail.dev"): string {
+export function buildMfaEmail(to: string, code: string, mainGlobalDomain: string = "example.com"): string {
   const boundary = `----=_Part_${Date.now().toString(36)}`;
   
   const textBody = `Your HideMyEmail Authentication Code
