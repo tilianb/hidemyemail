@@ -61,24 +61,17 @@ export function Stats() {
           <h1 className="page-title">Stats</h1>
           <p className="page-subtitle">Activity telemetry — last sync on page load.</p>
         </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(2, 1fr)",
-            gap: 16,
-            marginBottom: 24,
-          }}
-        >
+        <div className="stat-grid-2">
           <div className="stat-card">
-            <div style={{ width: "60%", marginBottom: 12 }}><Skeleton height={14} /></div>
-            <div style={{ width: "40%" }}><Skeleton height={36} /></div>
+            <div className="skeleton-label"><Skeleton height={14} /></div>
+            <div className="skeleton-value"><Skeleton height={36} /></div>
           </div>
           <div className="stat-card">
-            <div style={{ width: "60%", marginBottom: 12 }}><Skeleton height={14} /></div>
-            <div style={{ width: "40%" }}><Skeleton height={36} /></div>
+            <div className="skeleton-label"><Skeleton height={14} /></div>
+            <div className="skeleton-value"><Skeleton height={36} /></div>
           </div>
         </div>
-        <div className="card" style={{ marginBottom: 24 }}>
+        <div className="card card-spaced-bottom">
           <Skeleton height={80} />
         </div>
         <div className="card">
@@ -110,32 +103,24 @@ export function Stats() {
       </div>
 
       {/* ── Totals row ── */}
-      <div
-        className="stagger-1"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(2, 1fr)",
-          gap: 16,
-          marginBottom: 24,
-        }}
-      >
+      <div className="stagger-1 stat-grid-2">
         <div className="stat-card">
           <div className="stat-label">Total Aliases</div>
           <div className="stat-value">{data.totals.aliases}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Active Aliases</div>
-          <div className="stat-value" style={{ color: "var(--accent)" }}>
+          <div className="stat-value text-accent">
             {data.totals.active}
           </div>
         </div>
       </div>
 
       {/* ── Last 24h activity ── */}
-      <div className="card stagger-2" style={{ marginBottom: 24 }}>
+      <div className="card stagger-2 card-spaced-bottom">
         <div className="card-header">
           <span className="card-title">Last 24 Hours</span>
-          <span className="badge badge-muted" style={{ fontFamily: "var(--font-mono)" }}>
+          <span className="badge badge-muted type-data">
             {totalVolume} total
           </span>
         </div>
@@ -145,8 +130,7 @@ export function Stats() {
             return (
               <div key={bar.key} className="bar-col">
                 <span
-                  className="font-mono"
-                  style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}
+                  className="font-mono bar-value"
                 >
                   {bar.value}
                 </span>
@@ -166,69 +150,46 @@ export function Stats() {
       </div>
 
       {/* ── Top Aliases ── */}
-      <div className="card stagger-3" style={{ marginBottom: 24 }}>
+      <div className="card stagger-3 card-spaced-bottom">
         <div className="card-header">
           <span className="card-title">Top Aliases</span>
           <span className="badge badge-muted">by forwards</span>
         </div>
         {data.topAliases.length === 0 ? (
-          <p
-            style={{
-              fontFamily: "var(--font-body)",
-              fontStyle: "italic",
-              fontSize: "0.85rem",
-              color: "var(--text-muted)",
-              textAlign: "center",
-              padding: "24px 0",
-            }}
-          >
+          <p className="center-muted muted-italic">
             No activity yet.
           </p>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+          <div className="list-stack">
             {data.topAliases.map((alias, i) => (
               <div
                 key={alias.full_address}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  padding: "10px 0",
-                  borderBottom:
-                    i < data.topAliases.length - 1 ? "1px solid var(--border)" : "none",
-                  transition: "background var(--t-fast)",
-                }}
+                className="rank-row"
               >
-                <span
-                  className="font-mono text-muted"
-                  style={{ minWidth: 24, fontSize: "0.72rem" }}
-                >
+                <span className="rank-index">
                   {pad2(i + 1)}
                 </span>
-                <div className="addr-cell" style={{ flex: 1, minWidth: 0 }}>
+                <div className="addr-cell addr-cell-fluid">
                   <span className="addr-mono">{alias.full_address}</span>
                   <CopyButton text={alias.full_address} />
                 </div>
-                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                <div className="metric-pills">
                   <span
-                    className="badge-count"
+                    className="badge-count metric-forward"
                     title="Forwards"
-                    style={{ color: "var(--accent)", background: "var(--accent-dim)" }}
                   >
                     {alias.fwd_count}
                   </span>
                   <span
-                    className="badge-count"
+                    className="badge-count metric-reply"
                     title="Replies"
-                    style={{ color: "var(--blue)", background: "var(--blue-dim)" }}
                   >
                     {alias.reply_count}
                   </span>
                   {alias.blocked_count > 0 && (
                     <span
-                      className="badge-count"
+                      className="badge-count metric-block"
                       title="Blocked"
-                      style={{ color: "var(--red)", background: "var(--red-dim)" }}
                     >
                       {alias.blocked_count}
                     </span>

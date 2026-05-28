@@ -16,6 +16,9 @@ test("create domain, create + list + patch + delete alias", async () => {
 
   const encReal = await encryptDestination("real@me.com", testEnv.DESTINATION_ENCRYPTION_KEY);
   const hashReal = await hashDestination("real@me.com", testEnv.DESTINATION_ENCRYPTION_KEY);
+  await (env.DB as D1Database).prepare(
+    "UPDATE settings SET value = 'hidemyemail.dev' WHERE key = 'main_global_domain'"
+  ).run();
   await (env.DB as D1Database).prepare("INSERT INTO destinations (user_id, email, email_hash, token, verified_at, created_at) VALUES (1, ?, ?, 'tok1', 123, 123)").bind(encReal, hashReal).run();
 
   const encWork = await encryptDestination("work@me.com", testEnv.DESTINATION_ENCRYPTION_KEY);
@@ -58,4 +61,58 @@ test("create domain, create + list + patch + delete alias", async () => {
   expect(blk?.count).toBe(0);
   const evt = await (env.DB as D1Database).prepare("SELECT COUNT(*) as count FROM events WHERE alias_id=?").bind(alias.id).first<{ count: number }>();
   expect(evt?.count).toBe(0);
+});
+
+test("users only see and use active verified global domains", async () => {
+  const app = createApp();
+  const db = env.DB as D1Database;
+  const userCookie = "__Host-session=" + (await signSession("sek", 2, 3600));
+  const h = { cookie: userCookie, "Content-Type": "application/json" };
+
+  await db.prepare("INSERT INTO users (id, passphrase_hash, active, forwarding, created_at) VALUES (2, 'USER2', 1, 1, ?)").bind(Date.now()).run();
+  const encDest = await encryptDestination("user@me.com", testEnv.DESTINATION_ENCRYPTION_KEY);
+  const hashDest = await hashDestination("user@me.com", testEnv.DESTINATION_ENCRYPTION_KEY);
+  await db.prepare("INSERT INTO destinations (user_id, email, email_hash, token, verified_at, is_default, created_at) VALUES (2, ?, ?, 'tok-user', 123, 1, 123)").bind(encDest, hashDest).run();
+
+  await db.prepare("INSERT INTO domains (id, user_id, is_global, domain, active, verified_at, created_at) VALUES (10, 1, 1, 'good.example', 1, 123, 123)").run();
+  await db.prepare("INSERT INTO domains (id, user_id, is_global, domain, active, verified_at, created_at) VALUES (11, 1, 1, 'inactive.example', 0, 123, 123)").run();
+  await db.prepare("INSERT INTO domains (id, user_id, is_global, domain, active, verified_at, created_at) VALUES (12, 1, 1, 'unverified.example', 1, NULL, 123)").run();
+  await db.prepare("INSERT INTO domains (id, user_id, is_global, domain, active, verified_at, created_at) VALUES (13, 2, 0, 'mine.hidemyemail.dev', 1, NULL, 123)").run();
+
+  const list = await app.request("/api/domains", { headers: { cookie: userCookie } }, testEnv);
+  expect(list.status).toBe(200);
+  const domains = await list.json<any[]>();
+  expect(domains.map(d => d.domain)).toEqual(["good.example", "mine.hidemyemail.dev"]);
+
+  const inactiveAlias = await app.request("/api/aliases", { method: "POST", headers: h, body: JSON.stringify({ domain_id: 11, local_part: "shop" }) }, testEnv);
+  expect(inactiveAlias.status).toBe(400);
+
+  const unverifiedAlias = await app.request("/api/aliases", { method: "POST", headers: h, body: JSON.stringify({ domain_id: 12, local_part: "shop" }) }, testEnv);
+  expect(unverifiedAlias.status).toBe(400);
+
+  const goodAlias = await app.request("/api/aliases", { method: "POST", headers: h, body: JSON.stringify({ domain_id: 10, local_part: "shop" }) }, testEnv);
+  expect(goodAlias.status).toBe(200);
+});
+
+test("admin settings reject unsafe main global domain values", async () => {
+  const app = createApp();
+  const h = { cookie, "Content-Type": "application/json" };
+
+  const res = await app.request("/api/admin/settings", { method: "PATCH", headers: h, body: JSON.stringify({ main_global_domain: "evil.com\r\nBcc: victim@example.com" }) }, testEnv);
+  expect(res.status).toBe(400);
+});
+
+test("admin cannot delete the configured main global domain", async () => {
+  const app = createApp();
+  const db = env.DB as D1Database;
+  const h = { cookie, "Content-Type": "application/json" };
+
+  await db.prepare("INSERT INTO domains (id, user_id, is_global, domain, active, verified_at, created_at) VALUES (20, 1, 1, 'main.example', 1, 123, 123)").run();
+  await app.request("/api/admin/settings", { method: "PATCH", headers: h, body: JSON.stringify({ main_global_domain: "main.example" }) }, testEnv);
+
+  const res = await app.request("/api/domains/20", { method: "DELETE", headers: { cookie } }, testEnv);
+  expect(res.status).toBe(400);
+
+  const stillThere = await db.prepare("SELECT id FROM domains WHERE id = 20").first<{ id: number }>();
+  expect(stillThere?.id).toBe(20);
 });

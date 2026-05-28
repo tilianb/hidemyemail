@@ -2,6 +2,7 @@ import { env } from "cloudflare:test";
 import { beforeAll, expect, test } from "vitest";
 import { createApp } from "../src/api/app";
 import { hashPassword } from "../src/lib/auth";
+import { SETTING_DEFAULTS } from "../src/config";
 
 let testEnv: any;
 beforeAll(async () => {
@@ -30,6 +31,9 @@ test("register and login with new passphrase", async () => {
   const app = createApp();
   // Clear rate limits just in case
   await (env.DB as D1Database).prepare("DELETE FROM rate_limits").run();
+  await (env.DB as D1Database).prepare(
+    "UPDATE settings SET value = 'true' WHERE key = 'registration_enabled'"
+  ).run();
   
   const passphrase = "horse-staple-battery-correct";
   const reg = await app.request("/api/register", { method: "POST", body: JSON.stringify({ password: passphrase }), headers: { "Content-Type": "application/json" } }, testEnv);
@@ -37,4 +41,8 @@ test("register and login with new passphrase", async () => {
 
   const login = await app.request("/api/login", { method: "POST", body: JSON.stringify({ password: passphrase }), headers: { "Content-Type": "application/json" } }, testEnv);
   expect(login.status).toBe(200);
+});
+
+test("public defaults keep registration disabled until admin enables it", async () => {
+  expect(SETTING_DEFAULTS.registration_enabled).toBe("false");
 });

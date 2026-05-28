@@ -31,7 +31,7 @@ if [ ! -f "$hash_script" ]; then
   exit 1
 fi
 
-echo "# Generated $(date -u +%FT%TZ) by docker/gen-secrets.sh"
+echo "# Created $(date -u +%FT%TZ) by docker/gen-secrets.sh"
 echo "SESSION_SECRET=$(openssl rand -hex 32)"
-echo "DESTINATION_ENCRYPTION_KEY=$(openssl rand -base64 32)"
+echo "DESTINATION_ENCRYPTION_KEY=$(openssl rand -hex 32)"
 node "$hash_script" "$password"

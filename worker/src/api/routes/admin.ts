@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
-import { getAllSettings, getEnvWithOverride } from "../../lib/settings";
+import { getAllSettings, getEnvWithOverride, getMainGlobalDomain } from "../../lib/settings";
 import { encryptDestination } from "../../lib/crypto";
 import { VALID_SETTING_KEYS, SETTING_DEFAULTS } from "../../config";
 
@@ -8,6 +8,17 @@ import { VALID_SETTING_KEYS, SETTING_DEFAULTS } from "../../config";
 function maskSecret(val: string): string {
   if (val.length <= 8) return "•••";
   return `${val.slice(0, 3)}•••${val.slice(-3)}`;
+}
+
+function normalizeDomain(input: string): string | null {
+  const domain = input.trim().toLowerCase();
+  if (!domain || domain.length > 253 || !domain.includes(".")) return null;
+  if (/[\s\r\n/:]/.test(domain)) return null;
+  const labels = domain.split(".");
+  if (labels.some(label => !label || label.length > 63 || label.startsWith("-") || label.endsWith("-") || !/^[a-z0-9-]+$/.test(label))) {
+    return null;
+  }
+  return domain;
 }
 
 export function adminRoutes() {
@@ -111,21 +122,22 @@ export function adminRoutes() {
 
       const email = await decryptDestination(dest.email, c.env.DESTINATION_ENCRYPTION_KEY);
       const url = `${new URL(c.req.url).origin}/recover?token=${token}`;
-      const rawBase64 = buildRecoveryEmail(email, url);
+      // rawBase64 will be built in the sendRaw block with mainGlobalDomain
 
       const sesAccessKeyId = await getEnvWithOverride(db, c.env, "ses_access_key_id");
       const sesSecretAccessKey = await getEnvWithOverride(db, c.env, "ses_secret_access_key");
       const sesRegion = await getEnvWithOverride(db, c.env, "ses_region");
 
       if (sesAccessKeyId && sesSecretAccessKey && sesRegion) {
+        const mainGlobalDomain = await getMainGlobalDomain(db, c.env);
         await sendRaw({
           accessKeyId: sesAccessKeyId,
           secretAccessKey: sesSecretAccessKey,
           region: sesRegion
         }, {
-          from: "HideMyEmail <noreply@hidemyemail.dev>",
+          from: `HideMyEmail <noreply@${mainGlobalDomain}>`,
           to: email,
-          rawBase64
+          rawBase64: buildRecoveryEmail(email, url, mainGlobalDomain)
         });
       }
       return c.json({ ok: true });
@@ -165,19 +177,90 @@ export function adminRoutes() {
   // Create global domain
   r.post("/domains", async (c) => {
     const { domain } = await c.req.json<{ domain: string }>().catch(() => ({ domain: "" }));
-    if (!domain || !domain.includes(".")) return c.json({ error: "invalid domain" }, 400);
+    const normalizedDomain = normalizeDomain(domain);
+    if (!normalizedDomain) return c.json({ error: "invalid domain" }, 400);
     
     const db = c.env.DB;
     try {
+      const token = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
       await db.prepare(
-        "INSERT INTO domains (user_id, is_global, domain, active, created_at) VALUES (1, 1, ?, 1, ?)"
-      ).bind(domain.toLowerCase(), Date.now()).run();
+        "INSERT INTO domains (user_id, is_global, domain, active, created_at, verification_token, verified_at) VALUES (1, 1, ?, 0, ?, ?, NULL)"
+      ).bind(normalizedDomain, Date.now(), token).run();
       return c.json({ ok: true });
     } catch (e: any) {
       if (e.message && e.message.includes("UNIQUE constraint failed")) {
         return c.json({ error: "domain already exists" }, 409);
       }
       return c.json({ error: "internal error" }, 500);
+    }
+  });
+
+  // Update global domain (e.g. toggle allow_custom_aliases, active)
+  r.patch("/domains/:id", async (c) => {
+    const db = c.env.DB;
+    const id = parseInt(c.req.param("id"), 10);
+    if (isNaN(id)) return c.json({ error: "invalid id" }, 400);
+
+    const { allow_custom_aliases, active } = await c.req
+      .json<{ allow_custom_aliases?: number, active?: number }>()
+      .catch((): { allow_custom_aliases?: number, active?: number } => ({}));
+    const domainRow = await db.prepare("SELECT domain FROM domains WHERE id = ? AND is_global = 1").bind(id).first<{ domain: string }>();
+    if (!domainRow) return c.json({ error: "domain not found" }, 404);
+    if (allow_custom_aliases !== undefined) {
+      await db.prepare("UPDATE domains SET allow_custom_aliases = ? WHERE id = ? AND is_global = 1")
+        .bind(allow_custom_aliases ? 1 : 0, id).run();
+    }
+    if (active !== undefined) {
+      if (!active) {
+        const mainGlobalDomain = await getMainGlobalDomain(db, c.env);
+        if (domainRow.domain === mainGlobalDomain) return c.json({ error: "cannot deactivate main global domain" }, 400);
+      }
+      await db.prepare("UPDATE domains SET active = ? WHERE id = ? AND is_global = 1")
+        .bind(active ? 1 : 0, id).run();
+    }
+    return c.json({ ok: true });
+  });
+
+  // Verify global domain via DNS DoH
+  r.post("/domains/:id/verify", async (c) => {
+    const db = c.env.DB;
+    const id = parseInt(c.req.param("id"), 10);
+    if (isNaN(id)) return c.json({ error: "invalid id" }, 400);
+
+    const row = await db.prepare("SELECT domain, verification_token, verified_at FROM domains WHERE id = ? AND is_global = 1").bind(id).first<{ domain: string; verification_token: string | null; verified_at: number | null }>();
+    if (!row) return c.json({ error: "domain not found" }, 404);
+    if (row.verified_at) return c.json({ ok: true, verified: true });
+    if (!row.verification_token) return c.json({ error: "no verification token" }, 400);
+
+    const tokenRecord = `hidemyemail-verify=${row.verification_token}`;
+    const checkDomain = `_hidemyemail.${row.domain}`;
+    
+    try {
+      const res = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(checkDomain)}&type=TXT`, {
+        headers: { "accept": "application/dns-json" }
+      });
+      if (!res.ok) throw new Error("DNS query failed");
+      const dnsData = await res.json() as { Status: number; Answer?: { type: number; data: string; }[] };
+      
+      let verified = false;
+      if (dnsData.Status === 0 && dnsData.Answer) {
+        for (const answer of dnsData.Answer) {
+          // TXT records are wrapped in quotes in DoH JSON output
+          if (answer.type === 16 && answer.data.replace(/"/g, "") === tokenRecord) {
+            verified = true;
+            break;
+          }
+        }
+      }
+
+      if (verified) {
+        await db.prepare("UPDATE domains SET verified_at = ?, active = 1 WHERE id = ?").bind(Date.now(), id).run();
+        return c.json({ ok: true, verified: true });
+      } else {
+        return c.json({ ok: true, verified: false, error: "DNS record not found" });
+      }
+    } catch (e: any) {
+      return c.json({ error: "DNS lookup failed" }, 500);
     }
   });
 
@@ -293,6 +376,22 @@ export function adminRoutes() {
           errors.push(`${key}: cannot be empty`);
           continue;
         }
+      }
+
+      if (key === "main_global_domain") {
+        const normalizedDomain = normalizeDomain(value);
+        if (!normalizedDomain) {
+          errors.push(`${key}: invalid domain`);
+          continue;
+        }
+        const domain = await db.prepare("SELECT id FROM domains WHERE domain = ? AND is_global = 1 AND active = 1 AND verified_at IS NOT NULL")
+          .bind(normalizedDomain).first<{ id: number }>();
+        if (!domain) {
+          errors.push(`${key}: must be an active verified global domain`);
+          continue;
+        }
+        updates.push({ key, value: normalizedDomain });
+        continue;
       }
 
       updates.push({ key, value });
