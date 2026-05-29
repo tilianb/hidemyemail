@@ -29,12 +29,23 @@ export function sesWebhookRoutes() {
       return c.json({ error: "Forbidden topic" }, 403);
     }
 
+    // SNS subscription handshake — log URL for manual confirmation
     if (body.Type === "SubscriptionConfirmation") {
       const subscribeUrl = body.SubscribeURL;
       if (typeof subscribeUrl !== "string" || !/^https:\/\/sns\.[a-z0-9-]+\.amazonaws\.com\//i.test(subscribeUrl)) {
         return c.json({ error: "Invalid subscribe url" }, 400);
       }
-      console.log("SNS SubscribeURL (confirm manually):", subscribeUrl);
+      console.log("SNS inbound SubscribeURL (auto-confirming):", subscribeUrl);
+      
+      // Auto-confirm the subscription so you don't have to check logs
+      const confirmFetch: typeof fetch = (c.env as any).__snsConfirmFetch ?? fetch;
+      try {
+        c.executionCtx.waitUntil(confirmFetch(subscribeUrl).catch(err => console.error("Auto-confirm failed:", err)));
+      } catch (e) {
+        // Fallback for tests or environments without executionCtx
+        void confirmFetch(subscribeUrl).catch(err => console.error("Auto-confirm failed:", err));
+      }
+      
       return c.json({ ok: true });
     }
 
