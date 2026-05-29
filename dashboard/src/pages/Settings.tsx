@@ -661,6 +661,112 @@ export function Settings() {
         </div>
       )}
 
+      {/* Passkeys card */}
+      <div className="card stagger-3 card-spaced-top">
+        <div className="card-header">
+          <span className="card-title">Passkeys</span>
+          <span className="badge badge-muted">{passkeys.length}</span>
+        </div>
+        <div className="card-body">
+          <p className="muted-copy card-spaced-bottom">
+            Sign in with biometrics or a hardware key — no passphrase needed. Works on any device where you've saved a passkey.
+          </p>
+
+          {passkeys.length > 0 && (
+            <div className="passkey-list">
+              {passkeys.map(pk => (
+                <div key={pk.id} className="passkey-row">
+                  <Fingerprint size={16} className="icon-muted" />
+                  {editingPasskeyId === pk.id ? (
+                    <form
+                      onSubmit={e => { e.preventDefault(); renamePasskey(pk.id, editingPasskeyName); }}
+                      className="passkey-edit-form"
+                    >
+                      <input
+                        className="input flex-input btn-compact"
+                        value={editingPasskeyName}
+                        onChange={e => setEditingPasskeyName(e.target.value)}
+                        autoFocus
+                        maxLength={64}
+                      />
+                      <button type="submit" className="btn btn-primary btn-compact">Save</button>
+                      <button type="button" className="btn btn-soft btn-compact" onClick={() => setEditingPasskeyId(null)}>Cancel</button>
+                    </form>
+                  ) : (
+                    <>
+                      <div className="flex-1">
+                        <div className="passkey-name">
+                          {pk.device_name || "Unnamed passkey"}
+                        </div>
+                        <div className="passkey-meta">
+                          Added {new Date(pk.created_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        onClick={() => { setEditingPasskeyId(pk.id); setEditingPasskeyName(pk.device_name || ""); }}
+                        title="Rename"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost icon-red"
+                        onClick={() => deletePasskey(pk.id)}
+                        title="Remove"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {passkeysSupported ? (
+            showAddPasskey ? (
+              <form onSubmit={addPasskey} className="security-form-stack">
+                <div className="muted-copy-sm">
+                  Give this passkey a name so you can recognise it later (optional).
+                </div>
+                <div className="security-inline-form">
+                  <input
+                    className="input flex-input"
+                    value={newPasskeyName}
+                    onChange={e => setNewPasskeyName(e.target.value)}
+                    placeholder="e.g. MacBook Touch ID, iPhone Face ID"
+                    maxLength={64}
+                    disabled={addingPasskey}
+                    autoFocus
+                  />
+                  <button type="submit" className="btn btn-primary shrink-0" disabled={addingPasskey}>
+                    {addingPasskey ? <Loader2 size={14} className="spin" /> : <Fingerprint size={14} />}
+                    {addingPasskey ? "Registering…" : "Register"}
+                  </button>
+                  <button type="button" className="btn btn-soft" onClick={() => { setShowAddPasskey(false); setNewPasskeyName(""); }} disabled={addingPasskey}>
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setShowAddPasskey(true)}
+              >
+                <Fingerprint size={14} /> Add Passkey
+              </button>
+            )
+          ) : (
+            <p className="muted-copy-sm">
+              Passkeys are not supported in this browser.
+            </p>
+          )}
+        </div>
+      </div>
+
       {/* Account data card */}
       <div className="card stagger-3 card-spaced-top">
         <div className="card-header">
@@ -798,111 +904,6 @@ export function Settings() {
         </div>
       )}
 
-      {/* Passkeys card */}
-      <div className="card stagger-3 card-spaced-top">
-        <div className="card-header">
-          <span className="card-title">Passkeys</span>
-          <span className="badge badge-muted">{passkeys.length}</span>
-        </div>
-        <div className="card-body">
-          <p className="muted-copy card-spaced-bottom">
-            Sign in with biometrics or a hardware key — no passphrase needed. Works on any device where you've saved a passkey.
-          </p>
-
-          {passkeys.length > 0 && (
-            <div className="passkey-list">
-              {passkeys.map(pk => (
-                <div key={pk.id} className="passkey-row">
-                  <Fingerprint size={16} className="icon-muted" />
-                  {editingPasskeyId === pk.id ? (
-                    <form
-                      onSubmit={e => { e.preventDefault(); renamePasskey(pk.id, editingPasskeyName); }}
-                      className="passkey-edit-form"
-                    >
-                      <input
-                        className="input flex-input btn-compact"
-                        value={editingPasskeyName}
-                        onChange={e => setEditingPasskeyName(e.target.value)}
-                        autoFocus
-                        maxLength={64}
-                      />
-                      <button type="submit" className="btn btn-primary btn-compact">Save</button>
-                      <button type="button" className="btn btn-soft btn-compact" onClick={() => setEditingPasskeyId(null)}>Cancel</button>
-                    </form>
-                  ) : (
-                    <>
-                      <div className="flex-1">
-                        <div className="passkey-name">
-                          {pk.device_name || "Unnamed passkey"}
-                        </div>
-                        <div className="passkey-meta">
-                          Added {new Date(pk.created_at).toLocaleDateString()}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        onClick={() => { setEditingPasskeyId(pk.id); setEditingPasskeyName(pk.device_name || ""); }}
-                        title="Rename"
-                      >
-                        <Pencil size={13} />
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-ghost icon-red"
-                        onClick={() => deletePasskey(pk.id)}
-                        title="Remove"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {passkeysSupported ? (
-            showAddPasskey ? (
-              <form onSubmit={addPasskey} className="security-form-stack">
-                <div className="muted-copy-sm">
-                  Give this passkey a name so you can recognise it later (optional).
-                </div>
-                <div className="security-inline-form">
-                  <input
-                    className="input flex-input"
-                    value={newPasskeyName}
-                    onChange={e => setNewPasskeyName(e.target.value)}
-                    placeholder="e.g. MacBook Touch ID, iPhone Face ID"
-                    maxLength={64}
-                    disabled={addingPasskey}
-                    autoFocus
-                  />
-                  <button type="submit" className="btn btn-primary shrink-0" disabled={addingPasskey}>
-                    {addingPasskey ? <Loader2 size={14} className="spin" /> : <Fingerprint size={14} />}
-                    {addingPasskey ? "Registering…" : "Register"}
-                  </button>
-                  <button type="button" className="btn btn-soft" onClick={() => { setShowAddPasskey(false); setNewPasskeyName(""); }} disabled={addingPasskey}>
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => setShowAddPasskey(true)}
-              >
-                <Fingerprint size={14} /> Add Passkey
-              </button>
-            )
-          ) : (
-            <p className="muted-copy-sm">
-              Passkeys are not supported in this browser.
-            </p>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
