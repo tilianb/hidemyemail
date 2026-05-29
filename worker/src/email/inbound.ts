@@ -112,12 +112,26 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   let dest = await decryptDestination(encDest, env.DESTINATION_ENCRYPTION_KEY);
   
   if (dest === "global") {
-    const globalDestRow = await db.prepare("SELECT email FROM destinations WHERE user_id = ? AND is_default = 1").bind(domain.user_id).first<{email: string}>();
+    const globalDestRow = await db.prepare("SELECT * FROM destinations WHERE user_id = ? AND is_default = 1").bind(domain.user_id).first<import("../types").DestinationRow>();
     if (!globalDestRow) {
       await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "no_destination", ts: now });
       return;
     }
+    // Suppression check for global (default) destination
+    if (globalDestRow.suppressed_at) {
+      await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "suppressed", ts: now });
+      return;
+    }
     dest = await decryptDestination(globalDestRow.email, env.DESTINATION_ENCRYPTION_KEY);
+  } else {
+    // Suppression check for named destination: look up by encrypted email hash
+    const { hashDestination } = await import("../lib/crypto");
+    const destHash = await hashDestination(dest.toLowerCase(), env.DESTINATION_ENCRYPTION_KEY);
+    const destRow = await db.prepare("SELECT suppressed_at FROM destinations WHERE email_hash = ? AND user_id = ?").bind(destHash, alias.user_id).first<{ suppressed_at: number | null }>();
+    if (destRow?.suppressed_at) {
+      await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "suppressed", ts: now });
+      return;
+    }
   }
 
   const reverseAddr = reverseAddress(localPart, message.from, domainName);
