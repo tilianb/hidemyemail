@@ -449,6 +449,11 @@ export function Settings() {
               </select>
             </div>
           </div>
+          {effectiveEnabled && (
+            <div className="callout" style={{ marginTop: "var(--space-3)" }}>
+              <strong>Deliverability note.</strong> The inline action bar adds three <code>mailto:</code> buttons to every forwarded message. Spam filters at Microsoft / Outlook treat that pattern as marketing-list footer, which — combined with a new sending domain — can push messages to Junk. If you see forwards landing in Spam, switch this to <em>Disabled</em> while your sending domain builds reputation; the same actions remain available via the email's standard Unsubscribe button.
+            </div>
+          )}
         </div>
       </div>
 
