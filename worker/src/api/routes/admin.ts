@@ -156,30 +156,14 @@ export function adminRoutes() {
     return c.json({ token });
   });
 
-  // Delete user (cascade delete is assumed in DB schema or logic)
+  // Delete user (full manual cascade via shared helper)
   r.delete("/users/:id", async (c) => {
     const db = c.env.DB;
     const id = parseInt(c.req.param("id"));
     if (isNaN(id) || id === 1) return c.json({ error: "Invalid id" }, 400);
 
-    // D1 does not currently support foreign key ON DELETE CASCADE completely in all modes,
-    // but the project mentioned "Cascaded deletion of related records... is implemented".
-    // We should delete user records in order, or if they have cascades set up, just delete the user.
-    // The safest is to delete aliases first, destinations, domains, blocks, then user.
-    
-    // Deleting a user requires deleting their aliases, reverse_map, events, blocks, destinations, domains.
-    // We will do a full manual cascade just in case.
-    const aliases = await db.prepare("SELECT id FROM aliases WHERE user_id = ?").bind(id).all<{ id: number }>();
-    for (const alias of aliases.results ?? []) {
-      await db.prepare("DELETE FROM events WHERE alias_id = ?").bind(alias.id).run();
-      await db.prepare("DELETE FROM reverse_map WHERE alias_id = ?").bind(alias.id).run();
-      await db.prepare("DELETE FROM blocks WHERE alias_id = ?").bind(alias.id).run();
-    }
-    await db.prepare("DELETE FROM aliases WHERE user_id = ?").bind(id).run();
-    await db.prepare("DELETE FROM blocks WHERE user_id = ?").bind(id).run();
-    await db.prepare("DELETE FROM destinations WHERE user_id = ?").bind(id).run();
-    await db.prepare("DELETE FROM domains WHERE user_id = ?").bind(id).run();
-    await db.prepare("DELETE FROM users WHERE id = ?").bind(id).run();
+    const { hardDeleteUser } = await import("../../lib/purge");
+    await hardDeleteUser(db, id);
 
     return c.json({ ok: true });
   });
