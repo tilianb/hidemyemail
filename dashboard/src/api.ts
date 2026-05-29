@@ -101,6 +101,7 @@ export const api = {
 
   domains: () => req<Domain[]>("/api/domains"),
   createDomain: (domain: string, default_destination: string, base_domain_id?: number) => req<Domain>("/api/domains", { method: "POST", body: JSON.stringify({ domain, default_destination, base_domain_id }) }),
+  updateDomainDestination: (id: number, default_destination: string) => req<{ ok: true; default_destination: string }>(`/api/domains/${id}`, { method: "PATCH", body: JSON.stringify({ default_destination }) }),
   deleteDomain: (id: number) => req<{ ok: true }>(`/api/domains/${id}`, { method: "DELETE" }),
 
   aliases: (q = "") => req<Alias[]>(`/api/aliases${q ? `?q=${encodeURIComponent(q)}` : ""}`),

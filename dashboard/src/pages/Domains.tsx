@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type Domain, type Destination } from "../api";
 import { useToast, CopyButton, TableSkeleton, EmptyState } from "../ui";
-import { Globe, Trash2 } from "lucide-react";
+import { Globe, Trash2, Pencil, Check, X } from "lucide-react";
 
 export function Domains() {
   const { toast } = useToast();
@@ -11,6 +11,9 @@ export function Domains() {
   const [form, setForm] = useState({ prefix: "", default_destination: "", base_domain_id: 0 });
   const [submitting, setSubmitting] = useState(false);
   const [maxSubdomains, setMaxSubdomains] = useState(-1);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editDest, setEditDest] = useState("global");
+  const [savingId, setSavingId] = useState<number | null>(null);
 
   async function load() {
     setLoading(true);
@@ -56,6 +59,29 @@ export function Domains() {
       toast(err.message || "Failed to add domain", "error");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  function startEdit(d: Domain) {
+    setEditingId(d.id);
+    setEditDest(d.default_destination || "global");
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+  }
+
+  async function saveEdit(id: number) {
+    setSavingId(id);
+    try {
+      await api.updateDomainDestination(id, editDest);
+      setEditingId(null);
+      await load();
+      toast("Default destination updated", "success");
+    } catch (err: any) {
+      toast(err.message || "Failed to update destination", "error");
+    } finally {
+      setSavingId(null);
     }
   }
 
@@ -178,7 +204,20 @@ export function Domains() {
                       )}
                     </td>
                     <td data-label="Default destination">
-                      {d.default_destination === "global" ? (
+                      {editingId === d.id ? (
+                        <select
+                          className="input"
+                          value={editDest}
+                          onChange={e => setEditDest(e.target.value)}
+                          disabled={savingId === d.id}
+                          autoFocus
+                        >
+                          <option value="global">-- Global Default --</option>
+                          {destinations.map(dest => (
+                            <option key={dest.id} value={dest.email}>{dest.email}</option>
+                          ))}
+                        </select>
+                      ) : d.default_destination === "global" ? (
                         <span className="muted-italic">Global Default</span>
                       ) : d.default_destination ? (
                         <div className="addr-cell">
@@ -201,9 +240,27 @@ export function Domains() {
                     </td>
                     <td>
                       {!d.is_global && (
-                        <button className="btn-icon danger" onClick={() => remove(d.id)} title="Delete domain">
-                          <Trash2 size={16} />
-                        </button>
+                        <div className="addr-cell">
+                          {editingId === d.id ? (
+                            <>
+                              <button className="btn-icon" onClick={() => saveEdit(d.id)} disabled={savingId === d.id} title="Save destination">
+                                <Check size={16} />
+                              </button>
+                              <button className="btn-icon" onClick={cancelEdit} disabled={savingId === d.id} title="Cancel">
+                                <X size={16} />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button className="btn-icon" onClick={() => startEdit(d)} disabled={destinations.length === 0} title="Edit default destination">
+                                <Pencil size={16} />
+                              </button>
+                              <button className="btn-icon danger" onClick={() => remove(d.id)} title="Delete domain">
+                                <Trash2 size={16} />
+                              </button>
+                            </>
+                          )}
+                        </div>
                       )}
                     </td>
                   </tr>
