@@ -109,15 +109,25 @@ export async function suppressDestination(
   suppressionClass: string,
   ts: number
 ): Promise<void> {
-  await db.prepare(
-    "UPDATE destinations SET suppressed_at = ?, suppression_reason = ?, suppression_class = ? WHERE id = ?"
-  ).bind(ts, reason, suppressionClass, id).run();
+  try {
+    await db.prepare(
+      "UPDATE destinations SET suppressed_at = ?, suppression_reason = ?, suppression_class = ? WHERE id = ?"
+    ).bind(ts, reason, suppressionClass, id).run();
+  } catch (err: any) {
+    if (String(err?.message ?? err).includes("no such column")) return;
+    throw err;
+  }
 }
 
 export async function clearSuppression(db: D1Database, id: number): Promise<void> {
-  await db.prepare(
-    "UPDATE destinations SET suppressed_at = NULL, suppression_reason = NULL, suppression_class = NULL WHERE id = ?"
-  ).bind(id).run();
+  try {
+    await db.prepare(
+      "UPDATE destinations SET suppressed_at = NULL, suppression_reason = NULL, suppression_class = NULL WHERE id = ?"
+    ).bind(id).run();
+  } catch (err: any) {
+    if (String(err?.message ?? err).includes("no such column")) return;
+    throw err;
+  }
 }
 
 export async function countEventsForDestinationSince(

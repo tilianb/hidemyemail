@@ -127,7 +127,12 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
     // Suppression check for named destination: look up by encrypted email hash
     const { hashDestination } = await import("../lib/crypto");
     const destHash = await hashDestination(dest.toLowerCase(), env.DESTINATION_ENCRYPTION_KEY);
-    const destRow = await db.prepare("SELECT suppressed_at FROM destinations WHERE email_hash = ? AND user_id = ?").bind(destHash, alias.user_id).first<{ suppressed_at: number | null }>();
+    let destRow: { suppressed_at: number | null } | null = null;
+    try {
+      destRow = await db.prepare("SELECT suppressed_at FROM destinations WHERE email_hash = ? AND user_id = ?").bind(destHash, alias.user_id).first<{ suppressed_at: number | null }>();
+    } catch (err: any) {
+      if (!String(err?.message ?? err).includes("no such column")) throw err;
+    }
     if (destRow?.suppressed_at) {
       await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "suppressed", ts: now });
       return;
