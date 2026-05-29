@@ -260,8 +260,9 @@ jobs:
         env:
           META_JSON: ${{ steps.meta-ghcr.outputs.json }}
         run: |
-          docker buildx imagetools create $(jq -cr --arg image '${{ env.GHCR_IMAGE }}' '.tags | map(select(startswith($image + ":")) | "-t " + .) | join(" ")' <<< "$META_JSON") \
-            $(printf '${{ env.GHCR_IMAGE }}@sha256:%s ' *)
+          mapfile -t tags < <(jq -r --arg image '${{ env.GHCR_IMAGE }}' '.tags[] | select(startswith($image + ":")) | "-t", .' <<< "$META_JSON")
+          mapfile -t digests < <(printf '${{ env.GHCR_IMAGE }}@sha256:%s\n' *)
+          docker buildx imagetools create "${tags[@]}" "${digests[@]}"
 
       - name: Create Docker Hub manifest list and push
         if: startsWith(github.ref, 'refs/tags/')
@@ -269,8 +270,9 @@ jobs:
         env:
           META_JSON: ${{ steps.meta-dockerhub.outputs.json }}
         run: |
-          docker buildx imagetools create $(jq -cr --arg image '${{ env.DOCKERHUB_IMAGE }}' '.tags | map(select(startswith($image + ":")) | "-t " + .) | join(" ")' <<< "$META_JSON") \
-            $(printf '${{ env.DOCKERHUB_IMAGE }}@sha256:%s ' *)
+          mapfile -t tags < <(jq -r --arg image '${{ env.DOCKERHUB_IMAGE }}' '.tags[] | select(startswith($image + ":")) | "-t", .' <<< "$META_JSON")
+          mapfile -t digests < <(printf '${{ env.DOCKERHUB_IMAGE }}@sha256:%s\n' *)
+          docker buildx imagetools create "${tags[@]}" "${digests[@]}"
 
       - name: Inspect GHCR image
         run: |
