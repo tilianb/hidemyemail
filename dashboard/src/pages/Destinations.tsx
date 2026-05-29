@@ -127,24 +127,26 @@ export function Destinations() {
                       <span className="addr-mono">{d.email}</span>
                     </td>
                     <td>
-                      {d.suppressed_at ? (
-                        <span className="badge badge-red">
-                          <AlertTriangle size={12} className="badge-icon" /> Suppressed
-                        </span>
-                      ) : d.verified_at ? (
-                        <span className="badge badge-green">
-                          <CheckCircle2 size={12} className="badge-icon" /> Verified
-                        </span>
-                      ) : (
-                        <span className="badge badge-yellow">
-                          <Clock size={12} className="badge-icon" /> Pending
-                        </span>
-                      )}
-                      {d.suppressed_at && d.suppression_reason && (
-                        <span className="badge badge-muted" style={{ marginLeft: 4 }}>
-                          {d.suppression_reason.replace(/_/g, " ")}
-                        </span>
-                      )}
+                      <div className="destination-status">
+                        {d.suppressed_at ? (
+                          <span className="badge badge-red">
+                            <AlertTriangle size={12} className="badge-icon" /> Suppressed
+                          </span>
+                        ) : d.verified_at ? (
+                          <span className="badge badge-green">
+                            <CheckCircle2 size={12} className="badge-icon" /> Verified
+                          </span>
+                        ) : (
+                          <span className="badge badge-yellow">
+                            <Clock size={12} className="badge-icon" /> Pending
+                          </span>
+                        )}
+                        {d.suppressed_at && d.suppression_reason && (
+                          <span className="destination-status-detail">
+                            {d.suppression_reason.replace(/_/g, " ")}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td>
                       <span className="font-mono text-muted">
