@@ -10,6 +10,7 @@ import { blockRoutes } from "./routes/blocks";
 import { statsRoutes } from "./routes/stats";
 import { sesWebhookRoutes } from "./routes/ses-webhook";
 import { sesInboundRoutes } from "./routes/ses-inbound";
+import { unsubscribeRoutes } from "./routes/unsubscribe";
 import { destinationRoutes, verificationRoute } from "./routes/destinations";
 import { adminRoutes } from "./routes/admin";
 import { settingsRoutes } from "./routes/settings";
@@ -64,6 +65,7 @@ export function createApp() {
   app.route("/api", verificationRoute());
   app.route("/api", sesWebhookRoutes());
   app.route("/api", sesInboundRoutes());
+  app.route("/api", unsubscribeRoutes());
 
   // session guard for everything else under /api
   app.use("/api/*", async (c, next) => {
@@ -74,7 +76,8 @@ export function createApp() {
       p === "/api/logout" ||
       p === "/api/verify" ||
       p === "/api/ses/notification" ||
-      p === "/api/ses/inbound"
+      p === "/api/ses/inbound" ||
+      p === "/api/unsubscribe"
     ) return next();
     const token = getCookie(c, "__Host-session");
     if (!token) return c.json({ error: "Unauthorized" }, 401);

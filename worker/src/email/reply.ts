@@ -99,7 +99,15 @@ export async function handleReply(
     return;
   }
 
-  mime = removeHeaders(mime, ["From", "Sender", "Reply-To", "Return-Path", "DKIM-Signature", "Message-ID", "X-Reinjected", "Received"]);
+  // Strip both legacy (X-Reinjected, X-Forwarded-*, X-Original-From) and the
+  // current X-HideMyEmail-* forwarding metadata so an outbound reply never
+  // re-exposes the sender's destination or the forwarder hop chain.
+  mime = removeHeaders(mime, [
+    "From", "Sender", "Reply-To", "Return-Path", "DKIM-Signature", "Message-ID", "Received",
+    "X-Reinjected", "X-Forwarded-For", "X-Forwarded-To", "X-Original-From",
+    "X-HideMyEmail-Forwarded-For", "X-HideMyEmail-Forwarded-To", "X-HideMyEmail-Original-From",
+    "List-Unsubscribe", "List-Unsubscribe-Post",
+  ]);
   mime = setHeader(mime, "From", alias.full_address);
   mime = setHeader(mime, "To", parsed.externalSender || message.to);
   mime = setHeader(mime, "Message-ID", `<${crypto.randomUUID()}@${domainName}>`);

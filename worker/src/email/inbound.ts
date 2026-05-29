@@ -174,15 +174,27 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
     mime = setHeader(mime, "From", fromHeader);
     mime = setHeader(mime, "Reply-To", reverseAddr);
     mime = removeHeaders(mime, ["DKIM-Signature", "ARC-Seal", "ARC-Message-Signature", "ARC-Authentication-Results", "Return-Path", "Sender"]);
-    mime = setHeader(mime, "X-Reinjected", "1");
-    mime = setHeader(mime, "X-Forwarded-For", message.from);
-    mime = setHeader(mime, "X-Forwarded-To", message.to);
-    mime = setHeader(mime, "X-Original-From", origFrom);
+    // Internal-only forwarding metadata. Prefixed with X-HideMyEmail- so
+    // recipient spam filters don't recognise these as the generic forwarder
+    // / open-relay headers (X-Reinjected, X-Forwarded-For, X-Original-From)
+    // that classifiers learn to penalise. X-Reinjected is dropped entirely:
+    // nothing in the router uses it for loop detection.
+    mime = setHeader(mime, "X-HideMyEmail-Forwarded-For", message.from);
+    mime = setHeader(mime, "X-HideMyEmail-Forwarded-To", message.to);
+    mime = setHeader(mime, "X-HideMyEmail-Original-From", origFrom);
 
     const { signAction } = await import("./action");
     const disableSig = await signAction("disable", String(alias.id), env);
     const actionEmail = `action+disable=${alias.id}_${disableSig}@${domainName}`;
-    mime = setHeader(mime, "List-Unsubscribe", `<mailto:${actionEmail}>`);
+    const mainGlobalDomain = await getMainGlobalDomain(db, env);
+    const unsubHttps = mainGlobalDomain
+      ? `https://${mainGlobalDomain}/api/unsubscribe?a=${alias.id}&s=${disableSig}`
+      : "";
+    // RFC 8058 one-click: HTTPS form first so MUAs that support one-click
+    // (Gmail, Outlook, Yahoo) hit a real URL instead of the mailto fallback,
+    // which spam filters distrust when it carries an opaque local-part.
+    mime = setHeader(mime, "List-Unsubscribe",
+      unsubHttps ? `<${unsubHttps}>, <mailto:${actionEmail}>` : `<mailto:${actionEmail}>`);
     mime = setHeader(mime, "List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
 
     const rawBase64 = toBase64(serializeMime(mime));
@@ -299,15 +311,20 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   
   msg.setSender({ name: sanitize(display), addr: alias.full_address });
   msg.setHeader("Reply-To", new Mailbox({ addr: reverseAddr }));
-  msg.setHeader("X-Reinjected", "1");
-  msg.setHeader("X-Forwarded-For", message.from);
-  msg.setHeader("X-Forwarded-To", message.to);
-  msg.setHeader("X-Original-From", origFrom);
+  // See parallel block above for rationale on these header names.
+  msg.setHeader("X-HideMyEmail-Forwarded-For", message.from);
+  msg.setHeader("X-HideMyEmail-Forwarded-To", message.to);
+  msg.setHeader("X-HideMyEmail-Original-From", origFrom);
 
   const { signAction } = await import("./action");
   const disableSig = await signAction("disable", String(alias.id), env);
   const actionEmail = `action+disable=${alias.id}_${disableSig}@${domainName}`;
-  msg.setHeader("List-Unsubscribe", `<mailto:${actionEmail}>`);
+  const mainGlobalDomainForUnsub = await getMainGlobalDomain(db, env);
+  const unsubHttpsUrl = mainGlobalDomainForUnsub
+    ? `https://${mainGlobalDomainForUnsub}/api/unsubscribe?a=${alias.id}&s=${disableSig}`
+    : "";
+  msg.setHeader("List-Unsubscribe",
+    unsubHttpsUrl ? `<${unsubHttpsUrl}>, <mailto:${actionEmail}>` : `<mailto:${actionEmail}>`);
   msg.setHeader("List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
 
   if (!finalText && !finalHtml) {

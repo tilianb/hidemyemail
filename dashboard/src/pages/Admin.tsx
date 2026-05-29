@@ -990,6 +990,8 @@ export function Admin() {
                   <div className="setting-desc">
                     Default for new users. Each user can override in their Settings page.
                     Choose where the Block / Mute&nbsp;7d / Disable alias bar appears in forwarded emails, or disable it entirely.
+                    {" "}
+                    <strong>Recommended: Disabled</strong> while sending domains are new — the three inline <code>mailto:</code> buttons pattern-match marketing footers and push forwards to Junk at Microsoft / Outlook.
                   </div>
                 </div>
                 <div className="setting-control" style={{ minWidth: 160 }}>
