@@ -108,13 +108,17 @@ export async function suppressDestination(
   reason: string,
   suppressionClass: string,
   ts: number
-): Promise<void> {
+): Promise<boolean> {
   try {
+    const current = await db.prepare(
+      "SELECT suppressed_at FROM destinations WHERE id = ?"
+    ).bind(id).first<{ suppressed_at: number | null }>();
     await db.prepare(
       "UPDATE destinations SET suppressed_at = ?, suppression_reason = ?, suppression_class = ? WHERE id = ?"
     ).bind(ts, reason, suppressionClass, id).run();
+    return !current?.suppressed_at;
   } catch (err: any) {
-    if (String(err?.message ?? err).includes("no such column")) return;
+    if (String(err?.message ?? err).includes("no such column")) return false;
     throw err;
   }
 }
