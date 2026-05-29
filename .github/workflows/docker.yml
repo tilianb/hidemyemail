@@ -338,6 +338,10 @@ jobs:
           META_JSON: ${{ steps.meta-ghcr.outputs.json }}
         run: |
           source_ref="${{ env.GHCR_IMAGE }}:sha-${GITHUB_SHA::7}"
+          if ! crane digest "$source_ref" >/dev/null; then
+            source_ref="${{ env.GHCR_IMAGE }}:main"
+          fi
+          echo "Using source image: $source_ref"
           mapfile -t tags < <(jq -r --arg image '${{ env.GHCR_IMAGE }}' '.tags[] | select(startswith($image + ":")) | "-t", .' <<< "$META_JSON")
           docker buildx imagetools create "${tags[@]}" "$source_ref"
 
@@ -346,6 +350,10 @@ jobs:
           META_JSON: ${{ steps.meta-dockerhub.outputs.json }}
         run: |
           source_ref="${{ env.GHCR_IMAGE }}:sha-${GITHUB_SHA::7}"
+          if ! crane digest "$source_ref" >/dev/null; then
+            source_ref="${{ env.GHCR_IMAGE }}:main"
+          fi
+          echo "Using source image: $source_ref"
           mapfile -t tags < <(jq -r --arg image '${{ env.DOCKERHUB_IMAGE }}' '.tags[] | select(startswith($image + ":"))' <<< "$META_JSON")
           for tag in "${tags[@]}"; do
             crane copy "$source_ref" "$tag"
