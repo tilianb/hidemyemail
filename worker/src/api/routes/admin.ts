@@ -485,6 +485,20 @@ export function adminRoutes() {
     const now = Date.now();
     const since24h = now - 24 * 3600_000;
     const since7d = now - 7 * 24 * 3600_000;
+    const emptySuppressionResponse = {
+      suppressions: [],
+      totals: {
+        bounce_24h: 0,
+        bounce_7d: 0,
+        complaint_24h: 0,
+        complaint_7d: 0,
+        suppressed: 0,
+        hard_suppressed: 0,
+        soft_suppressed: 0,
+      },
+      health: "healthy" as const,
+      migration_pending: true,
+    };
 
     const bounce24hTotal = await db.prepare(
       "SELECT COUNT(*) AS n FROM events WHERE type = 'bounce' AND ts >= ?"
@@ -499,9 +513,17 @@ export function adminRoutes() {
       "SELECT COUNT(*) AS n FROM events WHERE type = 'complaint' AND ts >= ?"
     ).bind(since7d).first<{ n: number }>();
 
-    const suppressedRows = await db.prepare(
-      "SELECT id, user_id, email_hash, suppressed_at, suppression_reason, suppression_class FROM destinations WHERE suppressed_at IS NOT NULL ORDER BY suppressed_at DESC"
-    ).all<{ id: number; user_id: number; email_hash: string | null; suppressed_at: number; suppression_reason: string | null; suppression_class: string | null }>();
+    let suppressedRows;
+    try {
+      suppressedRows = await db.prepare(
+        "SELECT id, user_id, email_hash, suppressed_at, suppression_reason, suppression_class FROM destinations WHERE suppressed_at IS NOT NULL ORDER BY suppressed_at DESC"
+      ).all<{ id: number; user_id: number; email_hash: string | null; suppressed_at: number; suppression_reason: string | null; suppression_class: string | null }>();
+    } catch (err: any) {
+      if (String(err?.message ?? err).includes("no such column")) {
+        return c.json(emptySuppressionResponse);
+      }
+      throw err;
+    }
 
     const results = [];
     for (const row of suppressedRows.results ?? []) {
