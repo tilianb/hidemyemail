@@ -155,6 +155,68 @@ test("first-contact match is case-insensitive", async () => {
   expect(sentinel.sent.length).toBe(1);
 });
 
+// Distinct-recipient cap: an authenticated owner could reply to many strangers (each
+// with exactly one prior inbound) and use the alias as a cold-outbound spam relay.
+// Cap the number of unique reply recipients per 24h window.
+
+// Helper: seed a prior inbound 'forward' so the first-contact gate passes.
+async function seedForward(sender: string) {
+  await q.insertEvent(DB(), { alias_id: 1, type: "forward", external_sender: sender, ts: Date.now() });
+}
+
+test("distinct recipient cap: under cap → reply succeeds", async () => {
+  // Lower the cap to 2 so we don't need to seed 15 prior senders.
+  await DB().prepare("INSERT INTO settings (key, value, updated_at) VALUES ('reply_distinct_recipient_cap', '2', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(Date.now()).run();
+
+  // Seed one prior distinct reply (within window) so we sit at 1/2 distinct.
+  await seedForward("other@example.com");
+  await q.insertEvent(DB(), { alias_id: 1, type: "reply", external_sender: "other@example.com", ts: Date.now() });
+
+  // Reply to the regularly-seeded boss@store.com (prior inbound already seeded in beforeEach).
+  const sentinel = { sent: [] as any[] };
+  await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
+  expect(sentinel.sent.length).toBe(1);
+});
+
+test("distinct recipient cap: at cap with new recipient → rejected + alias muted", async () => {
+  // Cap of 2; seed 2 distinct reply recipients already in the window.
+  await DB().prepare("INSERT INTO settings (key, value, updated_at) VALUES ('reply_distinct_recipient_cap', '2', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(Date.now()).run();
+
+  const now = Date.now();
+  await seedForward("alice@example.com");
+  await seedForward("bob@example.com");
+  await q.insertEvent(DB(), { alias_id: 1, type: "reply", external_sender: "alice@example.com", ts: now });
+  await q.insertEvent(DB(), { alias_id: 1, type: "reply", external_sender: "bob@example.com", ts: now });
+
+  // boss@store.com is the new (third) distinct recipient — must be blocked.
+  const sentinel = { sent: [] as any[] };
+  await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
+  expect(sentinel.sent.length).toBe(0);
+
+  const ev = await DB().prepare("SELECT detail FROM events WHERE type='reject' ORDER BY id DESC LIMIT 1").first<{ detail: string }>();
+  expect(ev?.detail).toBe("distinct_recipient_cap");
+
+  // Alias must now be muted for a future timestamp.
+  const alias = await DB().prepare("SELECT muted_until FROM aliases WHERE id = 1").first<{ muted_until: number | null }>();
+  expect(alias?.muted_until).toBeGreaterThan(Date.now());
+});
+
+test("distinct recipient cap: already-contacted recipient exempted at cap", async () => {
+  // Cap of 2; seed boss@store.com itself as one of the 2 already-replied-to recipients.
+  await DB().prepare("INSERT INTO settings (key, value, updated_at) VALUES ('reply_distinct_recipient_cap', '2', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(Date.now()).run();
+
+  const now = Date.now();
+  await seedForward("alice@example.com");
+  // boss@store.com was already seeded via beforeEach; also record a prior reply to it.
+  await q.insertEvent(DB(), { alias_id: 1, type: "reply", external_sender: "boss@store.com", ts: now });
+  await q.insertEvent(DB(), { alias_id: 1, type: "reply", external_sender: "alice@example.com", ts: now });
+  // Distinct count is now 2/2 (boss + alice). Replying again to boss must NOT be blocked.
+
+  const sentinel = { sent: [] as any[] };
+  await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
+  expect(sentinel.sent.length).toBe(1);
+});
+
 // Reply rate limit: replies consume SES quota + sender reputation, capped per alias
 // per hour (default 10). countEventsSince counts forward+reply in the window.
 test("reply rate limit: over per-alias cap → rejected, no SES", async () => {

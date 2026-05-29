@@ -854,6 +854,23 @@ export function Admin() {
 
               <div className="setting-row">
                 <div className="setting-info">
+                  <label htmlFor="setting-distinct-recipient-cap" className="setting-label">Per-Alias Distinct Reply Recipient Cap (per 24h)</label>
+                  <div className="setting-desc">Max unique external recipients an alias may reply to in 24h. Tripping the cap auto-mutes the alias for 24h. -1 to disable</div>
+                </div>
+                <div className="setting-control">
+                  <input
+                    id="setting-distinct-recipient-cap"
+                    className="input"
+                    type="text"
+                    inputMode="numeric"
+                    value={editedSettings.reply_distinct_recipient_cap ?? ""}
+                    onChange={e => setEditedSettings({...editedSettings, reply_distinct_recipient_cap: e.target.value.replace(/[^0-9-]/g, "").replace(/(?!^)-/g, "")})}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
                   <label htmlFor="setting-max-total-aliases" className="setting-label">Max Total Aliases</label>
                   <div className="setting-desc">Maximum number of aliases a user can have (-1 for unlimited)</div>
                 </div>
@@ -1239,6 +1256,7 @@ export function Admin() {
                     rate_limit_per_alias: "20",
                     rate_limit_reply_per_alias: "10",
                     rate_limit_global: "1000",
+                    reply_distinct_recipient_cap: "15",
                     max_inbound_bytes: "26214400",
                     catch_all_auto_create: "true",
                     alias_quota_buffer_enabled: "true",
