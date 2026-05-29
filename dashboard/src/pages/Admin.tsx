@@ -717,6 +717,23 @@ export function Admin() {
 
               <div className="setting-row">
                 <div className="setting-info">
+                  <label htmlFor="setting-rate-reply" className="setting-label">Per-Alias Reply Rate Limit (emails/hr)</label>
+                  <div className="setting-desc">Max replies per alias per hour (outbound; protects sender reputation). -1 to disable</div>
+                </div>
+                <div className="setting-control">
+                  <input
+                    id="setting-rate-reply"
+                    className="input"
+                    type="text"
+                    inputMode="numeric"
+                    value={editedSettings.rate_limit_reply_per_alias ?? ""}
+                    onChange={e => setEditedSettings({...editedSettings, rate_limit_reply_per_alias: e.target.value.replace(/[^0-9-]/g, "").replace(/(?!^)-/g, "")})}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
                   <label htmlFor="setting-max-total-aliases" className="setting-label">Max Total Aliases</label>
                   <div className="setting-desc">Maximum number of aliases a user can have (-1 for unlimited)</div>
                 </div>
@@ -1081,6 +1098,7 @@ export function Admin() {
                 onClick={() => {
                   setEditedSettings({
                     rate_limit_per_alias: "20",
+                    rate_limit_reply_per_alias: "10",
                     rate_limit_global: "1000",
                     max_inbound_bytes: "26214400",
                     catch_all_auto_create: "true",

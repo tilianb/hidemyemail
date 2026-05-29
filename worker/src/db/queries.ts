@@ -71,6 +71,17 @@ export async function insertEvent(
   ).bind(e.alias_id ?? null, e.type, e.external_sender ?? null, e.subject ?? null, e.bytes ?? null, e.detail ?? null, e.ts).run();
 }
 
+// First-contact gate for replies: has this alias previously forwarded inbound mail
+// FROM this external sender? Reverse addresses are guessable, so a reply is only
+// authorised to a correspondent the alias has actually heard from. Case-insensitive
+// because envelope MAIL FROM casing is not normalised on the inbound path.
+export async function hasPriorInbound(db: D1Database, aliasId: number, externalSender: string): Promise<boolean> {
+  const r = await db.prepare(
+    "SELECT 1 AS n FROM events WHERE alias_id = ? AND type = 'forward' AND LOWER(external_sender) = LOWER(?) LIMIT 1"
+  ).bind(aliasId, externalSender).first<{ n: number }>();
+  return !!r;
+}
+
 export async function countEventsSince(db: D1Database, aliasId: number | null, since: number): Promise<number> {
   const sql = aliasId == null
     ? "SELECT COUNT(*) AS n FROM events WHERE ts >= ? AND type IN ('forward','reply')"

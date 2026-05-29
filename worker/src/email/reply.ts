@@ -3,7 +3,7 @@ import * as q from "../db/queries";
 import { streamToBytes, toBase64 } from "../lib/bytes";
 import { parseMime, setHeader, removeHeaders, getHeader, serializeMime } from "../lib/mime";
 import { sendRaw, SesTransientError } from "../lib/ses";
-import { getEnvWithOverride } from "../lib/settings";
+import { getEnvWithOverride, getNumericSetting } from "../lib/settings";
 
 type SesSend = typeof sendRaw;
 
@@ -74,6 +74,28 @@ export async function handleReply(
       alias_id: alias.id, type: "reject", external_sender: parsed.externalSender,
       detail: owners.has(envelopeFrom) || (headerFrom && owners.has(headerFrom)) ? "auth" : "not_owner", ts: now,
     });
+    return;
+  }
+
+  // ABUSE: reverse addresses are guessable, so the authenticated owner gate alone does
+  // not stop the owner from crafting a reverse address for an arbitrary stranger and
+  // using the alias as a cold-outbound spam relay. Require a prior inbound forward from
+  // the same external sender — turning this into a genuine *reply*, not an *originate*.
+  // Fail closed.
+  if (!(await q.hasPriorInbound(db, alias.id, parsed.externalSender))) {
+    await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: parsed.externalSender, detail: "no_prior_contact", ts: now });
+    return;
+  }
+
+  // Reply rate limit: outbound consumes SES quota and sender reputation, so cap it
+  // tighter than inbound. countEventsSince already counts forward+reply in the window;
+  // -1 disables a cap.
+  const replyCap = await getNumericSetting(db, "rate_limit_reply_per_alias");
+  const globalCap = await getNumericSetting(db, "rate_limit_global");
+  const aliasCount = await q.countEventsSince(db, alias.id, now - 3600_000);
+  const globalCount = await q.countEventsSince(db, null, now - 3600_000);
+  if ((replyCap >= 0 && aliasCount >= replyCap) || (globalCap >= 0 && globalCount >= globalCap)) {
+    await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: parsed.externalSender, detail: "rate", ts: now });
     return;
   }
 
