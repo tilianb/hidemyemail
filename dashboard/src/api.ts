@@ -84,6 +84,31 @@ export interface Destination {
   is_default: number;
   verified_at: number | null;
   created_at: number;
+  suppressed_at: number | null;
+  suppression_reason: string | null;
+  suppression_class: string | null;
+}
+
+export interface SuppressionEntry {
+  id: number;
+  user_id: number;
+  suppressed_at: number;
+  suppression_reason: string | null;
+  suppression_class: string | null;
+  bounce_24h: number;
+  bounce_7d: number;
+  complaint_24h: number;
+  complaint_7d: number;
+}
+
+export interface SuppressionSummary {
+  bounce_24h: number;
+  bounce_7d: number;
+  complaint_24h: number;
+  complaint_7d: number;
+  suppressed: number;
+  hard_suppressed: number;
+  soft_suppressed: number;
 }
 
 export const api = {
@@ -98,6 +123,7 @@ export const api = {
   createDestination: (email: string) => req<{ ok: true }>("/api/destinations", { method: "POST", body: JSON.stringify({ email }) }),
   deleteDestination: (id: number) => req<{ ok: true }>(`/api/destinations/${id}`, { method: "DELETE" }),
   setDefaultDestination: (id: number) => req<{ ok: true }>(`/api/destinations/${id}/default`, { method: "PATCH" }),
+  unsuppressDestination: (id: number) => req<{ ok: true }>(`/api/destinations/${id}/unsuppress`, { method: "POST" }),
 
   domains: () => req<Domain[]>("/api/domains"),
   createDomain: (domain: string, default_destination: string, base_domain_id?: number) => req<Domain>("/api/domains", { method: "POST", body: JSON.stringify({ domain, default_destination, base_domain_id }) }),
@@ -160,4 +186,6 @@ export const api = {
   adminSettings: () => req<{ settings: Record<string, { value: string; updated_at: number }> }>("/api/admin/settings"),
   adminUpdateSettings: (data: Record<string, string>) => req<{ ok: true; updated: number }>("/api/admin/settings", { method: "PATCH", body: JSON.stringify(data) }),
   adminSendTestEmail: (data: { type: string; to: string }) => req<{ ok: true; type: string; to: string }>("/api/admin/test-email", { method: "POST", body: JSON.stringify(data) }),
+  adminSuppressions: () => req<{ suppressions: SuppressionEntry[]; totals: SuppressionSummary; health: "healthy" | "attention" }>("/api/admin/suppressions"),
+  adminClearSuppression: (id: number) => req<{ ok: true }>(`/api/admin/suppressions/${id}/clear`, { method: "POST" }),
 };

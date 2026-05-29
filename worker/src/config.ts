@@ -21,6 +21,7 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   max_subdomains: "5",
   inline_actions_default_enabled: "false",
   inline_actions_default_position: "footer",
+  soft_bounce_threshold: "3",
 };
 
 // Kept for backward-compat with any imports (tests, etc.)

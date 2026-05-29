@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { api, type Domain } from "../api";
+import { api, type Domain, type SuppressionEntry, type SuppressionSummary } from "../api";
 import { useToast, TableSkeleton, EmptyState, ConfirmDialog, PromptDialog, ChoiceDialog, CopyButton } from "../ui";
-import { Users, Trash2, Globe, Cloud, Edit3, Key, Server, Settings, Send, CheckCircle, XCircle } from "lucide-react";
+import { Users, Trash2, Globe, Cloud, Edit3, Key, Server, Settings, Send, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
 
 const FORWARDED_FROM_FORMATS = [
   { value: "name_address_parens", label: "Name (email at domain)", example: '"Alice (alice at store.com)" <alias@domain>' },
@@ -94,6 +94,10 @@ export function Admin() {
     try { localStorage.setItem("domain_health", JSON.stringify(healthStatus)); } catch {}
   }, [healthStatus]);
 
+  const [suppressions, setSuppressions] = useState<SuppressionEntry[]>([]);
+  const [suppressionSummary, setSuppressionSummary] = useState<SuppressionSummary | null>(null);
+  const [suppressionHealth, setSuppressionHealth] = useState<"healthy" | "attention">("healthy");
+  const [showSuppressions, setShowSuppressions] = useState(false);
   const [envData, setEnvData] = useState<{ vars: Record<string, { value: string; secret: false }>; secrets: Record<string, { configured: boolean; preview?: string }> } | null>(null);
   const [settingsData, setSettingsData] = useState<Record<string, { value: string; updated_at: number }> | null>(null);
   const [editedSettings, setEditedSettings] = useState<Record<string, string>>({});
@@ -118,18 +122,22 @@ export function Admin() {
   async function load() {
     setLoading(true);
     try {
-      const [uRes, sRes, doms, envRes, setRes] = await Promise.all([
+      const [uRes, sRes, doms, envRes, setRes, supRes] = await Promise.all([
         api.adminUsers(),
         api.adminStats(),
         api.domains(),
         api.adminEnv(),
-        api.adminSettings()
+        api.adminSettings(),
+        api.adminSuppressions(),
       ]);
       setUsers(uRes.users);
       setStats(sRes.totals);
       setGlobalDomains(doms.filter(d => d.is_global === 1));
       setEnvData(envRes);
       setSettingsData(setRes.settings);
+      setSuppressions(supRes.suppressions);
+      setSuppressionSummary(supRes.totals);
+      setSuppressionHealth(supRes.health);
       
       const newEdited: Record<string, string> = {};
       for (const [k, v] of Object.entries(setRes.settings)) {
@@ -201,6 +209,16 @@ export function Admin() {
       toast(err.message || "Failed to save settings", "error");
     } finally {
       setSavingSettings(false);
+    }
+  }
+
+  async function clearSuppression(id: number) {
+    try {
+      await api.adminClearSuppression(id);
+      await load();
+      toast("Suppression cleared", "success");
+    } catch (err: any) {
+      toast(err.message || "Failed to clear suppression", "error");
     }
   }
 
@@ -661,8 +679,110 @@ export function Admin() {
         )}
       </div>
 
+      <div className={`card admin-panel-card stagger-4 ${showSuppressions ? "is-open" : ""}`}>
+        <div className="card-header admin-section-header admin-collapsible-header" onClick={() => setShowSuppressions(!showSuppressions)}>
+          <div>
+            <span className="card-title admin-section-title">
+              <AlertTriangle size={18} /> Suppressions
+            </span>
+            <p className="admin-section-subtitle">Destinations suppressed due to bounces or complaints. Hard suppressions require admin clearance.</p>
+          </div>
+          <button className="admin-panel-toggle" type="button" onClick={(e) => { e.stopPropagation(); setShowSuppressions(!showSuppressions); }}>
+            {suppressions.length} suppressed · {showSuppressions ? "Hide" : "Show"}
+          </button>
+        </div>
+        {showSuppressions && (
+          <div className="card-body">
+            {suppressionSummary && (
+              <div className="admin-stats-grid" style={{ marginBottom: 16 }}>
+                <div className="stat-card">
+                  <div className="stat-label">Reputation Health</div>
+                  <div className="stat-value">
+                    {suppressionHealth === "attention" ? (
+                      <span className="badge badge-red">Attention</span>
+                    ) : (
+                      <span className="badge badge-green">Healthy</span>
+                    )}
+                  </div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-label">Bounces 24h / 7d</div>
+                  <div className="stat-value">{suppressionSummary.bounce_24h} / {suppressionSummary.bounce_7d}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-label">Complaints 24h / 7d</div>
+                  <div className="stat-value">{suppressionSummary.complaint_24h} / {suppressionSummary.complaint_7d}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-label">Hard / Soft Suppressed</div>
+                  <div className="stat-value">{suppressionSummary.hard_suppressed} / {suppressionSummary.soft_suppressed}</div>
+                </div>
+              </div>
+            )}
+            {suppressions.length === 0 ? (
+              <EmptyState
+                icon={<AlertTriangle size={40} />}
+                title="No suppressions"
+                body="No destinations are currently suppressed."
+              />
+            ) : (
+              <div className="table-wrap">
+                <table className="dossier">
+                  <thead>
+                    <tr>
+                      <th>Destination ID</th>
+                      <th>User</th>
+                      <th>Class</th>
+                      <th>Reason</th>
+                      <th>Suppressed At</th>
+                      <th>Bounces (24h / 7d)</th>
+                      <th>Complaints (24h / 7d)</th>
+                      <th className="th-actions"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {suppressions.map(s => (
+                      <tr key={s.id}>
+                        <td><span className="font-mono text-muted">#{s.id}</span></td>
+                        <td><span className="font-mono text-muted">#{s.user_id}</span></td>
+                        <td>
+                          {s.suppression_class === "hard" ? (
+                            <span className="badge badge-red">Hard</span>
+                          ) : (
+                            <span className="badge badge-yellow">Soft</span>
+                          )}
+                        </td>
+                        <td><span className="text-muted">{s.suppression_reason?.replace(/_/g, " ") ?? "—"}</span></td>
+                        <td>
+                          <span className="font-mono text-muted">
+                            {new Date(s.suppressed_at > 1e11 ? s.suppressed_at : s.suppressed_at * 1000).toLocaleDateString()}
+                          </span>
+                        </td>
+                        <td><span className="font-mono">{s.bounce_24h} / {s.bounce_7d}</span></td>
+                        <td><span className="font-mono">{s.complaint_24h} / {s.complaint_7d}</span></td>
+                        <td>
+                          <div className="table-actions">
+                            <button
+                              className="btn btn-secondary btn-compact"
+                              onClick={() => clearSuppression(s.id)}
+                              title="Clear suppression"
+                            >
+                              Clear
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {settingsData && (
-        <div className={`card admin-panel-card admin-settings-card stagger-4 ${showSettings ? "is-open" : ""}`}>
+        <div className={`card admin-panel-card admin-settings-card stagger-5 ${showSettings ? "is-open" : ""}`}>
           <div className="card-header admin-section-header admin-collapsible-header" onClick={() => setShowSettings(!showSettings)}>
             <div>
               <span className="card-title admin-section-title">
@@ -779,6 +899,23 @@ export function Admin() {
                     inputMode="numeric"
                     value={editedSettings.max_subdomains ?? "-1"}
                     onChange={e => setEditedSettings({...editedSettings, max_subdomains: e.target.value.replace(/[^0-9-]/g, "").replace(/(?!^)-/g, "")})}
+                  />
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-soft-bounce-threshold" className="setting-label">Soft Bounce Threshold</label>
+                  <div className="setting-desc">Number of transient (soft) bounces per 24h before suppressing a destination. Set to 1 to suppress on first soft bounce.</div>
+                </div>
+                <div className="setting-control">
+                  <input
+                    id="setting-soft-bounce-threshold"
+                    className="input"
+                    type="text"
+                    inputMode="numeric"
+                    value={editedSettings.soft_bounce_threshold ?? "3"}
+                    onChange={e => setEditedSettings({...editedSettings, soft_bounce_threshold: e.target.value.replace(/[^0-9]/g, "")})}
                   />
                 </div>
               </div>
@@ -1108,7 +1245,8 @@ export function Admin() {
                     inline_actions_default_position: "footer",
                     main_global_domain: "",
                     cors_allowed_domains: "http://localhost:5173",
-                    forwarded_from_format: "name_address_parens"
+                    forwarded_from_format: "name_address_parens",
+                    soft_bounce_threshold: "3",
                   });
                 }}
                 type="button"
@@ -1129,7 +1267,7 @@ export function Admin() {
       )}
 
       {envData && (
-        <div className={`card admin-panel-card admin-env-card stagger-5 ${showEnvVars ? "is-open" : ""}`}>
+        <div className={`card admin-panel-card admin-env-card stagger-6 ${showEnvVars ? "is-open" : ""}`}>
           <div className="card-header admin-section-header admin-collapsible-header" onClick={() => setShowEnvVars(!showEnvVars)}>
             <div>
               <span className="card-title admin-section-title">
@@ -1185,7 +1323,7 @@ export function Admin() {
       )}
 
       {/* AWS Onboarding Wizard */}
-      <div className={`card admin-panel-card admin-aws-card stagger-6 ${showAwsSetup ? "is-open" : ""}`}>
+      <div className={`card admin-panel-card admin-aws-card stagger-7 ${showAwsSetup ? "is-open" : ""}`}>
         <div className="card-header admin-section-header admin-collapsible-header" onClick={() => setShowAwsSetup(!showAwsSetup)}>
           <div>
             <span className="card-title admin-section-title">

@@ -1,4 +1,4 @@
-import type { AliasRow, DomainRow, EventType, ReverseRow, BlockRow } from "../types";
+import type { AliasRow, DomainRow, EventType, ReverseRow, BlockRow, DestinationRow } from "../types";
 import { decryptDestination } from "../lib/crypto";
 
 export async function createDomain(db: D1Database, domain: string, dest: string): Promise<number> {
@@ -93,6 +93,49 @@ export async function countEventsSince(db: D1Database, aliasId: number | null, s
 
 export async function incCounter(db: D1Database, aliasId: number, col: "fwd_count" | "blocked_count" | "reply_count"): Promise<void> {
   await db.prepare(`UPDATE aliases SET ${col} = ${col} + 1, last_seen_at = ? WHERE id = ?`).bind(Date.now(), aliasId).run();
+}
+
+export async function findDestinationsByHash(db: D1Database, emailHash: string): Promise<DestinationRow[]> {
+  const r = await db.prepare(
+    "SELECT * FROM destinations WHERE email_hash = ?"
+  ).bind(emailHash).all<DestinationRow>();
+  return r.results ?? [];
+}
+
+export async function suppressDestination(
+  db: D1Database,
+  id: number,
+  reason: string,
+  suppressionClass: string,
+  ts: number
+): Promise<void> {
+  await db.prepare(
+    "UPDATE destinations SET suppressed_at = ?, suppression_reason = ?, suppression_class = ? WHERE id = ?"
+  ).bind(ts, reason, suppressionClass, id).run();
+}
+
+export async function clearSuppression(db: D1Database, id: number): Promise<void> {
+  await db.prepare(
+    "UPDATE destinations SET suppressed_at = NULL, suppression_reason = NULL, suppression_class = NULL WHERE id = ?"
+  ).bind(id).run();
+}
+
+export async function countEventsForDestinationSince(
+  db: D1Database,
+  destinationId: number,
+  eventType: EventType,
+  since: number
+): Promise<number> {
+  const r = await db.prepare(
+    "SELECT COUNT(*) AS n FROM events WHERE detail = ? AND ts >= ? AND type = ?"
+  ).bind(`dest:${destinationId}`, since, eventType).first<{ n: number }>();
+  return r?.n ?? 0;
+}
+
+export async function getDestinationByEmail(db: D1Database, emailHash: string, userId: number): Promise<DestinationRow | null> {
+  return db.prepare(
+    "SELECT * FROM destinations WHERE email_hash = ? AND user_id = ?"
+  ).bind(emailHash, userId).first<DestinationRow>();
 }
 
 export async function ownerDestinations(db: D1Database, userId: number, key: string): Promise<Set<string>> {
