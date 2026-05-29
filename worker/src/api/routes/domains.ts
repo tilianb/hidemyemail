@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
-import * as q from "../../db/queries";
 import { encryptDestination, decryptDestination, hashDestination } from "../../lib/crypto";
 import { getMainGlobalDomain, getEnvWithOverride } from "../../lib/settings";
 
@@ -115,6 +114,44 @@ export function domainRoutes() {
     } catch (err: any) {
       return c.json({ error: "Domain already exists or internal error" }, 500);
     }
+  });
+
+  // Update a personal subdomain's default destination in place — no delete+recreate.
+  r.patch("/domains/:id", async (c) => {
+    const userId = c.get("userId");
+    const id = parseInt(c.req.param("id"), 10);
+    if (isNaN(id)) return c.json({ error: "Invalid id" }, 400);
+    const { default_destination } = await c.req.json<{ default_destination: string }>();
+
+    // Scope by user_id (no IDOR) and only personal subdomains. Global domains stay
+    // managed via the admin routes and are never editable here.
+    const domainRow = await c.env.DB.prepare(
+      "SELECT is_global FROM domains WHERE id = ? AND user_id = ?"
+    ).bind(id, userId).first<{ is_global: number }>();
+    if (!domainRow) return c.json({ error: "Not found" }, 404);
+    if (domainRow.is_global) return c.json({ error: "Cannot edit global domain" }, 400);
+
+    // Validate the destination: "global", or a verified destination owned by this
+    // user. Mirror POST /domains. Fail closed.
+    let destEnc: string | null = null;
+    let destHash: string | null = null;
+    if (default_destination === "global") {
+      destEnc = await encryptDestination("global", c.env.DESTINATION_ENCRYPTION_KEY);
+      destHash = await hashDestination("global", c.env.DESTINATION_ENCRYPTION_KEY);
+    } else if (default_destination) {
+      const emailHash = await hashDestination(default_destination.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY);
+      const destVerified = await c.env.DB.prepare(
+        "SELECT id FROM destinations WHERE user_id = ? AND email_hash = ? AND verified_at IS NOT NULL"
+      ).bind(userId, emailHash).first();
+      if (!destVerified) return c.json({ error: "Destination email not verified" }, 400);
+      destEnc = await encryptDestination(default_destination.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY);
+      destHash = await hashDestination(default_destination.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY);
+    }
+
+    await c.env.DB.prepare(
+      "UPDATE domains SET default_destination = ?, default_destination_hash = ? WHERE id = ? AND user_id = ?"
+    ).bind(destEnc, destHash, id, userId).run();
+    return c.json({ ok: true, default_destination });
   });
 
   r.delete("/domains/:id", async (c) => {
