@@ -2,7 +2,9 @@ import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import { getEnvWithOverride, getNumericSetting } from "../../lib/settings";
 import { verifySnsMessage } from "../../lib/sns";
-import { hashDestination } from "../../lib/crypto";
+import { decryptDestination, hashDestination } from "../../lib/crypto";
+import { buildNotificationEmail } from "../../lib/emails";
+import { sendRaw } from "../../lib/ses";
 import * as q from "../../db/queries";
 
 // SNS posts JSON (often Content-Type text/plain). We verify SNS signatures,
@@ -50,9 +52,9 @@ export function sesWebhookRoutes() {
       const encKey = c.env.DESTINATION_ENCRYPTION_KEY;
 
       if (kind === "Bounce") {
-        await processBounce(db, msg, encKey, now);
+        await processBounce(c.env, msg, encKey, now);
       } else if (kind === "Complaint") {
-        await processComplaint(db, msg, encKey, now);
+        await processComplaint(c.env, msg, encKey, now);
       } else {
         // Unknown notification type: log it
         await db.prepare("INSERT INTO events (alias_id, type, detail, ts) VALUES (NULL, 'error', ?, ?)")
@@ -66,7 +68,8 @@ export function sesWebhookRoutes() {
   return r;
 }
 
-async function processBounce(db: D1Database, msg: any, encKey: string, now: number): Promise<void> {
+async function processBounce(env: AppEnv["Bindings"], msg: any, encKey: string, now: number): Promise<void> {
+  const db = env.DB;
   const bounce = msg.bounce;
   if (!bounce || !Array.isArray(bounce.bouncedRecipients)) {
     console.log("Bounce notification missing bounce.bouncedRecipients");
@@ -107,21 +110,24 @@ async function processBounce(db: D1Database, msg: any, encKey: string, now: numb
 
       if (isHard) {
         // Hard bounce: suppress immediately
-        await q.suppressDestination(db, dest.id, "hard_bounce", "hard", now);
+        const changed = await q.suppressDestination(db, dest.id, "hard_bounce", "hard", now);
+        if (changed) await notifySuppression(env, dest, "hard_bounce", "hard");
       } else {
         // Soft/Transient bounce: count prior soft bounce events in last 24h
         // The event we just inserted is included in this count
         const since = now - 24 * 3600_000;
         const bounceCount = await q.countEventsForDestinationSince(db, dest.id, "bounce", since);
         if (softThreshold > 0 && bounceCount >= softThreshold) {
-          await q.suppressDestination(db, dest.id, "soft_bounce", "soft", now);
+          const changed = await q.suppressDestination(db, dest.id, "soft_bounce", "soft", now);
+          if (changed) await notifySuppression(env, dest, "soft_bounce", "soft");
         }
       }
     }
   }
 }
 
-async function processComplaint(db: D1Database, msg: any, encKey: string, now: number): Promise<void> {
+async function processComplaint(env: AppEnv["Bindings"], msg: any, encKey: string, now: number): Promise<void> {
+  const db = env.DB;
   const complaint = msg.complaint;
   if (!complaint || !Array.isArray(complaint.complainedRecipients)) {
     console.log("Complaint notification missing complaint.complainedRecipients");
@@ -157,7 +163,66 @@ async function processComplaint(db: D1Database, msg: any, encKey: string, now: n
       });
 
       // Always hard-suppress on complaint
-      await q.suppressDestination(db, dest.id, "complaint", "hard", now);
+      const changed = await q.suppressDestination(db, dest.id, "complaint", "hard", now);
+      if (changed) await notifySuppression(env, dest, "complaint", "hard");
     }
+  }
+}
+
+async function notifySuppression(
+  env: AppEnv["Bindings"],
+  suppressed: { id: number; user_id: number; email: string },
+  reason: "complaint" | "hard_bounce" | "soft_bounce",
+  suppressionClass: "hard" | "soft",
+): Promise<void> {
+  try {
+    const db = env.DB;
+    const sesAccessKeyId = await getEnvWithOverride(db, env, "ses_access_key_id");
+    const sesSecretAccessKey = await getEnvWithOverride(db, env, "ses_secret_access_key");
+    const sesRegion = await getEnvWithOverride(db, env, "ses_region");
+    const mainGlobalDomain = await getEnvWithOverride(db, env, "main_global_domain") || "example.com";
+    if (!sesAccessKeyId || !sesSecretAccessKey || !sesRegion) return;
+
+    const recipients = new Set<string>();
+    recipients.add(await decryptDestination(suppressed.email, env.DESTINATION_ENCRYPTION_KEY));
+    const defaultDestination = await findDefaultDestination(db, suppressed.user_id);
+    if (defaultDestination) {
+      recipients.add(await decryptDestination(defaultDestination.email, env.DESTINATION_ENCRYPTION_KEY));
+    }
+
+    const isSoft = suppressionClass === "soft";
+    const subject = isSoft ? "Forwarding paused for one destination" : "Destination forwarding paused";
+    const heading = isSoft ? "Forwarding paused" : "Destination suppressed";
+    const bodyText = isSoft
+      ? "A destination was paused after repeated temporary delivery failures. You can resume forwarding from the Destinations page once the mailbox is ready."
+      : reason === "complaint"
+        ? "A destination was paused after a spam complaint. Hard suppressions protect shared sender reputation and must be cleared by an admin."
+        : "A destination was paused after a permanent delivery failure. Hard suppressions protect shared sender reputation and must be cleared by an admin.";
+
+    const sesSend: typeof sendRaw = (env as any).__sesSend ?? sendRaw;
+    for (const to of recipients) {
+      await sesSend({
+        accessKeyId: sesAccessKeyId,
+        secretAccessKey: sesSecretAccessKey,
+        region: sesRegion,
+      }, {
+        from: `HideMyEmail <noreply@${mainGlobalDomain}>`,
+        to,
+        rawBase64: buildNotificationEmail(to, subject, heading, bodyText, mainGlobalDomain),
+      });
+    }
+  } catch (err) {
+    console.error("Failed to send suppression notification", err);
+  }
+}
+
+async function findDefaultDestination(db: D1Database, userId: number): Promise<{ email: string } | null> {
+  try {
+    return await db.prepare(
+      "SELECT email FROM destinations WHERE user_id = ? AND is_default = 1 AND verified_at IS NOT NULL LIMIT 1"
+    ).bind(userId).first<{ email: string }>();
+  } catch (err: any) {
+    if (String(err?.message ?? err).includes("no such column")) return null;
+    throw err;
   }
 }

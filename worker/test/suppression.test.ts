@@ -29,12 +29,13 @@ const INBOUND_ARN = "arn:aws:sns:ap-southeast-2:123456789012:hidemyemail-inbound
 const DB = () => env.DB as D1Database;
 
 /** Build a testEnv for the ses/notification (outbound feedback) webhook. */
-function webhookEnv(certPem = "bad cert") {
+function webhookEnv(certPem = "bad cert", overrides: Record<string, unknown> = {}) {
   return {
     ...env,
     SNS_ALLOWED_TOPIC_ARN: ARN,
     SES_REGION: "ap-southeast-2",
     __snsCertFetch: async () => new Response(certPem, { status: 200 }),
+    ...overrides,
   };
 }
 
@@ -87,12 +88,12 @@ async function signedInbound(to: string) {
 }
 
 /** Post a signed notification to /api/ses/notification. */
-async function postNotification(app: ReturnType<typeof createApp>, signed: { body: Record<string, string>; certPem: string }) {
+async function postNotification(app: ReturnType<typeof createApp>, signed: { body: Record<string, string>; certPem: string }, overrides: Record<string, unknown> = {}) {
   return app.request("/api/ses/notification", {
     method: "POST",
     headers: { "Content-Type": "text/plain" },
     body: JSON.stringify(signed.body),
-  }, webhookEnv(signed.certPem));
+  }, webhookEnv(signed.certPem, overrides));
 }
 
 /** Insert a real destination row and return its id. */
@@ -204,6 +205,57 @@ test("permanent bounce → destination suppressed (hard class)", async () => {
 
   const evtCount = await countBounceEvents(destId);
   expect(evtCount).toBe(1);
+});
+
+test("first suppression emails suppressed destination and default destination", async () => {
+  const suppressedId = await insertDestination("bad@example.com");
+  await DB().prepare("UPDATE destinations SET is_default = 0 WHERE id = ?").bind(suppressedId).run();
+  const defaultId = await insertDestination("default@example.com");
+  await DB().prepare("UPDATE destinations SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END WHERE user_id = 1")
+    .bind(defaultId).run();
+
+  const sent: any[] = [];
+  const app = createApp();
+  const msg = {
+    notificationType: "Bounce",
+    bounce: {
+      bounceType: "Permanent",
+      bouncedRecipients: [{ emailAddress: "bad@example.com" }],
+    },
+  };
+  const signed = await signedNotification(msg);
+  const res = await postNotification(app, signed, {
+    SES_ACCESS_KEY_ID: "AKIATEST",
+    SES_SECRET_ACCESS_KEY: "testsecret",
+    __sesSend: async (_c: any, m: any) => { sent.push(m); return `mid-${sent.length}`; },
+  });
+
+  expect(res.status).toBe(200);
+  expect(sent.map(m => m.to).sort()).toEqual(["bad@example.com", "default@example.com"]);
+});
+
+test("duplicate suppression does not resend notification", async () => {
+  const suppressedId = await insertDestination("already@example.com");
+  await DB().prepare("UPDATE destinations SET suppressed_at = ?, suppression_class = 'hard', suppression_reason = 'hard_bounce' WHERE id = ?")
+    .bind(Date.now(), suppressedId).run();
+  const sent: any[] = [];
+  const app = createApp();
+  const msg = {
+    notificationType: "Bounce",
+    bounce: {
+      bounceType: "Permanent",
+      bouncedRecipients: [{ emailAddress: "already@example.com" }],
+    },
+  };
+  const signed = await signedNotification(msg);
+  const res = await postNotification(app, signed, {
+    SES_ACCESS_KEY_ID: "AKIATEST",
+    SES_SECRET_ACCESS_KEY: "testsecret",
+    __sesSend: async (_c: any, m: any) => { sent.push(m); return `mid-${sent.length}`; },
+  });
+
+  expect(res.status).toBe(200);
+  expect(sent).toHaveLength(0);
 });
 
 // --------------------------------------------------------------------------
