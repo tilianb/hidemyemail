@@ -177,6 +177,30 @@ export const api = {
   mfaDisable: (code: string) => req<{ ok: true }>("/api/settings/mfa/disable", { method: "POST", body: JSON.stringify({ code }) }),
   mfaRegenerateBackupCodes: (code: string) => req<{ ok: true; backupCodes: string[] }>("/api/settings/mfa/backup-codes", { method: "POST", body: JSON.stringify({ code }) }),
 
+  // Account data export — returns a JSON Blob for download
+  exportAccount: async (): Promise<void> => {
+    const res = await fetch("/api/account/export", { credentials: "include" });
+    if (res.status === 401) throw new Error("unauthorized");
+    if (!res.ok) {
+      let msg = `${res.status}`;
+      try { const b = await res.json(); if (b && typeof b === "object" && "error" in b) msg = (b as any).error; } catch { /* ignore */ }
+      throw new Error(msg);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `hidemyemail-export-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  // Account deletion — tombstones the account (7-day grace, then hard-delete)
+  deleteAccount: (password: string, confirm: string) =>
+    req<{ ok: true }>("/api/account/delete", { method: "POST", body: JSON.stringify({ password, confirm }) }),
+
   // Recovery endpoints
   recoverSendCode: (token: string) => req<{ ok: true }>("/api/recover/send-code", { method: "POST", body: JSON.stringify({ token }) }),
   recoverVerify: (token: string, code: string) => req<{ ok: true; passphrase: string }>("/api/recover/verify", { method: "POST", body: JSON.stringify({ token, code }) }),

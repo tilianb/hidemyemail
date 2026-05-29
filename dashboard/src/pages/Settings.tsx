@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 import { QRCode } from "react-qr-code";
 import { api } from "../api";
+import { useAuth } from "../auth";
 import { useToast } from "../ui";
-import { ShieldCheck, ShieldOff, KeyRound, Copy, RefreshCw, Loader2, Fingerprint, Trash2, Pencil, Mail } from "lucide-react";
+import { ShieldCheck, ShieldOff, KeyRound, Copy, RefreshCw, Loader2, Fingerprint, Trash2, Pencil, Mail, Download, AlertTriangle } from "lucide-react";
 
 type SetupStep = "idle" | "qr" | "verify" | "backup";
 type PasskeyRow = { id: string; device_name: string | null; created_at: number };
 
 export function Settings() {
   const { toast } = useToast();
+  const { isAdmin, setAuthed } = useAuth();
   const [enabled, setEnabled] = useState(false);
   const [backupCodesRemaining, setBackupCodesRemaining] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -40,6 +42,13 @@ export function Settings() {
   const [regenCode, setRegenCode] = useState("");
   const [regenLoading, setRegenLoading] = useState(false);
   const [newBackupCodes, setNewBackupCodes] = useState<string[]>([]);
+
+  // Account export / delete state
+  const [exportLoading, setExportLoading] = useState(false);
+  const [showDeleteZone, setShowDeleteZone] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   // Email preferences
   type Tri = "on" | "off" | null;
@@ -249,6 +258,37 @@ export function Settings() {
       () => toast(`${label} copied`, "success"),
       () => toast("Failed to copy", "error")
     );
+  }
+
+  async function handleExport() {
+    setExportLoading(true);
+    try {
+      await api.exportAccount();
+      toast("Export downloaded", "success");
+    } catch (err: any) {
+      toast(err?.message || "Failed to export data", "error");
+    } finally {
+      setExportLoading(false);
+    }
+  }
+
+  async function handleDeleteAccount(e: React.FormEvent) {
+    e.preventDefault();
+    if (deleteConfirmText !== "DELETE") {
+      toast("Type DELETE to confirm", "error");
+      return;
+    }
+    setDeleteLoading(true);
+    try {
+      await api.deleteAccount(deletePassword, deleteConfirmText);
+      toast("Account scheduled for deletion", "success");
+      setAuthed(false);
+    } catch (err: any) {
+      toast(err?.message || "Failed to delete account", "error");
+      setDeletePassword("");
+    } finally {
+      setDeleteLoading(false);
+    }
   }
 
   if (loading) {
@@ -617,6 +657,143 @@ export function Settings() {
                 <RefreshCw size={14} /> Regenerate Backup Codes
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Account data card */}
+      <div className="card stagger-3 card-spaced-top">
+        <div className="card-header">
+          <span className="card-title">Account Data</span>
+        </div>
+        <div className="card-body">
+          <div className="inline-actions-wrap inline-actions-nowrap">
+            <div className="security-status-media">
+              <Download size={20} className="icon-muted" />
+              <div>
+                <div className="status-title">Export my data</div>
+                <div className="status-caption">
+                  Download a JSON file containing your aliases, destinations, domains, blocks, and email events.
+                </div>
+              </div>
+            </div>
+            <div className="inline-actions shrink-0">
+              <button
+                type="button"
+                className="btn btn-soft"
+                onClick={handleExport}
+                disabled={exportLoading}
+              >
+                {exportLoading ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
+                {exportLoading ? "Exporting…" : "Export"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Danger zone — account deletion (not shown to admin) */}
+      {!isAdmin && (
+        <div className="card stagger-4 card-spaced-top" style={{ borderColor: "var(--color-danger, #ef4444)" }}>
+          <div className="card-header">
+            <span className="card-title" style={{ color: "var(--color-danger, #ef4444)" }}>
+              <AlertTriangle size={16} />
+              Danger Zone
+            </span>
+          </div>
+          <div className="card-body">
+            {!showDeleteZone ? (
+              <div className="inline-actions-wrap inline-actions-nowrap">
+                <div className="security-status-media">
+                  <Trash2 size={20} className="icon-muted" />
+                  <div>
+                    <div className="status-title">Delete account</div>
+                    <div className="status-caption">
+                      Permanently delete your account and all associated data after a 7-day grace period.
+                      Forwarding stops immediately.
+                    </div>
+                  </div>
+                </div>
+                <div className="inline-actions shrink-0">
+                  <button
+                    type="button"
+                    className="btn btn-danger-soft"
+                    onClick={() => setShowDeleteZone(true)}
+                  >
+                    <Trash2 size={14} /> Delete Account
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleDeleteAccount} className="security-danger-form">
+                <div className="muted-copy">
+                  Your account and all data will be permanently deleted after 7 days. Email forwarding
+                  stops immediately. This cannot be undone.
+                </div>
+                <div className="field field-tight">
+                  <label className="field-label" htmlFor="delete-confirm">
+                    Type <strong>DELETE</strong> to confirm
+                  </label>
+                  <input
+                    id="delete-confirm"
+                    className="input"
+                    type="text"
+                    value={deleteConfirmText}
+                    onChange={e => setDeleteConfirmText(e.target.value)}
+                    placeholder="DELETE"
+                    disabled={deleteLoading}
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="field field-tight">
+                  <label className="field-label" htmlFor="delete-password">Your passphrase</label>
+                  <input
+                    id="delete-password"
+                    className="input"
+                    type="password"
+                    value={deletePassword}
+                    onChange={e => setDeletePassword(e.target.value)}
+                    placeholder="Current passphrase"
+                    disabled={deleteLoading}
+                    autoComplete="current-password"
+                  />
+                </div>
+                <div className="inline-actions">
+                  <button
+                    type="button"
+                    className="btn btn-soft"
+                    onClick={() => { setShowDeleteZone(false); setDeleteConfirmText(""); setDeletePassword(""); }}
+                    disabled={deleteLoading}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-danger-soft"
+                    disabled={deleteLoading || deleteConfirmText !== "DELETE" || !deletePassword}
+                  >
+                    {deleteLoading ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
+                    {deleteLoading ? "Deleting…" : "Confirm Delete"}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {isAdmin && (
+        <div className="card stagger-4 card-spaced-top">
+          <div className="card-header">
+            <span className="card-title">
+              <AlertTriangle size={16} className="icon-muted" />
+              Danger Zone
+            </span>
+          </div>
+          <div className="card-body">
+            <p className="muted-copy">
+              The admin account cannot be self-deleted. Use the Admin panel to manage other user accounts.
+            </p>
           </div>
         </div>
       )}
