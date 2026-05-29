@@ -3,7 +3,7 @@ import type { AppEnv } from "../app";
 import { getAllSettings, getEnvWithOverride, getMainGlobalDomain } from "../../lib/settings";
 import { encryptDestination } from "../../lib/crypto";
 import { sendRaw } from "../../lib/ses";
-import { VALID_SETTING_KEYS, SETTING_DEFAULTS } from "../../config";
+import { VALID_SETTING_KEYS } from "../../config";
 
 /** Mask a secret: show first 3 + "•••" + last 3, or just "•••" if too short */
 function maskSecret(val: string): string {

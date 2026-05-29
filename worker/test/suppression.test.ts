@@ -59,7 +59,7 @@ function inboundEnv(opts: { certPem?: string; raw?: string } = {}) {
     SES_ACCESS_KEY_ID: "AKIATEST",
     SES_SECRET_ACCESS_KEY: "testsecret",
     SES_REGION: "ap-southeast-2",
-    __snsCertFetch: async (u: string) => new Response(opts.certPem ?? "bad cert", { status: 200 }),
+    __snsCertFetch: async (_u: string) => new Response(opts.certPem ?? "bad cert", { status: 200 }),
     __s3Fetch: async () => new TextEncoder().encode(raw),
     __sesSend: async (_c: any, m: any) => { sesSent.push(m); return "mid"; },
     _sesSent: sesSent,
