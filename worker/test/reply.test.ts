@@ -22,6 +22,10 @@ beforeEach(async () => {
   await resetDb(DB());
   await q.createDomain(DB(), "hidemyemail.dev", "real@me.com");
   await q.autoCreateAlias(DB(), 1, "shop", "shop@hidemyemail.dev");
+  // First-contact rule: a reply is only allowed to an external sender the alias has
+  // already heard from. Seed the prior inbound 'forward' from boss@store.com so the
+  // relay-success tests below model a genuine reply to existing correspondence.
+  await q.insertEvent(DB(), { alias_id: 1, type: "forward", external_sender: "boss@store.com", ts: Date.now() });
 });
 
 test("owner reply with SPF pass → SES send as alias, leaks stripped", async () => {
@@ -125,4 +129,42 @@ test("SECURITY: multiple <addr> tokens → last one wins (rejected when last is 
   const spoof = `From: <real@me.com> spoof <attacker@evil.com>\r\nTo: ${TO}\r\nSubject: spoof\r\n\r\nbody\r\n`;
   await handleReply(mkMessage("attacker@evil.com", TO, spoof), testEnv(sentinel), PARSED, { spf: "PASS", dmarc: "PASS" });
   expect(sentinel.sent.length).toBe(0);
+});
+
+// SECURITY (first-contact): reverse addresses are guessable. An authenticated owner
+// could craft a reverse address for a stranger and use the alias as a cold-outbound
+// spam relay. Only allow replies to external senders the alias has heard from.
+test("SECURITY: owner reply to a stranger with no prior inbound → rejected, no SES", async () => {
+  const sentinel = { sent: [] as any[] };
+  const strangerTo = "shop+cold=stranger.com@hidemyemail.dev";
+  const strangerParsed = { aliasLocal: "shop", externalSender: "cold@stranger.com" };
+  const raw = `From: Me <real@me.com>\r\nTo: ${strangerTo}\r\nSubject: cold\r\n\r\nspam\r\n`;
+  await handleReply(mkMessage("real@me.com", strangerTo, raw), testEnv(sentinel), strangerParsed, { spf: "PASS" });
+  expect(sentinel.sent.length).toBe(0);
+  const ev = await DB().prepare("SELECT detail FROM events WHERE type='reject' ORDER BY id DESC LIMIT 1").first<{ detail: string }>();
+  expect(ev?.detail).toBe("no_prior_contact");
+});
+
+// First-contact is case-insensitive: inbound stored "Boss@Store.com" still authorises
+// a reply to "boss@store.com".
+test("first-contact match is case-insensitive", async () => {
+  await DB().prepare("DELETE FROM events").run();
+  await q.insertEvent(DB(), { alias_id: 1, type: "forward", external_sender: "Boss@Store.com", ts: Date.now() });
+  const sentinel = { sent: [] as any[] };
+  await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
+  expect(sentinel.sent.length).toBe(1);
+});
+
+// Reply rate limit: replies consume SES quota + sender reputation, capped per alias
+// per hour (default 10). countEventsSince counts forward+reply in the window.
+test("reply rate limit: over per-alias cap → rejected, no SES", async () => {
+  const now = Date.now();
+  for (let i = 0; i < 12; i++) {
+    await q.insertEvent(DB(), { alias_id: 1, type: "reply", external_sender: "boss@store.com", ts: now });
+  }
+  const sentinel = { sent: [] as any[] };
+  await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
+  expect(sentinel.sent.length).toBe(0);
+  const ev = await DB().prepare("SELECT detail FROM events WHERE type='reject' ORDER BY id DESC LIMIT 1").first<{ detail: string }>();
+  expect(ev?.detail).toBe("rate");
 });

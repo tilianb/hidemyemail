@@ -381,7 +381,7 @@ export function adminRoutes() {
       }
 
       // Validate value types
-      if (key === "rate_limit_per_alias" || key === "rate_limit_global") {
+      if (key === "rate_limit_per_alias" || key === "rate_limit_reply_per_alias" || key === "rate_limit_global") {
         const n = parseInt(value, 10);
         if (isNaN(n) || n < -1) {
           errors.push(`${key}: must be a number greater than or equal to -1`);
