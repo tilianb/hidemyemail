@@ -99,6 +99,27 @@ export async function handleReply(
     return;
   }
 
+  // ABUSE: even with first-contact + per-alias rate limiting, an authenticated owner
+  // can reply to MANY DISTINCT strangers (each of whom emailed them once) and use the
+  // alias as a cold-outbound spam relay. Cap the number of unique recipients an alias
+  // replies to per 24h. Replying to an already-contacted correspondent never increases
+  // the distinct count — only NEW recipients are gated, so ongoing threads are not
+  // affected. Tripping the cap mutes the alias for 24h (inbound also pauses) to force
+  // owner attention. -1 disables the cap. Fail closed.
+  const distinctCap = await getNumericSetting(db, "reply_distinct_recipient_cap");
+  if (distinctCap >= 0) {
+    const since = now - 24 * 3600_000;
+    const alreadyContacted = await q.hasRepliedTo(db, alias.id, parsed.externalSender, since);
+    if (!alreadyContacted) {
+      const distinct = await q.countDistinctReplyRecipientsSince(db, alias.id, since);
+      if (distinct >= distinctCap) {
+        await q.muteAlias(db, alias.id, now + 24 * 3600_000); // 24h cooldown mute
+        await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: parsed.externalSender, detail: "distinct_recipient_cap", ts: now });
+        return;
+      }
+    }
+  }
+
   // Strip both legacy (X-Reinjected, X-Forwarded-*, X-Original-From) and the
   // current X-HideMyEmail-* forwarding metadata so an outbound reply never
   // re-exposes the sender's destination or the forwarder hop chain.

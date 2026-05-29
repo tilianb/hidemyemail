@@ -152,6 +152,32 @@ export async function getDestinationByEmail(db: D1Database, emailHash: string, u
   ).bind(emailHash, userId).first<DestinationRow>();
 }
 
+// Distinct-recipient cap: has this alias already replied to this external sender
+// in the given window? Exempts already-contacted correspondents from the cap so
+// back-and-forth threads are never gated. Case-insensitive (mirrors hasPriorInbound).
+export async function hasRepliedTo(db: D1Database, aliasId: number, externalSender: string, since: number): Promise<boolean> {
+  const r = await db.prepare(
+    "SELECT 1 AS n FROM events WHERE alias_id = ? AND type = 'reply' AND LOWER(external_sender) = LOWER(?) AND ts >= ? LIMIT 1"
+  ).bind(aliasId, externalSender, since).first<{ n: number }>();
+  return !!r;
+}
+
+// Count how many distinct external recipients this alias has replied to since `since`.
+// Used to enforce the cold-outbound cap without penalising ongoing threads.
+export async function countDistinctReplyRecipientsSince(db: D1Database, aliasId: number, since: number): Promise<number> {
+  const r = await db.prepare(
+    "SELECT COUNT(DISTINCT LOWER(external_sender)) AS n FROM events WHERE alias_id = ? AND type = 'reply' AND ts >= ? AND external_sender IS NOT NULL"
+  ).bind(aliasId, since).first<{ n: number }>();
+  return r?.n ?? 0;
+}
+
+// Mute an alias until the given epoch-ms timestamp. Used by the distinct-recipient cap
+// to force owner attention after a potential spam burst. The inbound path also enforces
+// muted_until, so the alias goes quiet in both directions until the cooldown expires.
+export async function muteAlias(db: D1Database, aliasId: number, until: number): Promise<void> {
+  await db.prepare("UPDATE aliases SET muted_until = ? WHERE id = ?").bind(until, aliasId).run();
+}
+
 export async function ownerDestinations(db: D1Database, userId: number, key: string): Promise<Set<string>> {
   const a = await db.prepare("SELECT default_destination AS d FROM domains WHERE user_id = ? OR is_global = 1").bind(userId).all<{ d: string }>();
   const b = await db.prepare("SELECT DISTINCT destination AS d FROM aliases WHERE destination IS NOT NULL AND user_id = ?").bind(userId).all<{ d: string }>();
