@@ -437,6 +437,19 @@ select.input { cursor: pointer; }
   align-items: flex-start;
   gap: 2px;
 }
+.destination-status {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+.destination-status-detail {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  padding-left: 21px;
+}
 
 /* ─── Table ──────────────────────────────────────────────────────────────── */
 .table-wrap {
