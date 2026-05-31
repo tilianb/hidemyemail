@@ -28,7 +28,7 @@ export function accountRoutes() {
 
     // Domains owned by this user
     const domainsResult = await db.prepare(
-      "SELECT id, domain, default_destination, active, created_at, verified_at, verification_token, is_global, allow_custom_aliases, allow_subdomain_aliases FROM domains WHERE user_id = ?"
+      "SELECT id, domain, default_destination, active, created_at, verified_at, verification_token, is_global, allow_custom_aliases, allow_subdomain_aliases, catch_all, inline_actions_pref FROM domains WHERE user_id = ?"
     ).bind(userId).all<Record<string, unknown>>();
 
     // Aliases owned by this user
@@ -48,9 +48,9 @@ export function accountRoutes() {
       }))
     );
 
-    // Blocks owned by this user (both global and per-alias)
+    // Blocks owned by this user (global, per-subdomain, and per-alias; block/allow)
     const blocksResult = await db.prepare(
-      "SELECT id, alias_id, pattern, created_at FROM blocks WHERE user_id = ?"
+      "SELECT id, alias_id, domain_id, kind, pattern, created_at FROM blocks WHERE user_id = ?"
     ).bind(userId).all<Record<string, unknown>>();
 
     // Events for all aliases belonging to this user

@@ -10,6 +10,8 @@ export interface Domain {
   created_at: number;
   verified_at: number | null;
   verification_token: string | null;
+  catch_all: 0 | 1 | null;
+  inline_actions_pref: "on" | "off" | null;
 }
 
 export interface Alias {
@@ -32,6 +34,8 @@ export interface Alias {
 export interface Block {
   id: number;
   alias_id: number | null;
+  domain_id: number | null;
+  kind: "block" | "allow";
   pattern: string;
   created_at: number;
 }
@@ -128,6 +132,7 @@ export const api = {
   domains: () => req<Domain[]>("/api/domains"),
   createDomain: (domain: string, default_destination: string, base_domain_id?: number) => req<Domain>("/api/domains", { method: "POST", body: JSON.stringify({ domain, default_destination, base_domain_id }) }),
   updateDomainDestination: (id: number, default_destination: string) => req<{ ok: true; default_destination: string }>(`/api/domains/${id}`, { method: "PATCH", body: JSON.stringify({ default_destination }) }),
+  patchDomain: (id: number, data: { catch_all?: 0 | 1 | null; inline_actions_pref?: "on" | "off" | null; default_destination?: string | null }) => req<{ ok: true }>(`/api/domains/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   deleteDomain: (id: number) => req<{ ok: true }>(`/api/domains/${id}`, { method: "DELETE" }),
 
   aliases: (q = "") => req<Alias[]>(`/api/aliases${q ? `?q=${encodeURIComponent(q)}` : ""}`),
@@ -137,7 +142,7 @@ export const api = {
   events: (id: number) => req<EmailEvent[]>(`/api/aliases/${id}/events`),
 
   blocks: () => req<Block[]>("/api/blocks"),
-  createBlock: (pattern: string, alias_id?: number) => req<Block>("/api/blocks", { method: "POST", body: JSON.stringify({ pattern, alias_id }) }),
+  createBlock: (pattern: string, opts?: { alias_id?: number; domain_id?: number; kind?: "block" | "allow" }) => req<Block>("/api/blocks", { method: "POST", body: JSON.stringify({ pattern, ...opts }) }),
   deleteBlock: (id: number) => req<{ ok: true }>(`/api/blocks/${id}`, { method: "DELETE" }),
 
   // Admin endpoints

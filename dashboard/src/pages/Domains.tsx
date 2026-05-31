@@ -96,6 +96,18 @@ export function Domains() {
     }
   }
 
+  async function patchDomain(id: number, data: Parameters<typeof api.patchDomain>[1], optimistic: Partial<Domain>) {
+    const prev = rows;
+    setRows(rs => rs.map(d => (d.id === id ? { ...d, ...optimistic } : d)));
+    try {
+      await api.patchDomain(id, data);
+      toast("Subdomain updated", "success");
+    } catch (err: any) {
+      setRows(prev);
+      toast(err.message || "Failed to update subdomain", "error");
+    }
+  }
+
   return (
     <div>
       <div className="page-header">
@@ -180,12 +192,14 @@ export function Domains() {
                 <th>Domain</th>
                 <th>Type</th>
                 <th>Default destination</th>
+                <th>Catch-all</th>
+                <th>Inline actions</th>
                 <th>Added</th>
                 <th className="th-actions"></th>
               </tr>
             </thead>
             {loading ? (
-              <TableSkeleton cols={5} rows={3} />
+              <TableSkeleton cols={7} rows={3} />
             ) : (
               <tbody>
                 {rows.filter(d => !d.is_global).map(d => (
@@ -232,6 +246,38 @@ export function Domains() {
                       ) : (
                         <span className="muted-italic">None (Drop email)</span>
                       )}
+                    </td>
+                    <td data-label="Catch-all">
+                      <select
+                        className="input input-mono"
+                        value={d.catch_all === null ? "inherit" : d.catch_all === 1 ? "on" : "off"}
+                        onChange={e => {
+                          const v = e.target.value;
+                          const catch_all = v === "inherit" ? null : v === "on" ? 1 : 0;
+                          patchDomain(d.id, { catch_all }, { catch_all });
+                        }}
+                        title="Auto-create an alias for any address on this subdomain"
+                      >
+                        <option value="inherit">Inherit</option>
+                        <option value="on">On</option>
+                        <option value="off">Off</option>
+                      </select>
+                    </td>
+                    <td data-label="Inline actions">
+                      <select
+                        className="input input-mono"
+                        value={d.inline_actions_pref ?? "inherit"}
+                        onChange={e => {
+                          const v = e.target.value;
+                          const inline_actions_pref = v === "inherit" ? null : (v as "on" | "off");
+                          patchDomain(d.id, { inline_actions_pref }, { inline_actions_pref });
+                        }}
+                        title="Show the unsubscribe/mute toolbar on mail forwarded from this subdomain"
+                      >
+                        <option value="inherit">Inherit</option>
+                        <option value="on">On</option>
+                        <option value="off">Off</option>
+                      </select>
                     </td>
                     <td data-label="Added">
                       <span className="font-mono text-muted">
