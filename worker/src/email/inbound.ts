@@ -2,7 +2,7 @@ import type { Env } from "../types";
 import * as q from "../db/queries";
 import PostalMime from "postal-mime";
 import { createMimeMessage, Mailbox } from "mimetext";
-import { isBlocked } from "../lib/blocks";
+import { evaluateSenderRules } from "../lib/blocks";
 import { streamToBytes, toBase64 } from "../lib/bytes";
 import { parseMime, setHeader, removeHeaders, getHeader, serializeMime } from "../lib/mime";
 import { reverseAddress } from "../lib/reverse";
@@ -22,8 +22,11 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   const domain = await q.getDomain(db, domainName) as import("../types").DomainRow & { user_id: number };
   if (!domain || domain.active === 0) return;
 
-  // Check catch-all auto-create setting
-  const autoCreateEnabled = await getBoolSetting(db, "catch_all_auto_create");
+  // Check catch-all auto-create setting. A per-subdomain override (catch_all
+  // 0/1) wins; NULL falls back to the global setting.
+  const autoCreateEnabled = domain.catch_all != null
+    ? domain.catch_all === 1
+    : await getBoolSetting(db, "catch_all_auto_create");
   let alias = await q.getAlias(db, message.to.toLowerCase());
   
   if (!alias && autoCreateEnabled) {
@@ -81,8 +84,8 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
     return;
   }
 
-  const rules = await q.listBlocks(db, alias.id, alias.user_id);
-  if (isBlocked(rules, message.from)) {
+  const rules = await q.listBlocks(db, alias.id, alias.domain_id, alias.user_id);
+  if (evaluateSenderRules(rules, message.from) === "block") {
     await q.insertEvent(db, { alias_id: alias.id, type: "block", external_sender: message.from, ts: now });
     await q.incCounter(db, alias.id, "blocked_count");
     return;
@@ -147,10 +150,12 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   if (alias.source !== "auto_over_quota") {
     const prefRow = await db.prepare("SELECT inline_actions_pref, inline_actions_position FROM users WHERE id = ?")
       .bind(alias.user_id).first<{ inline_actions_pref: string | null; inline_actions_position: string | null }>();
-    const userPref = prefRow?.inline_actions_pref;
-    if (userPref === "on") {
+    // Resolution: subdomain pref > user pref > global default. A subdomain is a
+    // mail category, so its setting is more specific than the user-wide one.
+    const effectivePref = domain.inline_actions_pref ?? prefRow?.inline_actions_pref;
+    if (effectivePref === "on") {
       inlineActionsEnabled = true;
-    } else if (userPref === "off") {
+    } else if (effectivePref === "off") {
       inlineActionsEnabled = false;
     } else {
       inlineActionsEnabled = await getBoolSetting(db, "inline_actions_default_enabled");
