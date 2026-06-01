@@ -52,6 +52,22 @@ test("native bearer flow: login returns token, guarded route accepts it", async 
   expect(bad.status).toBe(401);
 });
 
+test("token mode is refused when a browser Origin is present (XSS guard)", async () => {
+  const app = createApp();
+  await (env.DB as D1Database).prepare("DELETE FROM rate_limits").run();
+
+  // A browser always pins the Origin header on POST; page JS can't strip it.
+  // Even with X-Auth-Mode: token, the token must not be echoed in that case,
+  // so an XSS can't escalate a cookie session into an exfiltratable token.
+  const res = await app.request("/api/login", {
+    method: "POST",
+    body: JSON.stringify({ password: "hunter2" }),
+    headers: { "Content-Type": "application/json", "X-Auth-Mode": "token", Origin: "https://app.hidemyemail.dev" },
+  }, testEnv);
+  expect(res.status).toBe(200);
+  expect((await res.json() as any).token).toBeUndefined();
+});
+
 test("register and login with new passphrase", async () => {
   const app = createApp();
   // Clear rate limits just in case
