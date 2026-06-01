@@ -39,11 +39,21 @@ async function recordFailedAttempt(ip: string, db: D1Database): Promise<void> {
   await db.prepare("UPDATE rate_limits SET attempts = attempts + 1 WHERE ip = ?").bind(ip).run();
 }
 
-async function setAuthenticatedCookies(c: Context<AppEnv>, userId: number): Promise<void> {
+// Native clients (iOS/Android) can't use the HttpOnly __Host- cookie jar, so
+// they opt into bearer-token auth by sending `X-Auth-Mode: token`. Only then do
+// we echo the session token in the response body. Browsers never send this
+// header, so the web app keeps its HttpOnly cookie and the token stays
+// unreadable to page JS — preserving XSS protection for the dominant client.
+function wantsToken(c: Context<AppEnv>): boolean {
+  return c.req.header("X-Auth-Mode") === "token";
+}
+
+async function setAuthenticatedCookies(c: Context<AppEnv>, userId: number): Promise<string> {
   const sessionToken = await signSession(c.env.SESSION_SECRET, userId, SESSION_TTL);
   const freshAuthToken = await signFreshAuth(c.env.SESSION_SECRET, userId, FRESH_AUTH_TTL);
   setCookie(c, "__Host-session", sessionToken, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
   setCookie(c, "__Host-fresh-auth", freshAuthToken, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: FRESH_AUTH_TTL });
+  return sessionToken;
 }
 
 function randomSixDigitCode(): string {
@@ -135,11 +145,13 @@ export function authRoutes() {
     if (mfa?.totp_enabled === 1) {
       const challenge = await signMfaChallenge(c.env.SESSION_SECRET, userId);
       setCookie(c, "__Host-mfa-challenge", challenge, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: 300 });
-      return c.json({ mfa_required: true });
+      // Native clients carry the short-lived challenge themselves since they
+      // can't rely on the __Host-mfa-challenge cookie round-trip.
+      return c.json(wantsToken(c) ? { mfa_required: true, mfa_token: challenge } : { mfa_required: true });
     }
 
-    await setAuthenticatedCookies(c, userId);
-    return c.json({ ok: true, userId });
+    const token = await setAuthenticatedCookies(c, userId);
+    return c.json(wantsToken(c) ? { ok: true, userId, token } : { ok: true, userId });
   });
 
   r.post("/register", async (c) => {
@@ -168,8 +180,8 @@ export function authRoutes() {
       ).bind(hash, Date.now()).run();
 
       const userId = res.meta.last_row_id;
-      await setAuthenticatedCookies(c, userId);
-      return c.json({ ok: true, userId });
+      const token = await setAuthenticatedCookies(c, userId);
+      return c.json(wantsToken(c) ? { ok: true, userId, token } : { ok: true, userId });
     } catch (err: any) {
       if (err.message && err.message.includes("UNIQUE constraint failed")) {
         await recordFailedAttempt(ip, c.env.DB);
@@ -191,13 +203,15 @@ export function authRoutes() {
       return c.json({ error: "Too many attempts" }, 429);
     }
 
-    const challenge = getCookie(c, "__Host-mfa-challenge");
+    const { code, mfa_token } = await c.req.json<{ code: string; mfa_token?: string }>().catch(() => ({ code: "", mfa_token: undefined }));
+
+    // Cookie for the web app; body fallback (mfa_token) for native bearer clients.
+    const challenge = getCookie(c, "__Host-mfa-challenge") || mfa_token;
     if (!challenge) return c.json({ error: "No challenge" }, 401);
 
     const userId = await verifyMfaChallenge(c.env.SESSION_SECRET, challenge);
     if (!userId) return c.json({ error: "Challenge expired" }, 401);
 
-    const { code } = await c.req.json<{ code: string }>().catch(() => ({ code: "" }));
     if (!code) return c.json({ error: "Missing code" }, 400);
 
     const mfa = await c.env.DB.prepare(
@@ -237,8 +251,8 @@ export function authRoutes() {
     }
 
     deleteCookie(c, "__Host-mfa-challenge", { path: "/", secure: true });
-    await setAuthenticatedCookies(c, userId);
-    return c.json({ ok: true, userId });
+    const token = await setAuthenticatedCookies(c, userId);
+    return c.json(wantsToken(c) ? { ok: true, userId, token } : { ok: true, userId });
   });
 
   // ── Passkey authentication (discoverable credentials, no passphrase needed) ──

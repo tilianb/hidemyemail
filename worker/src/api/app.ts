@@ -57,7 +57,7 @@ export function createApp() {
       } catch (e) {}
       return "";
     },
-    allowHeaders: ["Content-Type", "Cookie"],
+    allowHeaders: ["Content-Type", "Cookie", "Authorization", "X-Auth-Mode"],
     credentials: true
   }));
 
@@ -80,7 +80,13 @@ export function createApp() {
       p === "/api/ses/inbound" ||
       p === "/api/unsubscribe"
     ) return next();
-    const token = getCookie(c, "__Host-session");
+    // Web clients send the HttpOnly __Host-session cookie; native clients send
+    // the same signed session token as `Authorization: Bearer <token>`.
+    let token = getCookie(c, "__Host-session");
+    if (!token) {
+      const authHeader = c.req.header("Authorization");
+      if (authHeader?.startsWith("Bearer ")) token = authHeader.slice(7).trim();
+    }
     if (!token) return c.json({ error: "Unauthorized" }, 401);
     const userId = await verifySession(c.env.SESSION_SECRET, token);
     if (userId === null) return c.json({ error: "Unauthorized" }, 401);
