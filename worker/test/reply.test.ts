@@ -218,7 +218,17 @@ test("distinct recipient cap: already-contacted recipient exempted at cap", asyn
 });
 
 // Reply rate limit: replies consume SES quota + sender reputation, capped per alias
-// per hour (default 10). countEventsSince counts forward+reply in the window.
+// per hour (default 10). Inbound forwards do not count against this reply cap.
+test("reply rate limit: inbound forwards do not count against per-alias reply cap", async () => {
+  const now = Date.now();
+  for (let i = 0; i < 12; i++) {
+    await q.insertEvent(DB(), { alias_id: 1, type: "forward", external_sender: `sender${i}@example.com`, ts: now });
+  }
+  const sentinel = { sent: [] as any[] };
+  await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
+  expect(sentinel.sent.length).toBe(1);
+});
+
 test("reply rate limit: over per-alias cap → rejected, no SES", async () => {
   const now = Date.now();
   for (let i = 0; i < 12; i++) {

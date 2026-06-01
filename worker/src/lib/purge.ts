@@ -11,13 +11,21 @@
  * passkey_credentials.
  */
 export async function hardDeleteUser(db: D1Database, userId: number): Promise<void> {
-  // 1. Per-alias children
+  // 1. Per-destination and per-alias children
+  const destinations = await db.prepare("SELECT id FROM destinations WHERE user_id = ?")
+    .bind(userId).all<{ id: number }>();
+  const destinationIds = (destinations.results ?? []).map(dest => dest.id);
+  if (destinationIds.length > 0) {
+    const placeholders = destinationIds.map(() => "?").join(", ");
+    await db.prepare(`DELETE FROM events WHERE detail IN (${placeholders})`)
+      .bind(...destinationIds.map(id => `dest:${id}`)).run();
+  }
+
   const aliases = await db.prepare("SELECT id FROM aliases WHERE user_id = ?")
     .bind(userId).all<{ id: number }>();
   for (const alias of aliases.results ?? []) {
     await db.prepare("DELETE FROM events WHERE alias_id = ?").bind(alias.id).run();
     await db.prepare("DELETE FROM reverse_map WHERE alias_id = ?").bind(alias.id).run();
-    await db.prepare("DELETE FROM blocks WHERE alias_id = ?").bind(alias.id).run();
   }
 
   // 2. Top-level owned rows

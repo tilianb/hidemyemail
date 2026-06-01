@@ -4,6 +4,7 @@ import { getAllSettings, getEnvWithOverride, getMainGlobalDomain } from "../../l
 import { encryptDestination } from "../../lib/crypto";
 import { sendRaw } from "../../lib/ses";
 import { VALID_SETTING_KEYS } from "../../config";
+import { countEventsForDestinationSince } from "../../db/queries";
 
 /** Mask a secret: show first 3 + "•••" + last 3, or just "•••" if too short */
 function maskSecret(val: string): string {
@@ -511,18 +512,12 @@ export function adminRoutes() {
 
     const results = [];
     for (const row of suppressedRows.results ?? []) {
-      const bounce24h = await db.prepare(
-        "SELECT COUNT(*) AS n FROM events WHERE type = 'bounce' AND detail = ? AND ts >= ?"
-      ).bind(`dest:${row.id}`, since24h).first<{ n: number }>();
-      const bounce7d = await db.prepare(
-        "SELECT COUNT(*) AS n FROM events WHERE type = 'bounce' AND detail = ? AND ts >= ?"
-      ).bind(`dest:${row.id}`, since7d).first<{ n: number }>();
-      const complaint24h = await db.prepare(
-        "SELECT COUNT(*) AS n FROM events WHERE type = 'complaint' AND detail = ? AND ts >= ?"
-      ).bind(`dest:${row.id}`, since24h).first<{ n: number }>();
-      const complaint7d = await db.prepare(
-        "SELECT COUNT(*) AS n FROM events WHERE type = 'complaint' AND detail = ? AND ts >= ?"
-      ).bind(`dest:${row.id}`, since7d).first<{ n: number }>();
+      const [bounce24h, bounce7d, complaint24h, complaint7d] = await Promise.all([
+        countEventsForDestinationSince(db, row.id, "bounce", since24h),
+        countEventsForDestinationSince(db, row.id, "bounce", since7d),
+        countEventsForDestinationSince(db, row.id, "complaint", since24h),
+        countEventsForDestinationSince(db, row.id, "complaint", since7d),
+      ]);
 
       results.push({
         id: row.id,
@@ -530,10 +525,10 @@ export function adminRoutes() {
         suppressed_at: row.suppressed_at,
         suppression_reason: row.suppression_reason,
         suppression_class: row.suppression_class,
-        bounce_24h: bounce24h?.n ?? 0,
-        bounce_7d: bounce7d?.n ?? 0,
-        complaint_24h: complaint24h?.n ?? 0,
-        complaint_7d: complaint7d?.n ?? 0,
+        bounce_24h: bounce24h,
+        bounce_7d: bounce7d,
+        complaint_24h: complaint24h,
+        complaint_7d: complaint7d,
       });
     }
 

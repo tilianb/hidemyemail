@@ -136,6 +136,30 @@ test("export includes events only for caller's aliases", async () => {
   expect(body.events.every((e: any) => e.alias_id === aliasId)).toBe(true);
 });
 
+test("export includes destination suppression events owned by caller", async () => {
+  const app = createApp();
+  const { userId, cookie } = await makeUser();
+  const destinationId = await insertDestination("bouncy@example.com", userId);
+  const { userId: otherId } = await makeUser("other-pass");
+  const otherDestinationId = await insertDestination("other-bouncy@example.com", otherId);
+
+  await DB().prepare(
+    "INSERT INTO events (alias_id, type, external_sender, detail, ts) VALUES (NULL, 'bounce', 'ses@example.com', ?, ?)"
+  ).bind(`dest:${destinationId}`, Date.now()).run();
+  await DB().prepare(
+    "INSERT INTO events (alias_id, type, external_sender, detail, ts) VALUES (NULL, 'complaint', 'ses@example.com', ?, ?)"
+  ).bind(`dest:${otherDestinationId}`, Date.now()).run();
+
+  const res = await app.request("/api/account/export", {
+    headers: { cookie },
+  }, testEnv);
+
+  expect(res.status).toBe(200);
+  const body = await res.json<any>();
+  expect(body.events.map((e: any) => e.detail)).toContain(`dest:${destinationId}`);
+  expect(body.events.map((e: any) => e.detail)).not.toContain(`dest:${otherDestinationId}`);
+});
+
 test("export requires authentication", async () => {
   const app = createApp();
   const res = await app.request("/api/account/export", {}, testEnv);
@@ -255,6 +279,7 @@ test("purge: user with deleted_at past 7 days is fully removed", async () => {
   ).bind(domainId, userId, Date.now()).run();
   const aliasId = Number(aliasRes.meta.last_row_id);
   await DB().prepare("INSERT INTO events (alias_id, type, ts) VALUES (?, 'forward', ?)").bind(aliasId, Date.now()).run();
+  await DB().prepare("INSERT INTO events (alias_id, type, detail, ts) VALUES (NULL, 'bounce', ?, ?)").bind(`dest:${destId}`, Date.now()).run();
 
   // Set deleted_at 8 days ago (past the 7-day window)
   const eightDaysAgo = Date.now() - 8 * 24 * 3_600_000;
@@ -279,6 +304,8 @@ test("purge: user with deleted_at past 7 days is fully removed", async () => {
   // Events must be gone
   const eventRow = await DB().prepare("SELECT id FROM events WHERE alias_id = ?").bind(aliasId).first();
   expect(eventRow).toBeNull();
+  const destEventRow = await DB().prepare("SELECT id FROM events WHERE detail = ?").bind(`dest:${destId}`).first();
+  expect(destEventRow).toBeNull();
 });
 
 test("purge: user with deleted_at within 7 days is retained", async () => {

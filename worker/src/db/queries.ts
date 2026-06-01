@@ -96,6 +96,15 @@ export async function countEventsSince(db: D1Database, aliasId: number | null, s
   return r?.n ?? 0;
 }
 
+export async function countRepliesSince(db: D1Database, aliasId: number | null, since: number): Promise<number> {
+  const sql = aliasId == null
+    ? "SELECT COUNT(*) AS n FROM events WHERE ts >= ? AND type = 'reply'"
+    : "SELECT COUNT(*) AS n FROM events WHERE ts >= ? AND alias_id = ? AND type = 'reply'";
+  const stmt = aliasId == null ? db.prepare(sql).bind(since) : db.prepare(sql).bind(since, aliasId);
+  const r = await stmt.first<{ n: number }>();
+  return r?.n ?? 0;
+}
+
 export async function incCounter(db: D1Database, aliasId: number, col: "fwd_count" | "blocked_count" | "reply_count"): Promise<void> {
   await db.prepare(`UPDATE aliases SET ${col} = ${col} + 1, last_seen_at = ? WHERE id = ?`).bind(Date.now(), aliasId).run();
 }

@@ -87,13 +87,13 @@ export async function handleReply(
     return;
   }
 
-  // Reply rate limit: outbound consumes SES quota and sender reputation, so cap it
-  // tighter than inbound. countEventsSince already counts forward+reply in the window;
-  // -1 disables a cap.
+  // Reply rate limit: outbound consumes SES quota and sender reputation, so cap
+  // replies only. Busy inbound aliases must not lose outbound reply capability
+  // just because they received many forwards. -1 disables a cap.
   const replyCap = await getNumericSetting(db, "rate_limit_reply_per_alias");
   const globalCap = await getNumericSetting(db, "rate_limit_global");
-  const aliasCount = await q.countEventsSince(db, alias.id, now - 3600_000);
-  const globalCount = await q.countEventsSince(db, null, now - 3600_000);
+  const aliasCount = await q.countRepliesSince(db, alias.id, now - 3600_000);
+  const globalCount = await q.countRepliesSince(db, null, now - 3600_000);
   if ((replyCap >= 0 && aliasCount >= replyCap) || (globalCap >= 0 && globalCount >= globalCap)) {
     await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: parsed.externalSender, detail: "rate", ts: now });
     return;

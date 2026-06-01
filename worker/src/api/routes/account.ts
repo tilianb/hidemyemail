@@ -47,6 +47,7 @@ export function accountRoutes() {
         email: await decryptDestination(d.email, key),
       }))
     );
+    const destinationIds = (destinationsResult.results ?? []).map(d => d.id);
 
     // Blocks owned by this user (global, per-subdomain, and per-alias; block/allow)
     const blocksResult = await db.prepare(
@@ -59,6 +60,15 @@ export function accountRoutes() {
       "FROM events e INNER JOIN aliases a ON a.id = e.alias_id WHERE a.user_id = ?"
     ).bind(userId).all<Record<string, unknown>>();
 
+    let destinationEvents: Record<string, unknown>[] = [];
+    if (destinationIds.length > 0) {
+      const placeholders = destinationIds.map(() => "?").join(", ");
+      const result = await db.prepare(
+        `SELECT id, alias_id, type, external_sender, subject, bytes, detail, ts FROM events WHERE detail IN (${placeholders})`
+      ).bind(...destinationIds.map(id => `dest:${id}`)).all<Record<string, unknown>>();
+      destinationEvents = result.results ?? [];
+    }
+
     const ts = Date.now();
     const payload = {
       exported_at: ts,
@@ -67,7 +77,7 @@ export function accountRoutes() {
       aliases: aliasesResult.results ?? [],
       destinations,
       blocks: blocksResult.results ?? [],
-      events: eventsResult.results ?? [],
+      events: [...(eventsResult.results ?? []), ...destinationEvents],
     };
 
     return new Response(JSON.stringify(payload, null, 2), {
