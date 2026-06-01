@@ -23,8 +23,14 @@ struct MFAView: View {
                     .padding(.horizontal)
 
                 TextField("Code", text: $code)
-                    .keyboardType(.numberPad)
+                    // ASCII (not numberPad): backup codes are 8 alphanumeric
+                    // characters, not just digits. The Worker normalises case
+                    // and strips separators, so disable autocorrect/caps to
+                    // avoid mangling what the user types.
+                    .keyboardType(.asciiCapable)
                     .textContentType(.oneTimeCode)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
                     .multilineTextAlignment(.center)
                     .font(.title3.monospaced())
                     .padding()
