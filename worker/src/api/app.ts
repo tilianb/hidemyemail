@@ -109,5 +109,15 @@ export function createApp() {
   app.route("/api/settings", settingsRoutes());
   app.route("/api/account", accountRoutes());
 
+  // Apple App Site Association — lets the iOS app claim `webcredentials` for
+  // passkeys on this domain. Served by the Worker (not a static asset) so the
+  // App ID stays configurable via the APPLE_APP_ID env var. Requires this path
+  // in the assets `run_worker_first` list (see wrangler.jsonc).
+  app.get("/.well-known/apple-app-site-association", (c) => {
+    const appID = c.env.APPLE_APP_ID;
+    if (!appID) return c.json({ error: "Not configured" }, 404);
+    return c.json({ webcredentials: { apps: [appID] } });
+  });
+
   return app;
 }

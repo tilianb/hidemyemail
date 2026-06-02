@@ -104,3 +104,44 @@ test("seeded per-alias rate limit matches fallback default", async () => {
 
   expect(row?.value).toBe(SETTING_DEFAULTS.rate_limit_per_alias);
 });
+
+test("native passkey challenge echoes the challenge token; web does not", async () => {
+  const app = createApp();
+  const appEnv = { ...testEnv, APP_ORIGIN: "https://app.hidemyemail.dev" };
+
+  // Native: X-Auth-Mode token + no Origin → token in body so the cookieless
+  // client can return it on verify.
+  const native = await app.request("/api/passkey/challenge", {
+    method: "POST",
+    headers: { "X-Auth-Mode": "token" },
+  }, appEnv);
+  expect(native.status).toBe(200);
+  const nbody = await native.json() as any;
+  expect(typeof nbody.challenge).toBe("string");
+  expect(typeof nbody.passkey_token).toBe("string");
+
+  // Web: Origin present → no token leaked into the body.
+  const web = await app.request("/api/passkey/challenge", {
+    method: "POST",
+    headers: { Origin: "https://app.hidemyemail.dev" },
+  }, appEnv);
+  expect(web.status).toBe(200);
+  expect((await web.json() as any).passkey_token).toBeUndefined();
+});
+
+test("apple-app-site-association: 404 until APPLE_APP_ID is configured", async () => {
+  const app = createApp();
+
+  const missing = await app.request("/.well-known/apple-app-site-association", {}, testEnv);
+  expect(missing.status).toBe(404);
+
+  const configured = await app.request(
+    "/.well-known/apple-app-site-association",
+    {},
+    { ...testEnv, APPLE_APP_ID: "ABCDE12345.dev.hidemyemail.app" }
+  );
+  expect(configured.status).toBe(200);
+  expect(await configured.json()).toEqual({
+    webcredentials: { apps: ["ABCDE12345.dev.hidemyemail.app"] },
+  });
+});
