@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct AliasListView: View {
     @Environment(AppState.self) private var app
@@ -11,25 +12,29 @@ struct AliasListView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if loading && aliases.isEmpty {
-                    ProgressView()
-                } else if aliases.isEmpty {
-                    ContentUnavailableView(
-                        "No aliases yet",
-                        systemImage: "at",
-                        description: Text("Tap + to create your first alias.")
-                    )
-                } else {
-                    List {
-                        ForEach(aliases) { alias in
-                            NavigationLink(value: alias) {
-                                AliasRowView(alias: alias)
+            ZStack {
+                Theme.canvas.ignoresSafeArea()
+                Group {
+                    if loading && aliases.isEmpty {
+                        ProgressView()
+                    } else if aliases.isEmpty {
+                        ContentUnavailableView(
+                            "No aliases yet",
+                            systemImage: "at",
+                            description: Text("Tap + to create your first alias.")
+                        )
+                    } else {
+                        List {
+                            ForEach(aliases) { alias in
+                                NavigationLink(value: alias) {
+                                    AliasRowView(alias: alias)
+                                }
                             }
+                            .onDelete(perform: delete)
                         }
-                        .onDelete(perform: delete)
+                        .listStyle(.plain)
+                        .scrollContentBackground(.hidden)
                     }
-                    .listStyle(.plain)
                 }
             }
             .navigationTitle("Aliases")
@@ -84,6 +89,8 @@ struct AliasListView: View {
 struct AliasRowView: View {
     let alias: Alias
 
+    @State private var copied = false
+
     var body: some View {
         HStack(spacing: 12) {
             Circle()
@@ -91,23 +98,45 @@ struct AliasRowView: View {
                 .frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 2) {
                 Text(alias.label ?? alias.fullAddress)
-                    .font(.body)
+                    .font(alias.label != nil ? Theme.body(16) : Theme.mono(14))
                     .lineLimit(1)
                 if alias.label != nil {
                     Text(alias.fullAddress)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(Theme.mono(12))
+                        .foregroundStyle(Theme.textSecondary)
                         .lineLimit(1)
                 }
             }
             Spacer()
-            if alias.fwdCount > 0 {
-                Text("\(alias.fwdCount)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+            Button(action: copy) {
+                HStack(spacing: 5) {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    Text(copied ? "Copied" : "Copy")
+                        .font(Theme.body(13, .medium))
+                }
+                .foregroundStyle(copied ? Theme.green : Theme.accent)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule().fill((copied ? Theme.green : Theme.accent).opacity(0.15))
+                )
+                .contentShape(Capsule())
             }
+            // Borderless so the tap copies instead of triggering the row's
+            // NavigationLink push.
+            .buttonStyle(.borderless)
         }
         .padding(.vertical, 2)
+    }
+
+    private func copy() {
+        UIPasteboard.general.string = alias.fullAddress
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation { copied = true }
+        Task {
+            try? await Task.sleep(for: .seconds(1.2))
+            withAnimation { copied = false }
+        }
     }
 }
 

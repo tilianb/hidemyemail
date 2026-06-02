@@ -38,6 +38,19 @@ actor APIClient {
         )
     }
 
+    /// Request a WebAuthn assertion challenge for passwordless passkey login.
+    /// Token mode (no Origin) makes the Worker echo the signed challenge token in
+    /// the body so the cookieless native client can return it on verify.
+    func passkeyChallenge() async throws -> PasskeyChallengeOptions {
+        try await request("/api/passkey/challenge", method: "POST", body: [:], authMode: true, authed: false)
+    }
+
+    /// Submit the signed assertion (plus the echoed challenge token) to complete
+    /// passkey login. Returns the bearer token in the body under token mode.
+    func passkeyVerify(assertion: [String: Any]) async throws -> LoginResponse {
+        try await request("/api/passkey/verify", method: "POST", body: assertion, authMode: true, authed: false)
+    }
+
     func completeMFA(code: String, mfaToken: String?) async throws -> LoginResponse {
         var body: [String: Any] = ["code": code]
         if let mfaToken { body["mfa_token"] = mfaToken }
@@ -104,8 +117,26 @@ actor APIClient {
         try await request("/api/domains")
     }
 
+    /// Create a personal subdomain (`prefix.<base global domain>`). `prefix` is the
+    /// label only; the Worker appends the base domain. `defaultDestination` is
+    /// "global" or a verified destination email. The POST response is a partial
+    /// row, so we don't decode it — callers reload `domains()` afterwards.
+    func createDomain(prefix: String, defaultDestination: String, baseDomainId: Int?) async throws {
+        var body: [String: Any] = ["domain": prefix, "default_destination": defaultDestination]
+        if let baseDomainId { body["base_domain_id"] = baseDomainId }
+        try await requestVoid("/api/domains", method: "POST", body: body)
+    }
+
+    func deleteDomain(id: Int) async throws {
+        try await requestVoid("/api/domains/\(id)", method: "DELETE")
+    }
+
     func config() async throws -> ServerConfig {
         try await request("/api/config", authed: false)
+    }
+
+    func blocks() async throws -> [Block] {
+        try await request("/api/blocks")
     }
 
     // MARK: - Core request plumbing

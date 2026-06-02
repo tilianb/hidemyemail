@@ -1,4 +1,5 @@
 import SwiftUI
+import AuthenticationServices
 
 struct LoginView: View {
     @Environment(AppState.self) private var app
@@ -18,10 +19,10 @@ struct LoginView: View {
                         .font(.system(size: 44))
                         .foregroundStyle(Theme.accent)
                     Text("HideMyEmail")
-                        .font(.largeTitle.bold())
+                        .font(Theme.display(34, .bold))
                     Text(app.serverURLString)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .font(Theme.mono(12))
+                        .foregroundStyle(Theme.textSecondary)
                 }
 
                 VStack(spacing: 12) {
@@ -52,12 +53,22 @@ struct LoginView: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .disabled(busy || password.isEmpty || !app.hasServer)
+
+                    Button(action: passkeyLogin) {
+                        Label("Sign in with Passkey", systemImage: "person.badge.key")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .disabled(busy || !app.hasServer)
                 }
                 .padding(.horizontal)
 
                 Spacer()
             }
             .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.canvas.ignoresSafeArea())
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Server", systemImage: "server.rack") { showServerSheet = true }
@@ -78,6 +89,21 @@ struct LoginView: View {
             do {
                 try await app.login(password: password)
                 password = ""
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
+    private func passkeyLogin() {
+        error = nil
+        busy = true
+        Task {
+            defer { busy = false }
+            do {
+                try await app.loginWithPasskey()
+            } catch let e as ASAuthorizationError where e.code == .canceled {
+                // User dismissed the system passkey sheet — not an error.
             } catch {
                 self.error = error.localizedDescription
             }

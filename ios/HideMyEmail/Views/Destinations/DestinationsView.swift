@@ -10,7 +10,8 @@ struct DestinationsView: View {
     @State private var newEmail = ""
 
     var body: some View {
-        NavigationStack {
+        ZStack {
+            Theme.canvas.ignoresSafeArea()
             Group {
                 if loading && destinations.isEmpty {
                     ProgressView()
@@ -27,29 +28,31 @@ struct DestinationsView: View {
                         }
                         .onDelete(perform: delete)
                     }
+                    .scrollContentBackground(.hidden)
                 }
             }
-            .navigationTitle("Destinations")
-            .refreshable { await reload() }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Add", systemImage: "plus") { showAdd = true }
-                }
-            }
-            .alert("Add Destination", isPresented: $showAdd) {
-                TextField("you@example.com", text: $newEmail)
-                    .keyboardType(.emailAddress)
-                    .textInputAutocapitalization(.never)
-                Button("Cancel", role: .cancel) { newEmail = "" }
-                Button("Add") { Task { await add() } }
-            } message: {
-                Text("We'll email a verification link before it can receive forwarded mail.")
-            }
-            .overlay(alignment: .bottom) {
-                if let error { ErrorBanner(message: error) }
-            }
-            .task { if destinations.isEmpty { await reload() } }
         }
+        .navigationTitle("Destinations")
+        .navigationBarTitleDisplayMode(.inline)
+        .refreshable { await reload() }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Add", systemImage: "plus") { showAdd = true }
+            }
+        }
+        .alert("Add Destination", isPresented: $showAdd) {
+            TextField("you@example.com", text: $newEmail)
+                .keyboardType(.emailAddress)
+                .textInputAutocapitalization(.never)
+            Button("Cancel", role: .cancel) { newEmail = "" }
+            Button("Add") { Task { await add() } }
+        } message: {
+            Text("We'll email a verification link before it can receive forwarded mail.")
+        }
+        .overlay(alignment: .bottom) {
+            if let error { ErrorBanner(message: error) }
+        }
+        .task { if destinations.isEmpty { await reload() } }
     }
 
     private func row(_ dest: Destination) -> some View {

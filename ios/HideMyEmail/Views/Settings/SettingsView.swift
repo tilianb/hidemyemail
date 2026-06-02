@@ -17,6 +17,13 @@ struct SettingsView: View {
                 Section("Server") {
                     LabeledContent("URL", value: app.serverURLString)
                 }
+                Section("Routing") {
+                    NavigationLink {
+                        DestinationsView()
+                    } label: {
+                        Label("Destinations", systemImage: "tray.and.arrow.down")
+                    }
+                }
                 Section {
                     Button("Sign Out", role: .destructive) { showSignOut = true }
                 }
@@ -26,6 +33,7 @@ struct SettingsView: View {
                     Text("Passkeys, push notifications, and the share sheet are planned for a future release.")
                 }
             }
+            .themedScrollBackground()
             .navigationTitle("Settings")
             .confirmationDialog("Sign out?", isPresented: $showSignOut, titleVisibility: .visible) {
                 Button("Sign Out", role: .destructive) { Task { await app.signOut() } }

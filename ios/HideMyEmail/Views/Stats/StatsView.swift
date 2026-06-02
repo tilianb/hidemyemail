@@ -9,7 +9,9 @@ struct StatsView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
+            ZStack {
+                Theme.canvas.ignoresSafeArea()
+                Group {
                 if let stats {
                     List {
                         Section("Totals") {
@@ -27,19 +29,21 @@ struct StatsView: View {
                             Section("Top aliases") {
                                 ForEach(stats.topAliases) { top in
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(top.fullAddress).font(.subheadline).lineLimit(1)
+                                        Text(top.fullAddress).font(Theme.mono(14)).lineLimit(1)
                                         Text("\(top.fwdCount) forwarded · \(top.replyCount) replied · \(top.blockedCount) blocked")
                                             .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                            .foregroundStyle(Theme.textSecondary)
                                     }
                                 }
                             }
                         }
                     }
+                    .scrollContentBackground(.hidden)
                 } else if loading {
                     ProgressView()
                 } else {
                     ContentUnavailableView("No stats", systemImage: "chart.bar")
+                }
                 }
             }
             .navigationTitle("Stats")

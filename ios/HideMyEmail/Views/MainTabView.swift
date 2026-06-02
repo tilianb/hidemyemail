@@ -5,8 +5,8 @@ struct MainTabView: View {
         TabView {
             AliasListView()
                 .tabItem { Label("Aliases", systemImage: "at") }
-            DestinationsView()
-                .tabItem { Label("Destinations", systemImage: "tray.and.arrow.down") }
+            SubdomainsView()
+                .tabItem { Label("Domains", systemImage: "globe") }
             StatsView()
                 .tabItem { Label("Stats", systemImage: "chart.bar") }
             SettingsView()

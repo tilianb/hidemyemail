@@ -43,12 +43,26 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         ITSAppUsesNonExemptEncryption: false
+        UIAppFonts:
+          - BricolageGrotesque-Regular.ttf
+          - BricolageGrotesque-Medium.ttf
+          - BricolageGrotesque-SemiBold.ttf
+          - BricolageGrotesque-Bold.ttf
+          - IBMPlexSans-Regular.ttf
+          - IBMPlexSans-Medium.ttf
+          - IBMPlexSans-SemiBold.ttf
+          - JetBrainsMono-Regular.ttf
+          - JetBrainsMono-Medium.ttf
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.hidemyemail.app
         GENERATE_INFOPLIST_FILE: NO
         ENABLE_USER_SCRIPT_SANDBOXING: YES
         TARGETED_DEVICE_FAMILY: "1,2"
+        # Passkeys: associates the app with app.hidemyemail.dev (see the Worker's
+        # /.well-known/apple-app-site-association). Requires a real Apple Team ID
+        # and the Associated Domains capability on the App ID for device builds.
+        CODE_SIGN_ENTITLEMENTS: HideMyEmail/HideMyEmail.entitlements
 
   HideMyEmailTests:
     type: bundle.unit-test
