@@ -267,7 +267,10 @@ export function authRoutes() {
     const { generateAuthenticationOptions } = await import("@simplewebauthn/server");
     const { getRpFromOrigin } = await import("../../lib/webauthn");
 
-    const { rpID } = getRpFromOrigin(c.req.header("origin"));
+    // Native clients send no Origin; fall back to the configured app origin so
+    // the rpID matches the iOS associated-domains entitlement (app.hidemyemail.dev).
+    const origin = c.req.header("origin") || c.env.APP_ORIGIN || "https://app.hidemyemail.dev";
+    const { rpID } = getRpFromOrigin(origin);
 
     const options = await generateAuthenticationOptions({
       rpID,
@@ -278,7 +281,9 @@ export function authRoutes() {
     const cookie = await signPasskeyAuthChallenge(c.env.SESSION_SECRET, options.challenge);
     setCookie(c, "__Host-passkey-challenge", cookie, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: 300 });
 
-    return c.json(options);
+    // Token-mode (native) clients can't persist the HttpOnly cookie, so echo the
+    // signed challenge token in the body to round-trip back on verify.
+    return c.json(wantsToken(c) ? { ...options, passkey_token: cookie } : options);
   });
 
   r.post("/passkey/verify", async (c) => {
@@ -287,14 +292,16 @@ export function authRoutes() {
       return c.json({ error: "Too many attempts" }, 429);
     }
 
-    const cookie = getCookie(c, "__Host-passkey-challenge");
+    // Read the assertion first: native clients carry the challenge token in the
+    // body (`passkey_token`) because they have no cookie jar.
+    const response = await c.req.json<AuthenticationResponseJSON & { passkey_token?: string }>().catch(() => null);
+    if (!response?.id) return c.json({ error: "Invalid request" }, 400);
+
+    const cookie = getCookie(c, "__Host-passkey-challenge") || response.passkey_token || null;
     if (!cookie) return c.json({ error: "No challenge" }, 401);
 
     const expectedChallenge = await verifyPasskeyAuthChallenge(c.env.SESSION_SECRET, cookie);
     if (!expectedChallenge) return c.json({ error: "Challenge expired" }, 401);
-
-    const response = await c.req.json<AuthenticationResponseJSON>().catch(() => null);
-    if (!response?.id) return c.json({ error: "Invalid request" }, 400);
 
     const cred = await c.env.DB.prepare(
       "SELECT user_id, public_key, sign_count, transports FROM passkey_credentials WHERE id = ?"
@@ -307,7 +314,8 @@ export function authRoutes() {
 
     const { verifyAuthenticationResponse } = await import("@simplewebauthn/server");
     const { fromBase64url, getRpFromOrigin } = await import("../../lib/webauthn");
-    const { rpID, expectedOrigin } = getRpFromOrigin(c.req.header("origin"));
+    const origin = c.req.header("origin") || c.env.APP_ORIGIN || "https://app.hidemyemail.dev";
+    const { rpID, expectedOrigin } = getRpFromOrigin(origin);
 
     const result = await verifyAuthenticationResponse({
       response,
@@ -338,9 +346,9 @@ export function authRoutes() {
       .bind(result.authenticationInfo.newCounter, response.id).run();
 
     deleteCookie(c, "__Host-passkey-challenge", { path: "/", secure: true });
-    await setAuthenticatedCookies(c, cred.user_id);
+    const token = await setAuthenticatedCookies(c, cred.user_id);
 
-    return c.json({ ok: true, userId: cred.user_id });
+    return c.json(wantsToken(c) ? { ok: true, userId: cred.user_id, token } : { ok: true, userId: cred.user_id });
   });
 
   r.post("/recover/send-code", async (c) => {

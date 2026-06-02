@@ -13,6 +13,12 @@ export interface Env {
   TEST_MIGRATIONS?: unknown;
   DESTINATION_ENCRYPTION_KEY: string;
   ACTION_SECRET?: string;
+  // Web origin of the dashboard, e.g. https://app.hidemyemail.dev. Used as the
+  // WebAuthn relying-party origin for native clients, which send no Origin header.
+  APP_ORIGIN?: string;
+  // Apple App ID ("<TeamID>.<bundleId>", e.g. ABCDE12345.dev.hidemyemail.app)
+  // published in the apple-app-site-association file for passkey association.
+  APPLE_APP_ID?: string;
 }
 
 export interface DomainRow { id: number; domain: string; default_destination: string; active: number; created_at: number; verified_at: number | null; verification_token: string | null; catch_all: number | null; inline_actions_pref: string | null; }
