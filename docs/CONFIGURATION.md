@@ -23,6 +23,8 @@ These are deployment-specific but not secrets. Store them in Cloudflare dashboar
 | `SES_REGION` | yes for mail | AWS SES/S3/SNS region, for example `ap-southeast-2`. |
 | `S3_INBOUND_BUCKET` | yes for inbound | Bucket where SES stores raw MIME. |
 | `SNS_INBOUND_TOPIC_ARN` | yes for inbound SNS | Exact SNS topic for SES receipt notifications. |
+| `APP_ORIGIN` | for native passkeys | Dashboard web origin, e.g. `https://app.hidemyemail.dev`. WebAuthn relying-party origin for native clients, which send no `Origin` header. Defaults to `https://app.hidemyemail.dev` if unset. |
+| `APPLE_APP_ID` | for iOS passkeys | Apple App ID `<TeamID>.<bundleId>` (e.g. `ABCDE12345.dev.hidemyemail.app`) published in `/.well-known/apple-app-site-association`. The AASA route 404s until this is set. |
 
 `worker/wrangler.jsonc` sets `keep_vars: true` so dashboard-managed variables are preserved even when Cloudflare Git deploys run plain `wrangler deploy`.
 
