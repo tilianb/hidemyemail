@@ -4,9 +4,9 @@ A native SwiftUI client for the HideMyEmail alias service. It talks to the same
 Cloudflare Worker API as the web dashboard, using **bearer-token auth** (the
 `X-Auth-Mode: token` opt-in added in `worker/src/api/`).
 
-This is the **Phase 1 / Core** release: sign in (passphrase + TOTP MFA), manage
-aliases, manage destination inboxes, and view stats. Android and the heavier
-native integrations (passkeys, push, share sheet) are tracked as follow-ups —
+Sign in (passphrase + TOTP MFA, or **passkey**), manage aliases and personal
+subdomains, manage destination inboxes, and view stats. Android and the
+remaining native integrations (push, share sheet) are tracked as follow-ups —
 see the roadmap below.
 
 ## Requirements
@@ -60,10 +60,30 @@ HideMyEmail/
 - The web app is unaffected: without the `X-Auth-Mode` header it keeps using
   cookies, and the token is never exposed to page JavaScript.
 
+### Passkey login
+
+"Sign in with Passkey" uses `ASAuthorizationPlatformPublicKeyCredentialProvider`
+against the Worker's `/api/passkey/{challenge,verify}` endpoints. Because the
+native client is cookieless, the Worker echoes the signed challenge in the body
+(`passkey_token`) under token mode and returns the bearer token on verify.
+
+Setup required for it to actually work (it cannot run on the unsigned simulator):
+
+1. **Worker** — deploy with the env vars from
+   [`docs/CONFIGURATION.md`](../docs/CONFIGURATION.md): `APP_ORIGIN`
+   (the relying-party origin, e.g. `https://app.hidemyemail.dev`) and
+   `APPLE_APP_ID` (`<TeamID>.dev.hidemyemail.app`). Confirm
+   `https://<APP_ORIGIN host>/.well-known/apple-app-site-association` returns the
+   `webcredentials` JSON.
+2. **App** — `HideMyEmail.entitlements` declares
+   `webcredentials:app.hidemyemail.dev`. The relying-party domain, `APP_ORIGIN`,
+   and the AASA host must all match. Set a real `DEVELOPMENT_TEAM` and enable the
+   **Associated Domains** capability on the App ID.
+3. **Register first** — the app only *signs in* with an existing passkey; create
+   one in the web dashboard (Settings → Passkeys), then test on a physical device.
+
 ## Roadmap (post-Core)
 
-- **Native passkeys** via `ASAuthorization` + Associated Domains (needs an
-  `apple-app-site-association` file served by the Worker).
 - **Push notifications** for forwarded / blocked mail alerts.
 - **Share sheet extension** to mint an alias from any app.
 - **Android** (Kotlin/Compose) — same API, same bearer-token flow.
