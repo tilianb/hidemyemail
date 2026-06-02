@@ -12,6 +12,18 @@ struct AliasDetailView: View {
     @State private var label: String
     @State private var error: String?
     @State private var showDeleteConfirm = false
+    @State private var blocks: [Block] = []
+    @State private var loadingBlocks = false
+
+    // Rules that apply to this alias, in the Worker's resolution order:
+    // alias-specific, then its subdomain, then account-wide.
+    private var scopedBlocks: [Block] {
+        blocks.filter { b in
+            b.aliasId == alias.id
+                || (b.domainId != nil && b.domainId == alias.domainId)
+                || (b.aliasId == nil && b.domainId == nil)
+        }
+    }
 
     init(alias: Alias, onChange: @escaping () async -> Void) {
         self.alias = alias
@@ -25,7 +37,7 @@ struct AliasDetailView: View {
             Section {
                 HStack {
                     Text(alias.fullAddress)
-                        .font(.body.monospaced())
+                        .font(Theme.mono(15))
                         .textSelection(.enabled)
                     Spacer()
                     Button {
@@ -59,9 +71,25 @@ struct AliasDetailView: View {
             }
 
             Section {
+                if loadingBlocks && blocks.isEmpty {
+                    HStack { Spacer(); ProgressView(); Spacer() }
+                } else if scopedBlocks.isEmpty {
+                    Text("No allow or block rules apply.")
+                        .foregroundStyle(Theme.textSecondary)
+                } else {
+                    ForEach(scopedBlocks) { ruleRow($0) }
+                }
+            } header: {
+                Text("Allow & Block Rules")
+            } footer: {
+                Text("Rules from this alias, its subdomain, and account-wide settings. Manage them in the web dashboard.")
+            }
+
+            Section {
                 Button("Delete Alias", role: .destructive) { showDeleteConfirm = true }
             }
         }
+        .themedScrollBackground()
         .navigationTitle(alias.label ?? alias.localPart)
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog("Delete this alias?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
@@ -72,6 +100,15 @@ struct AliasDetailView: View {
         .overlay(alignment: .bottom) {
             if let error { ErrorBanner(message: error) }
         }
+        .task { await loadBlocks() }
+        .onDisappear {
+            // Persist a pending label edit when the user navigates back without
+            // hitting return. Detached from the view's lifecycle so teardown
+            // doesn't cancel the request; guarded so we only PATCH on a change.
+            if label != (alias.label ?? "") {
+                Task { await saveLabel() }
+            }
+        }
     }
 
     private func statRow(_ title: String, _ value: Int, color: Color) -> some View {
@@ -80,6 +117,38 @@ struct AliasDetailView: View {
             Spacer()
             Text("\(value)").foregroundStyle(color).monospacedDigit()
         }
+    }
+
+    private func ruleRow(_ b: Block) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: b.isAllow ? "checkmark.shield.fill" : "hand.raised.fill")
+                .foregroundStyle(b.isAllow ? Theme.green : Theme.red)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(b.pattern).font(Theme.mono(13)).lineLimit(1)
+                Text(scopeLabel(b)).font(.caption).foregroundStyle(Theme.textSecondary)
+            }
+            Spacer()
+            Text(b.isAllow ? "ALLOW" : "BLOCK")
+                .font(Theme.body(10, .semibold))
+                .foregroundStyle(b.isAllow ? Theme.green : Theme.red)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(Capsule().fill((b.isAllow ? Theme.green : Theme.red).opacity(0.15)))
+        }
+    }
+
+    private func scopeLabel(_ b: Block) -> String {
+        if b.aliasId == alias.id { return "This alias" }
+        if b.domainId != nil { return "Subdomain rule" }
+        return "Account-wide"
+    }
+
+    private func loadBlocks() async {
+        guard let client = app.api() else { return }
+        loadingBlocks = true
+        defer { loadingBlocks = false }
+        do { blocks = try await client.blocks() }
+        catch { handle(error) }
     }
 
     private func setActive(_ value: Bool) async {

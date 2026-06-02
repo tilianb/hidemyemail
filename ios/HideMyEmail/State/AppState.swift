@@ -71,6 +71,40 @@ final class AppState {
         try await finishLogin(token: res.token)
     }
 
+    /// Passwordless login with a platform passkey. Fetches a challenge, runs the
+    /// AuthenticationServices assertion, and posts the signed result back. The
+    /// relying party is the server host (matching the AASA / entitlement).
+    func loginWithPasskey() async throws {
+        guard let baseURL else { throw APIError.notConfigured }
+        let client = client ?? APIClient(baseURL: baseURL, token: nil)
+        self.client = client
+
+        let opts = try await client.passkeyChallenge()
+        guard let challengeData = Data(base64urlEncoded: opts.challenge) else {
+            throw APIError.server(status: -1, message: "Malformed challenge")
+        }
+        let rp = opts.rpId ?? baseURL.host ?? "app.hidemyemail.dev"
+
+        let assertion = try await PasskeyAuthenticator().assert(relyingParty: rp, challenge: challengeData)
+
+        var response: [String: Any] = [
+            "id": assertion.credentialID.base64urlEncodedString(),
+            "rawId": assertion.credentialID.base64urlEncodedString(),
+            "type": "public-key",
+            "clientExtensionResults": [String: Any](),
+            "response": [
+                "clientDataJSON": assertion.rawClientDataJSON.base64urlEncodedString(),
+                "authenticatorData": assertion.rawAuthenticatorData.base64urlEncodedString(),
+                "signature": assertion.signature.base64urlEncodedString(),
+                "userHandle": assertion.userID.base64urlEncodedString(),
+            ],
+        ]
+        if let token = opts.passkeyToken { response["passkey_token"] = token }
+
+        let res = try await client.passkeyVerify(assertion: response)
+        try await finishLogin(token: res.token)
+    }
+
     func completeMFA(code: String) async throws {
         guard let client else { throw APIError.notConfigured }
         let mfaToken: String?

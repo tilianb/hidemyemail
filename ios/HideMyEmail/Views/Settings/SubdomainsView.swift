@@ -1,0 +1,201 @@
+import SwiftUI
+
+/// Manage personal subdomains (`name.<base global domain>`). Mirrors the create /
+/// list / delete subset of the web dashboard's `dashboard/src/pages/Domains.tsx`.
+/// Pushed inside Settings' NavigationStack, so this view owns no stack of its own.
+struct SubdomainsView: View {
+    @Environment(AppState.self) private var app
+
+    @State private var domains: [Domain] = []
+    @State private var destinations: [Destination] = []
+    @State private var maxSubdomains = -1
+    @State private var loading = false
+    @State private var error: String?
+
+    // Create form
+    @State private var prefix = ""
+    @State private var baseDomainId: Int?
+    @State private var selectedDestination = "global"   // "global" or a verified email
+    @State private var creating = false
+
+    // Delete confirmation
+    @State private var pendingDelete: Domain?
+
+    private var baseDomains: [Domain] { domains.filter { $0.canHostSubdomains } }
+    private var personalSubdomains: [Domain] { domains.filter { $0.isPersonal } }
+    private var verifiedDestinations: [Destination] { destinations.filter { $0.isVerified } }
+
+    private var selectedBaseDomain: Domain? {
+        domains.first { $0.id == baseDomainId } ?? baseDomains.first
+    }
+
+    private var canCreate: Bool {
+        !creating && !prefix.isEmpty && selectedBaseDomain != nil && !verifiedDestinations.isEmpty
+    }
+
+    private var quotaLabel: String {
+        maxSubdomains >= 0
+            ? "\(personalSubdomains.count) / \(maxSubdomains) used"
+            : "\(personalSubdomains.count) used"
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                addSection
+                listSection
+            }
+            .themedScrollBackground()
+            .navigationTitle("Domains")
+            .overlay(alignment: .bottom) {
+                if let error { ErrorBanner(message: error) }
+            }
+            .confirmationDialog(
+                pendingDelete.map { "Delete \($0.domain) and all its aliases?" } ?? "",
+                isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) {
+                    if let d = pendingDelete { Task { await remove(d) } }
+                }
+                Button("Cancel", role: .cancel) { pendingDelete = nil }
+            }
+            .task { if domains.isEmpty { await reload() } }
+        }
+    }
+
+    // MARK: - Create
+
+    @ViewBuilder
+    private var addSection: some View {
+        Section("Add Subdomain (\(quotaLabel))") {
+            if loading && domains.isEmpty {
+                HStack { Spacer(); ProgressView(); Spacer() }
+            } else if baseDomains.isEmpty {
+                Text("No global domains currently allow subdomain aliases.")
+                    .foregroundStyle(.secondary).font(.footnote)
+            } else if verifiedDestinations.isEmpty {
+                Text("Verify a destination email first.")
+                    .foregroundStyle(.secondary).font(.footnote)
+            } else {
+                HStack(spacing: 2) {
+                    TextField("name", text: $prefix)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onChange(of: prefix) { _, newValue in
+                            prefix = newValue.lowercased().filter { $0.isLowercase || $0.isNumber || $0 == "-" }
+                        }
+                    Text(".\(selectedBaseDomain?.domain ?? "")")
+                        .font(Theme.mono(13))
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                }
+
+                if baseDomains.count > 1 {
+                    Picker("Base domain", selection: $baseDomainId) {
+                        ForEach(baseDomains) { d in
+                            Text(d.domain).tag(Optional(d.id))
+                        }
+                    }
+                }
+
+                Picker("Default destination", selection: $selectedDestination) {
+                    Text("Global default").tag("global")
+                    ForEach(verifiedDestinations, id: \.id) { dest in
+                        Text(dest.email).tag(dest.email)
+                    }
+                }
+
+                Button {
+                    Task { await create() }
+                } label: {
+                    if creating { ProgressView() } else { Text("Add Subdomain") }
+                }
+                .disabled(!canCreate)
+            }
+        }
+    }
+
+    // MARK: - List
+
+    @ViewBuilder
+    private var listSection: some View {
+        Section("Your Subdomains") {
+            if personalSubdomains.isEmpty {
+                Text(loading ? "Loading…" : "No subdomains yet.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(personalSubdomains) { d in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(d.domain).font(Theme.mono(14))
+                        Text(destinationLabel(for: d))
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    .swipeActions {
+                        Button("Delete", role: .destructive) { pendingDelete = d }
+                    }
+                }
+            }
+        }
+    }
+
+    private func destinationLabel(for d: Domain) -> String {
+        switch d.defaultDestination {
+        case nil: return "Drops mail (no destination)"
+        case "global": return "Global default"
+        case let email?: return "→ \(email)"
+        }
+    }
+
+    // MARK: - Actions
+
+    private func reload() async {
+        guard let client = app.api() else { return }
+        loading = true
+        defer { loading = false }
+        do {
+            async let d = client.domains()
+            async let dest = client.destinations()
+            async let conf = client.config()
+            domains = try await d
+            destinations = try await dest
+            maxSubdomains = try await conf.maxSubdomains
+            if baseDomainId == nil || !baseDomains.contains(where: { $0.id == baseDomainId }) {
+                baseDomainId = baseDomains.first?.id
+            }
+            error = nil
+        } catch { handle(error) }
+    }
+
+    private func create() async {
+        guard let client = app.api(), let base = selectedBaseDomain else { return }
+        creating = true
+        defer { creating = false }
+        do {
+            try await client.createDomain(
+                prefix: prefix,
+                defaultDestination: selectedDestination,
+                baseDomainId: base.id
+            )
+            prefix = ""
+            selectedDestination = "global"
+            await reload()
+        } catch { handle(error) }
+    }
+
+    private func remove(_ d: Domain) async {
+        pendingDelete = nil
+        guard let client = app.api() else { return }
+        do { try await client.deleteDomain(id: d.id); await reload() }
+        catch { handle(error) }
+    }
+
+    private func handle(_ error: Error) {
+        if let err = error as? APIError, err.isAuthFailure {
+            Task { await app.handleAuthFailure() }
+        } else {
+            self.error = error.localizedDescription
+        }
+    }
+}

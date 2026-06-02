@@ -54,7 +54,8 @@ struct CreateAliasView: View {
                                     .textInputAutocapitalization(.never)
                                     .autocorrectionDisabled()
                                 Text("@\(selectedDomain?.domain ?? "")")
-                                    .foregroundStyle(.secondary)
+                                    .font(Theme.mono(13))
+                                    .foregroundStyle(Theme.textSecondary)
                                     .lineLimit(1)
                             }
                         } else {
@@ -78,6 +79,7 @@ struct CreateAliasView: View {
                     Text(error).foregroundStyle(Theme.red).font(.footnote)
                 }
             }
+            .themedScrollBackground()
             .navigationTitle("New Alias")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

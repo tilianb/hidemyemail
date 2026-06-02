@@ -15,10 +15,10 @@ struct MFAView: View {
                     .font(.system(size: 44))
                     .foregroundStyle(Theme.accent)
                 Text("Two-Factor Authentication")
-                    .font(.title2.bold())
+                    .font(Theme.display(24, .bold))
                 Text("Enter the 6-digit code from your authenticator app, or an 8-character backup code.")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
 
@@ -32,7 +32,7 @@ struct MFAView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .multilineTextAlignment(.center)
-                    .font(.title3.monospaced())
+                    .font(Theme.mono(20))
                     .padding()
                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
                     .padding(.horizontal)
@@ -56,6 +56,8 @@ struct MFAView: View {
                 Spacer()
             }
             .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.canvas.ignoresSafeArea())
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { Task { await app.signOut() } }

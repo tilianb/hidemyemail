@@ -67,11 +67,22 @@ struct Domain: Identifiable, Decodable, Hashable {
     let domain: String
     let active: Int
     let allowCustomAliases: Int
+    let allowSubdomainAliases: Int?
     let verifiedAt: Double?
+    let defaultDestination: String?
+    let createdAt: Double?
 
     var isGlobalDomain: Bool { isGlobal == 1 }
+    var isPersonal: Bool { isGlobal == 0 }
     var allowsCustomAliases: Bool { allowCustomAliases == 1 }
+    var allowsSubdomainAliases: Bool { (allowSubdomainAliases ?? 0) == 1 }
     var isUsable: Bool { active == 1 && (isGlobal == 0 || verifiedAt != nil) }
+    // A verified, active global domain that permits subdomain aliases can serve
+    // as the base for a user's personal subdomain (mirrors dashboard/Domains.tsx).
+    var canHostSubdomains: Bool {
+        isGlobalDomain && active == 1 && verifiedAt != nil && allowsSubdomainAliases
+    }
+    var createdDate: Date? { createdAt.map { Date(timeIntervalSince1970: $0 / 1000) } }
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -79,7 +90,31 @@ struct Domain: Identifiable, Decodable, Hashable {
         case isGlobal = "is_global"
         case domain, active
         case allowCustomAliases = "allow_custom_aliases"
+        case allowSubdomainAliases = "allow_subdomain_aliases"
         case verifiedAt = "verified_at"
+        case defaultDestination = "default_destination"
+        case createdAt = "created_at"
+    }
+}
+
+// An allow/block rule. Scope is implied by which id is set: alias-specific
+// (alias_id), subdomain-wide (domain_id, personal subdomains only), or
+// account-wide (both null). Mirrors the Worker's resolution in db/queries.ts.
+struct Block: Identifiable, Decodable, Hashable {
+    let id: Int
+    let aliasId: Int?
+    let domainId: Int?
+    let kind: String        // "block" | "allow"
+    let pattern: String
+    let createdAt: Double
+
+    var isAllow: Bool { kind == "allow" }
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, pattern
+        case aliasId = "alias_id"
+        case domainId = "domain_id"
+        case createdAt = "created_at"
     }
 }
 
@@ -125,6 +160,20 @@ struct ServerConfig: Decodable {
         case maxSubdomains = "max_subdomains"
         case maxTotalAliases = "max_total_aliases"
         case aliasQuotaBufferEnabled = "alias_quota_buffer_enabled"
+    }
+}
+
+// POST /api/passkey/challenge → WebAuthn authentication options. We only need
+// the challenge (base64url), the relying-party id, and the signed challenge
+// token the native flow echoes back on verify (since we hold no cookie).
+struct PasskeyChallengeOptions: Decodable {
+    let challenge: String
+    let rpId: String?
+    let passkeyToken: String?
+
+    enum CodingKeys: String, CodingKey {
+        case challenge, rpId
+        case passkeyToken = "passkey_token"
     }
 }
 
