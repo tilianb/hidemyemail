@@ -8,7 +8,7 @@
 import { env } from "cloudflare:test";
 import { beforeAll, beforeEach, expect, test } from "vitest";
 import { createApp } from "../src/api/app";
-import { signSession, derivePassphraseHash } from "../src/lib/auth";
+import { signSession, signFreshAuth, derivePassphraseHash } from "../src/lib/auth";
 import { encryptDestination, hashDestination } from "../src/lib/crypto";
 import { purgeDeletedAccounts } from "../src/lib/purge";
 
@@ -44,15 +44,20 @@ beforeEach(async () => {
   await db.prepare("DELETE FROM rate_limits").run();
 });
 
-/** Insert a user with a known passphrase, return { userId, hash, cookie }. */
-async function makeUser(passphrase = "my-secret-pass"): Promise<{ userId: number; hash: string; cookie: string }> {
+/**
+ * Insert a user with a known passphrase, return { userId, hash, cookie }.
+ * The cookie includes fresh-auth — export and delete are fresh-auth gated.
+ * `staleCookie` is the session alone (a long-lived session without re-login).
+ */
+async function makeUser(passphrase = "my-secret-pass"): Promise<{ userId: number; hash: string; cookie: string; staleCookie: string }> {
   const hash = await derivePassphraseHash(passphrase, "deadbeef");
   const res = await DB().prepare(
     "INSERT INTO users (passphrase_hash, active, forwarding, created_at) VALUES (?, 1, 1, ?)"
   ).bind(hash, Date.now()).run();
   const userId = Number(res.meta.last_row_id);
-  const cookie = "__Host-session=" + (await signSession("sek", userId, 3600));
-  return { userId, hash, cookie };
+  const staleCookie = "__Host-session=" + (await signSession("sek", userId, 3600));
+  const cookie = staleCookie + "; __Host-fresh-auth=" + (await signFreshAuth("sek", userId, 600));
+  return { userId, hash, cookie, staleCookie };
 }
 
 /** Insert an encrypted destination for a user. */
@@ -191,6 +196,17 @@ test("export requires authentication", async () => {
   expect(res.status).toBe(401);
 });
 
+test("export requires fresh auth — a session alone is rejected", async () => {
+  const app = createApp();
+  const { staleCookie } = await makeUser();
+  const res = await app.request("/api/account/export", {
+    headers: { cookie: staleCookie },
+  }, testEnv);
+  expect(res.status).toBe(401);
+  const body = await res.json<any>();
+  expect(body.error).toContain("Fresh authentication");
+});
+
 // ---------------------------------------------------------------------------
 // POST /api/account/delete
 // ---------------------------------------------------------------------------
@@ -223,7 +239,8 @@ test("delete: wrong password → 401", async () => {
 
 test("delete: userId 1 (admin) → 403", async () => {
   const app = createApp();
-  const adminCookie = "__Host-session=" + (await signSession("sek", 1, 3600));
+  const adminCookie = "__Host-session=" + (await signSession("sek", 1, 3600)) +
+    "; __Host-fresh-auth=" + (await signFreshAuth("sek", 1, 600));
 
   const res = await app.request("/api/account/delete", {
     method: "POST",
@@ -268,6 +285,101 @@ test("delete: valid → sets deleted_at, active=0, forwarding=0; subsequent logi
     body: JSON.stringify({ password: "correct-passphrase" }),
   }, testEnv);
   expect(loginRes.status).toBe(403);
+});
+
+test("delete requires fresh auth — session + correct password alone is rejected", async () => {
+  const app = createApp();
+  const { userId, staleCookie } = await makeUser("correct-passphrase");
+
+  const res = await app.request("/api/account/delete", {
+    method: "POST",
+    headers: { cookie: staleCookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ password: "correct-passphrase", confirm: "DELETE" }),
+  }, testEnv);
+
+  expect(res.status).toBe(401);
+  const row = await DB().prepare("SELECT deleted_at FROM users WHERE id = ?")
+    .bind(userId).first<{ deleted_at: number | null }>();
+  expect(row?.deleted_at).toBeNull();
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/restore
+// ---------------------------------------------------------------------------
+
+test("restore: cancels a pending deletion and re-enables login", async () => {
+  const app = createApp();
+  const { userId } = await makeUser("restore-me-pass");
+  await DB().prepare(
+    "UPDATE users SET deleted_at = ?, active = 0, forwarding = 0 WHERE id = ?"
+  ).bind(Date.now(), userId).run();
+
+  const res = await app.request("/api/restore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password: "restore-me-pass" }),
+  }, testEnv);
+  expect(res.status).toBe(200);
+
+  const row = await DB().prepare(
+    "SELECT active, forwarding, deleted_at FROM users WHERE id = ?"
+  ).bind(userId).first<{ active: number; forwarding: number; deleted_at: number | null }>();
+  expect(row).toMatchObject({ active: 1, forwarding: 1, deleted_at: null });
+
+  const loginRes = await app.request("/api/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password: "restore-me-pass" }),
+  }, testEnv);
+  expect(loginRes.status).toBe(200);
+});
+
+test("restore: wrong passphrase → 401, tombstone untouched", async () => {
+  const app = createApp();
+  const { userId } = await makeUser("restore-me-pass");
+  const ts = Date.now();
+  await DB().prepare(
+    "UPDATE users SET deleted_at = ?, active = 0, forwarding = 0 WHERE id = ?"
+  ).bind(ts, userId).run();
+
+  const res = await app.request("/api/restore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password: "wrong-pass" }),
+  }, testEnv);
+  expect(res.status).toBe(401);
+
+  const row = await DB().prepare("SELECT deleted_at FROM users WHERE id = ?")
+    .bind(userId).first<{ deleted_at: number | null }>();
+  expect(row?.deleted_at).toBe(ts);
+});
+
+test("restore: account not scheduled for deletion → 400", async () => {
+  const app = createApp();
+  await makeUser("not-deleted-pass");
+
+  const res = await app.request("/api/restore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password: "not-deleted-pass" }),
+  }, testEnv);
+  expect(res.status).toBe(400);
+});
+
+test("restore: login error carries the deleted flag for the dashboard", async () => {
+  const app = createApp();
+  const { userId } = await makeUser("deleted-login-pass");
+  await DB().prepare(
+    "UPDATE users SET deleted_at = ?, active = 0, forwarding = 0 WHERE id = ?"
+  ).bind(Date.now(), userId).run();
+
+  const res = await app.request("/api/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password: "deleted-login-pass" }),
+  }, testEnv);
+  expect(res.status).toBe(403);
+  expect(await res.json<any>()).toMatchObject({ deleted: true });
 });
 
 test("delete: existing session cannot access guarded routes after deletion", async () => {

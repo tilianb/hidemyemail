@@ -120,6 +120,8 @@ export const api = {
   login: (password: string) => req<{ ok: true; userId: number } | { mfa_required: true }>("/api/login", { method: "POST", body: JSON.stringify({ password }) }),
   completeMfa: (code: string) => req<{ ok: true; userId: number }>("/api/mfa/complete", { method: "POST", body: JSON.stringify({ code }) }),
   register: (password: string) => req<{ ok: true, userId: number }>("/api/register", { method: "POST", body: JSON.stringify({ password }) }),
+  // Cancel a pending account deletion during the 7-day grace window
+  restoreAccount: (password: string) => req<{ ok: true }>("/api/restore", { method: "POST", body: JSON.stringify({ password }) }),
   logout: () => req<{ ok: true }>("/api/logout", { method: "POST" }),
   stats: () => req<StatsData>("/api/stats"),
   

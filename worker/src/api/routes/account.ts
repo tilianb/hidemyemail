@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { deleteCookie } from "hono/cookie";
 import type { AppEnv } from "../app";
 import { derivePassphraseHash, timingSafeEqual } from "../../lib/auth";
+import { hasFreshAuth } from "../auth-helpers";
 import { decryptDestination } from "../../lib/crypto";
 
 export function accountRoutes() {
@@ -12,8 +13,12 @@ export function accountRoutes() {
    * Returns a JSON file with the authenticated user's data. Secret columns
    * (passphrase_hash, recovery_token, recovery_*) are omitted. Destination
    * emails are decrypted to plaintext.
+   *
+   * Fresh-auth gated: the export contains every destination address in
+   * plaintext, so a stolen long-lived session cookie alone must not reach it.
    */
   r.get("/export", async (c) => {
+    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
     const userId = c.get("userId");
     const db = c.env.DB;
     const key = c.env.DESTINATION_ENCRYPTION_KEY;
@@ -113,6 +118,9 @@ export function accountRoutes() {
    * by the scheduled purge job.
    */
   r.post("/delete", async (c) => {
+    // Fresh-auth gated on top of the password check: with MFA enabled, a
+    // stolen session + password alone must not be able to destroy the account.
+    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
     const userId = c.get("userId");
     if (userId === 1) {
       return c.json({ error: "The admin account cannot be self-deleted" }, 403);

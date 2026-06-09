@@ -266,7 +266,10 @@ export function Settings() {
       await api.exportAccount();
       toast("Export downloaded", "success");
     } catch (err: any) {
-      toast(err?.message || "Failed to export data", "error");
+      // Export is fresh-auth gated: a long-lived session alone can't reach it
+      toast(err?.message === "unauthorized"
+        ? "Session is not fresh — log out and back in, then retry"
+        : err?.message || "Failed to export data", "error");
     } finally {
       setExportLoading(false);
     }
@@ -284,7 +287,9 @@ export function Settings() {
       toast("Account scheduled for deletion", "success");
       setAuthed(false);
     } catch (err: any) {
-      toast(err?.message || "Failed to delete account", "error");
+      toast(err?.message === "unauthorized"
+        ? "Session is not fresh — log out and back in, then retry"
+        : err?.message || "Failed to delete account", "error");
       setDeletePassword("");
     } finally {
       setDeleteLoading(false);

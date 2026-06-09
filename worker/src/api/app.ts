@@ -74,6 +74,7 @@ export function createApp() {
     if (
       p === "/api/login" ||
       p === "/api/register" ||
+      p === "/api/restore" ||
       p === "/api/logout" ||
       p === "/api/verify" ||
       p === "/api/ses/notification" ||
