@@ -67,6 +67,31 @@ The app stores feature settings in D1. Important defaults:
 
 Most settings are editable from the Admin dashboard.
 
+## Per-subdomain policies
+
+Each subdomain you own can override the global defaults, so a subdomain works
+as a self-contained mail category. Settings resolve most-specific first:
+**alias → subdomain → global**. On the Domains page:
+
+- **Catch-all** — `Inherit` / `On` / `Off`. Overrides `catch_all_auto_create`
+  for that subdomain, e.g. let `shop.example.com` auto-create any address while
+  your primary domain only accepts explicit aliases.
+- **Inline actions** — `Inherit` / `On` / `Off`. Overrides your per-user inline
+  toolbar preference for mail received on that subdomain.
+- **Default destination** — where mail without a per-alias destination is sent.
+
+## Sender rules (block / allow)
+
+The Blocks page manages sender rules scoped **globally**, to a **subdomain**, or
+to a single **alias**:
+
+- **Block** rules drop matching senders before forwarding.
+- **Allow** rules enable allowlist mode for their scope: once any allow rule
+  exists, only senders matching one are forwarded and everything else is
+  dropped. A matching block rule always wins over an allow rule.
+
+Patterns support wildcards (`*@spam.com`, `evil@badactor.org`).
+
 ## Cloudflare automatic deploys
 
 Cloudflare Workers Builds are supported with `worker/scripts/cf-build.sh`.

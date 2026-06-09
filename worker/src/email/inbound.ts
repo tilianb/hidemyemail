@@ -2,7 +2,7 @@ import type { Env } from "../types";
 import * as q from "../db/queries";
 import PostalMime from "postal-mime";
 import { createMimeMessage, Mailbox } from "mimetext";
-import { isBlocked } from "../lib/blocks";
+import { evaluateSenderRules } from "../lib/blocks";
 import { streamToBytes, toBase64 } from "../lib/bytes";
 import { parseMime, setHeader, removeHeaders, getHeader, serializeMime } from "../lib/mime";
 import { reverseAddress } from "../lib/reverse";
@@ -22,8 +22,11 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   const domain = await q.getDomain(db, domainName) as import("../types").DomainRow & { user_id: number };
   if (!domain || domain.active === 0) return;
 
-  // Check catch-all auto-create setting
-  const autoCreateEnabled = await getBoolSetting(db, "catch_all_auto_create");
+  // Check catch-all auto-create setting. A per-subdomain override (catch_all
+  // 0/1) wins; NULL falls back to the global setting.
+  const autoCreateEnabled = domain.catch_all != null
+    ? domain.catch_all === 1
+    : await getBoolSetting(db, "catch_all_auto_create");
   let alias = await q.getAlias(db, message.to.toLowerCase());
   
   if (!alias && autoCreateEnabled) {
@@ -81,8 +84,8 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
     return;
   }
 
-  const rules = await q.listBlocks(db, alias.id, alias.user_id);
-  if (isBlocked(rules, message.from)) {
+  const rules = await q.listBlocks(db, alias.id, alias.domain_id, alias.user_id);
+  if (evaluateSenderRules(rules, message.from) === "block") {
     await q.insertEvent(db, { alias_id: alias.id, type: "block", external_sender: message.from, ts: now });
     await q.incCounter(db, alias.id, "blocked_count");
     return;
@@ -112,12 +115,31 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   let dest = await decryptDestination(encDest, env.DESTINATION_ENCRYPTION_KEY);
   
   if (dest === "global") {
-    const globalDestRow = await db.prepare("SELECT email FROM destinations WHERE user_id = ? AND is_default = 1").bind(domain.user_id).first<{email: string}>();
+    const globalDestRow = await db.prepare("SELECT * FROM destinations WHERE user_id = ? AND is_default = 1").bind(domain.user_id).first<import("../types").DestinationRow>();
     if (!globalDestRow) {
       await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "no_destination", ts: now });
       return;
     }
+    // Suppression check for global (default) destination
+    if (globalDestRow.suppressed_at) {
+      await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "suppressed", ts: now });
+      return;
+    }
     dest = await decryptDestination(globalDestRow.email, env.DESTINATION_ENCRYPTION_KEY);
+  } else {
+    // Suppression check for named destination: look up by encrypted email hash
+    const { hashDestination } = await import("../lib/crypto");
+    const destHash = await hashDestination(dest.toLowerCase(), env.DESTINATION_ENCRYPTION_KEY);
+    let destRow: { suppressed_at: number | null } | null = null;
+    try {
+      destRow = await db.prepare("SELECT suppressed_at FROM destinations WHERE email_hash = ? AND user_id = ?").bind(destHash, alias.user_id).first<{ suppressed_at: number | null }>();
+    } catch (err: any) {
+      if (!String(err?.message ?? err).includes("no such column")) throw err;
+    }
+    if (destRow?.suppressed_at) {
+      await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "suppressed", ts: now });
+      return;
+    }
   }
 
   const reverseAddr = reverseAddress(localPart, message.from, domainName);
@@ -128,10 +150,12 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   if (alias.source !== "auto_over_quota") {
     const prefRow = await db.prepare("SELECT inline_actions_pref, inline_actions_position FROM users WHERE id = ?")
       .bind(alias.user_id).first<{ inline_actions_pref: string | null; inline_actions_position: string | null }>();
-    const userPref = prefRow?.inline_actions_pref;
-    if (userPref === "on") {
+    // Resolution: subdomain pref > user pref > global default. A subdomain is a
+    // mail category, so its setting is more specific than the user-wide one.
+    const effectivePref = domain.inline_actions_pref ?? prefRow?.inline_actions_pref;
+    if (effectivePref === "on") {
       inlineActionsEnabled = true;
-    } else if (userPref === "off") {
+    } else if (effectivePref === "off") {
       inlineActionsEnabled = false;
     } else {
       inlineActionsEnabled = await getBoolSetting(db, "inline_actions_default_enabled");
@@ -155,15 +179,27 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
     mime = setHeader(mime, "From", fromHeader);
     mime = setHeader(mime, "Reply-To", reverseAddr);
     mime = removeHeaders(mime, ["DKIM-Signature", "ARC-Seal", "ARC-Message-Signature", "ARC-Authentication-Results", "Return-Path", "Sender"]);
-    mime = setHeader(mime, "X-Reinjected", "1");
-    mime = setHeader(mime, "X-Forwarded-For", message.from);
-    mime = setHeader(mime, "X-Forwarded-To", message.to);
-    mime = setHeader(mime, "X-Original-From", origFrom);
+    // Internal-only forwarding metadata. Prefixed with X-HideMyEmail- so
+    // recipient spam filters don't recognise these as the generic forwarder
+    // / open-relay headers (X-Reinjected, X-Forwarded-For, X-Original-From)
+    // that classifiers learn to penalise. X-Reinjected is dropped entirely:
+    // nothing in the router uses it for loop detection.
+    mime = setHeader(mime, "X-HideMyEmail-Forwarded-For", message.from);
+    mime = setHeader(mime, "X-HideMyEmail-Forwarded-To", message.to);
+    mime = setHeader(mime, "X-HideMyEmail-Original-From", origFrom);
 
     const { signAction } = await import("./action");
     const disableSig = await signAction("disable", String(alias.id), env);
     const actionEmail = `action+disable=${alias.id}_${disableSig}@${domainName}`;
-    mime = setHeader(mime, "List-Unsubscribe", `<mailto:${actionEmail}>`);
+    const mainGlobalDomain = await getMainGlobalDomain(db, env);
+    const unsubHttps = mainGlobalDomain
+      ? `https://${mainGlobalDomain}/api/unsubscribe?a=${alias.id}&s=${disableSig}`
+      : "";
+    // RFC 8058 one-click: HTTPS form first so MUAs that support one-click
+    // (Gmail, Outlook, Yahoo) hit a real URL instead of the mailto fallback,
+    // which spam filters distrust when it carries an opaque local-part.
+    mime = setHeader(mime, "List-Unsubscribe",
+      unsubHttps ? `<${unsubHttps}>, <mailto:${actionEmail}>` : `<mailto:${actionEmail}>`);
     mime = setHeader(mime, "List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
 
     const rawBase64 = toBase64(serializeMime(mime));
@@ -280,15 +316,20 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   
   msg.setSender({ name: sanitize(display), addr: alias.full_address });
   msg.setHeader("Reply-To", new Mailbox({ addr: reverseAddr }));
-  msg.setHeader("X-Reinjected", "1");
-  msg.setHeader("X-Forwarded-For", message.from);
-  msg.setHeader("X-Forwarded-To", message.to);
-  msg.setHeader("X-Original-From", origFrom);
+  // See parallel block above for rationale on these header names.
+  msg.setHeader("X-HideMyEmail-Forwarded-For", message.from);
+  msg.setHeader("X-HideMyEmail-Forwarded-To", message.to);
+  msg.setHeader("X-HideMyEmail-Original-From", origFrom);
 
   const { signAction } = await import("./action");
   const disableSig = await signAction("disable", String(alias.id), env);
   const actionEmail = `action+disable=${alias.id}_${disableSig}@${domainName}`;
-  msg.setHeader("List-Unsubscribe", `<mailto:${actionEmail}>`);
+  const mainGlobalDomainForUnsub = await getMainGlobalDomain(db, env);
+  const unsubHttpsUrl = mainGlobalDomainForUnsub
+    ? `https://${mainGlobalDomainForUnsub}/api/unsubscribe?a=${alias.id}&s=${disableSig}`
+    : "";
+  msg.setHeader("List-Unsubscribe",
+    unsubHttpsUrl ? `<${unsubHttpsUrl}>, <mailto:${actionEmail}>` : `<mailto:${actionEmail}>`);
   msg.setHeader("List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
 
   if (!finalText && !finalHtml) {

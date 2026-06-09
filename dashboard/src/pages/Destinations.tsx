@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type Destination } from "../api";
 import { useToast, TableSkeleton, EmptyState } from "../ui";
-import { Send, CheckCircle2, Clock, Trash2 } from "lucide-react";
+import { Send, CheckCircle2, Clock, Trash2, AlertTriangle, PlayCircle } from "lucide-react";
 
 export function Destinations() {
   const { toast } = useToast();
@@ -56,6 +56,16 @@ export function Destinations() {
       toast("Default destination updated", "success");
     } catch (err: any) {
       toast(err.message || "Failed to set default destination", "error");
+    }
+  }
+
+  async function unsuppress(id: number) {
+    try {
+      await api.unsuppressDestination(id);
+      setRows(rs => rs.map(r => r.id === id ? { ...r, suppressed_at: null, suppression_reason: null, suppression_class: null } : r));
+      toast("Forwarding resumed", "success");
+    } catch (err: any) {
+      toast(err.message || "Failed to resume forwarding", "error");
     }
   }
 
@@ -117,15 +127,26 @@ export function Destinations() {
                       <span className="addr-mono">{d.email}</span>
                     </td>
                     <td>
-                      {d.verified_at ? (
-                        <span className="badge badge-green">
-                          <CheckCircle2 size={12} className="badge-icon" /> Verified
-                        </span>
-                      ) : (
-                        <span className="badge badge-yellow">
-                          <Clock size={12} className="badge-icon" /> Pending
-                        </span>
-                      )}
+                      <div className="destination-status">
+                        {d.suppressed_at ? (
+                          <span className="badge badge-red">
+                            <AlertTriangle size={12} className="badge-icon" /> Suppressed
+                          </span>
+                        ) : d.verified_at ? (
+                          <span className="badge badge-green">
+                            <CheckCircle2 size={12} className="badge-icon" /> Verified
+                          </span>
+                        ) : (
+                          <span className="badge badge-yellow">
+                            <Clock size={12} className="badge-icon" /> Pending
+                          </span>
+                        )}
+                        {d.suppressed_at && d.suppression_reason && (
+                          <span className="destination-status-detail">
+                            {d.suppression_reason.replace(/_/g, " ")}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td>
                       <span className="font-mono text-muted">
@@ -134,14 +155,21 @@ export function Destinations() {
                     </td>
                     <td>
                       <div className="table-actions">
-                        {d.is_default === 1 ? (
-                          <span className="badge badge-accent">
-                            Default
-                          </span>
-                        ) : d.verified_at && (
-                          <button className="btn btn-secondary btn-compact" onClick={() => setDefault(d.id)} title="Set as default">
-                            Set Default
+                        {d.suppressed_at && d.suppression_class === "soft" && (
+                          <button className="btn btn-secondary btn-compact" onClick={() => unsuppress(d.id)} title="Resume forwarding">
+                            <PlayCircle size={14} /> Resume
                           </button>
+                        )}
+                        {!d.suppressed_at && (
+                          d.is_default === 1 ? (
+                            <span className="badge badge-accent">
+                              Default
+                            </span>
+                          ) : d.verified_at && (
+                            <button className="btn btn-secondary btn-compact" onClick={() => setDefault(d.id)} title="Set as default">
+                              Set Default
+                            </button>
+                          )
                         )}
                         <button className="btn-icon danger" onClick={() => remove(d.id)} title="Remove destination">
                           <Trash2 size={16} />

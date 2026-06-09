@@ -2,6 +2,7 @@
 // These match the seed values in migration 0007_settings.sql.
 export const SETTING_DEFAULTS: Record<string, string> = {
   rate_limit_per_alias: "20",
+  rate_limit_reply_per_alias: "10",
   rate_limit_global: "1000",
   max_inbound_bytes: String(25 * 1024 * 1024),
   catch_all_auto_create: "true",
@@ -20,6 +21,8 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   max_subdomains: "5",
   inline_actions_default_enabled: "false",
   inline_actions_default_position: "footer",
+  soft_bounce_threshold: "3",
+  reply_distinct_recipient_cap: "15",
 };
 
 // Kept for backward-compat with any imports (tests, etc.)

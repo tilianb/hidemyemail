@@ -9,6 +9,9 @@ function fromHex(hex: string): Uint8Array {
   return out;
 }
 export function timingSafeEqual(a: string, b: string): boolean {
+  // Fail closed if either side is missing (e.g. an unconfigured hash/salt)
+  // rather than throwing on undefined.length.
+  if (typeof a !== "string" || typeof b !== "string") return false;
   if (a.length !== b.length) return false;
   let r = 0;
   for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
@@ -31,6 +34,8 @@ export async function derivePassphraseHash(passphrase: string, globalSaltHex: st
 }
 
 export async function verifyPassword(password: string, saltHex: string, hashHex: string): Promise<boolean> {
+  // No configured credential → no match (fail closed, never throw).
+  if (!saltHex || !hashHex) return false;
   const computed = await pbkdf2(password, fromHex(saltHex));
   return timingSafeEqual(computed, hashHex);
 }

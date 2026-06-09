@@ -10,6 +10,8 @@ export interface Domain {
   created_at: number;
   verified_at: number | null;
   verification_token: string | null;
+  catch_all: 0 | 1 | null;
+  inline_actions_pref: "on" | "off" | null;
 }
 
 export interface Alias {
@@ -32,6 +34,8 @@ export interface Alias {
 export interface Block {
   id: number;
   alias_id: number | null;
+  domain_id: number | null;
+  kind: "block" | "allow";
   pattern: string;
   created_at: number;
 }
@@ -84,6 +88,31 @@ export interface Destination {
   is_default: number;
   verified_at: number | null;
   created_at: number;
+  suppressed_at: number | null;
+  suppression_reason: string | null;
+  suppression_class: string | null;
+}
+
+export interface SuppressionEntry {
+  id: number;
+  user_id: number;
+  suppressed_at: number;
+  suppression_reason: string | null;
+  suppression_class: string | null;
+  bounce_24h: number;
+  bounce_7d: number;
+  complaint_24h: number;
+  complaint_7d: number;
+}
+
+export interface SuppressionSummary {
+  bounce_24h: number;
+  bounce_7d: number;
+  complaint_24h: number;
+  complaint_7d: number;
+  suppressed: number;
+  hard_suppressed: number;
+  soft_suppressed: number;
 }
 
 export const api = {
@@ -98,9 +127,12 @@ export const api = {
   createDestination: (email: string) => req<{ ok: true }>("/api/destinations", { method: "POST", body: JSON.stringify({ email }) }),
   deleteDestination: (id: number) => req<{ ok: true }>(`/api/destinations/${id}`, { method: "DELETE" }),
   setDefaultDestination: (id: number) => req<{ ok: true }>(`/api/destinations/${id}/default`, { method: "PATCH" }),
+  unsuppressDestination: (id: number) => req<{ ok: true }>(`/api/destinations/${id}/unsuppress`, { method: "POST" }),
 
   domains: () => req<Domain[]>("/api/domains"),
   createDomain: (domain: string, default_destination: string, base_domain_id?: number) => req<Domain>("/api/domains", { method: "POST", body: JSON.stringify({ domain, default_destination, base_domain_id }) }),
+  updateDomainDestination: (id: number, default_destination: string) => req<{ ok: true; default_destination: string }>(`/api/domains/${id}`, { method: "PATCH", body: JSON.stringify({ default_destination }) }),
+  patchDomain: (id: number, data: { catch_all?: 0 | 1 | null; inline_actions_pref?: "on" | "off" | null; default_destination?: string | null }) => req<{ ok: true }>(`/api/domains/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   deleteDomain: (id: number) => req<{ ok: true }>(`/api/domains/${id}`, { method: "DELETE" }),
 
   aliases: (q = "") => req<Alias[]>(`/api/aliases${q ? `?q=${encodeURIComponent(q)}` : ""}`),
@@ -110,7 +142,7 @@ export const api = {
   events: (id: number) => req<EmailEvent[]>(`/api/aliases/${id}/events`),
 
   blocks: () => req<Block[]>("/api/blocks"),
-  createBlock: (pattern: string, alias_id?: number) => req<Block>("/api/blocks", { method: "POST", body: JSON.stringify({ pattern, alias_id }) }),
+  createBlock: (pattern: string, opts?: { alias_id?: number; domain_id?: number; kind?: "block" | "allow" }) => req<Block>("/api/blocks", { method: "POST", body: JSON.stringify({ pattern, ...opts }) }),
   deleteBlock: (id: number) => req<{ ok: true }>(`/api/blocks/${id}`, { method: "DELETE" }),
 
   // Admin endpoints
@@ -150,6 +182,30 @@ export const api = {
   mfaDisable: (code: string) => req<{ ok: true }>("/api/settings/mfa/disable", { method: "POST", body: JSON.stringify({ code }) }),
   mfaRegenerateBackupCodes: (code: string) => req<{ ok: true; backupCodes: string[] }>("/api/settings/mfa/backup-codes", { method: "POST", body: JSON.stringify({ code }) }),
 
+  // Account data export — returns a JSON Blob for download
+  exportAccount: async (): Promise<void> => {
+    const res = await fetch("/api/account/export", { credentials: "include" });
+    if (res.status === 401) throw new Error("unauthorized");
+    if (!res.ok) {
+      let msg = `${res.status}`;
+      try { const b = await res.json(); if (b && typeof b === "object" && "error" in b) msg = (b as any).error; } catch { /* ignore */ }
+      throw new Error(msg);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `hidemyemail-export-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  // Account deletion — tombstones the account (7-day grace, then hard-delete)
+  deleteAccount: (password: string, confirm: string) =>
+    req<{ ok: true }>("/api/account/delete", { method: "POST", body: JSON.stringify({ password, confirm }) }),
+
   // Recovery endpoints
   recoverSendCode: (token: string) => req<{ ok: true }>("/api/recover/send-code", { method: "POST", body: JSON.stringify({ token }) }),
   recoverVerify: (token: string, code: string) => req<{ ok: true; passphrase: string }>("/api/recover/verify", { method: "POST", body: JSON.stringify({ token, code }) }),
@@ -159,4 +215,6 @@ export const api = {
   adminSettings: () => req<{ settings: Record<string, { value: string; updated_at: number }> }>("/api/admin/settings"),
   adminUpdateSettings: (data: Record<string, string>) => req<{ ok: true; updated: number }>("/api/admin/settings", { method: "PATCH", body: JSON.stringify(data) }),
   adminSendTestEmail: (data: { type: string; to: string }) => req<{ ok: true; type: string; to: string }>("/api/admin/test-email", { method: "POST", body: JSON.stringify(data) }),
+  adminSuppressions: () => req<{ suppressions: SuppressionEntry[]; totals: SuppressionSummary; health: "healthy" | "attention" }>("/api/admin/suppressions"),
+  adminClearSuppression: (id: number) => req<{ ok: true }>(`/api/admin/suppressions/${id}/clear`, { method: "POST" }),
 };

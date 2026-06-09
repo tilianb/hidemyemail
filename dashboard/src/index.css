@@ -334,6 +334,9 @@ select.input { cursor: pointer; }
   border-bottom: 1px solid var(--border);
 }
 .card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
   font-family: var(--font-display);
   font-size: 0.85rem;
   font-weight: 600;
@@ -436,6 +439,19 @@ select.input { cursor: pointer; }
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
+}
+.destination-status {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+.destination-status-detail {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  padding-left: 21px;
 }
 
 /* ─── Table ──────────────────────────────────────────────────────────────── */

@@ -83,9 +83,24 @@ export function authRoutes() {
       userId = 1;
     } else {
       const hash = await derivePassphraseHash(password, c.env.AUTH_PASSWORD_SALT);
-      const user = await c.env.DB.prepare(
-        "SELECT id, active FROM users WHERE passphrase_hash = ?"
-      ).bind(hash).first<{ id: number; active: number }>();
+      // Gracefully handle pre-migration DBs that lack the deleted_at column by
+      // selecting it as NULL when absent — the catch below treats that as zero.
+      let user: { id: number; active: number; deleted_at: number | null } | null = null;
+      try {
+        user = await c.env.DB.prepare(
+          "SELECT id, active, deleted_at FROM users WHERE passphrase_hash = ?"
+        ).bind(hash).first<{ id: number; active: number; deleted_at: number | null }>();
+      } catch (err: unknown) {
+        if (err instanceof Error && err.message.includes("no such column")) {
+          // Migration not yet applied — fall back to query without deleted_at
+          const u = await c.env.DB.prepare(
+            "SELECT id, active FROM users WHERE passphrase_hash = ?"
+          ).bind(hash).first<{ id: number; active: number }>();
+          user = u ? { ...u, deleted_at: null } : null;
+        } else {
+          throw err;
+        }
+      }
 
       if (!user) {
         await recordFailedAttempt(ip, c.env.DB);
@@ -94,6 +109,11 @@ export function authRoutes() {
       if (user.active === 0) {
         // Correct passphrase but disabled account — not a brute-force attempt.
         return c.json({ error: "Account is disabled" }, 403);
+      }
+      if (user.deleted_at !== null) {
+        // Account is tombstoned — pending purge. Reject explicitly even if
+        // somehow re-activated (active=0 already covers the normal path).
+        return c.json({ error: "Account has been deleted" }, 403);
       }
       userId = user.id;
     }
