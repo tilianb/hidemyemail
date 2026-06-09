@@ -23,6 +23,16 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   inline_actions_default_position: "footer",
   soft_bounce_threshold: "3",
   reply_distinct_recipient_cap: "15",
+  // SES receipt verdict handling for inbound forwards. Forwarded spam is
+  // re-signed with the alias domain's DKIM, so it burns OUR reputation:
+  // spam → flag (X-Spam-Flag, recipient filters can act), virus → drop.
+  spam_verdict_action: "flag",   // "forward" | "flag" | "drop"
+  virus_verdict_action: "drop",  // "forward" | "flag" | "drop"
+  // When to add our List-Unsubscribe header to forwards. Adding it to
+  // person-to-person mail makes it look like bulk mail to spam filters;
+  // "bulk_only" adds it only when the original message already carried
+  // List-Unsubscribe or Precedence: bulk/list.
+  unsubscribe_header_mode: "bulk_only", // "always" | "bulk_only" | "never"
 };
 
 /** All valid setting keys. Used to validate admin PATCH requests. */

@@ -26,8 +26,9 @@ export interface ReverseRow { id: number; token: string; alias_id: number; exter
 
 // Decoded reverse address: "shop+alice=store.com@domain" → { aliasLocal: "shop", externalSender: "alice@store.com" }
 export interface ParsedReverse { aliasLocal: string; externalSender: string; }
-// SES receipt verdicts threaded into reply routing as the anti-spoof gate.
-export interface ReplyAuth { spf?: string; dmarc?: string; }
+// SES receipt verdicts. spf/dmarc gate reverse-alias replies (anti-spoof);
+// spam/virus gate inbound forwards (sender-reputation protection).
+export interface ReplyAuth { spf?: string; dmarc?: string; spam?: string; virus?: string; }
 export interface BlockRow { id: number; user_id: number; alias_id: number | null; domain_id: number | null; kind: string; pattern: string; created_at: number; }
 export type EventType = "forward" | "reply" | "block" | "reject" | "error" | "bounce" | "soft_bounce" | "complaint";
 
