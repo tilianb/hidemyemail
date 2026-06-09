@@ -207,7 +207,7 @@ test("permanent bounce → destination suppressed (hard class)", async () => {
   expect(evtCount).toBe(1);
 });
 
-test("first suppression emails suppressed destination and default destination", async () => {
+test("hard suppression notification skips suppressed destination and emails default destination", async () => {
   const suppressedId = await insertDestination("bad@example.com");
   await DB().prepare("UPDATE destinations SET is_default = 0 WHERE id = ?").bind(suppressedId).run();
   const defaultId = await insertDestination("default@example.com");
@@ -231,7 +231,30 @@ test("first suppression emails suppressed destination and default destination", 
   });
 
   expect(res.status).toBe(200);
-  expect(sent.map(m => m.to).sort()).toEqual(["bad@example.com", "default@example.com"]);
+  expect(sent.map(m => m.to)).toEqual(["default@example.com"]);
+});
+
+test("hard suppression notification sends nothing when suppressed destination is the default", async () => {
+  await insertDestination("default-bad@example.com");
+
+  const sent: any[] = [];
+  const app = createApp();
+  const msg = {
+    notificationType: "Bounce",
+    bounce: {
+      bounceType: "Permanent",
+      bouncedRecipients: [{ emailAddress: "default-bad@example.com" }],
+    },
+  };
+  const signed = await signedNotification(msg);
+  const res = await postNotification(app, signed, {
+    SES_ACCESS_KEY_ID: "AKIATEST",
+    SES_SECRET_ACCESS_KEY: "testsecret",
+    __sesSend: async (_c: any, m: any) => { sent.push(m); return `mid-${sent.length}`; },
+  });
+
+  expect(res.status).toBe(200);
+  expect(sent).toHaveLength(0);
 });
 
 test("duplicate suppression does not resend notification", async () => {

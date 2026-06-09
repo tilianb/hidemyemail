@@ -194,11 +194,13 @@ async function notifySuppression(
     const mainGlobalDomain = await getEnvWithOverride(db, env, "main_global_domain") || "example.com";
     if (!sesAccessKeyId || !sesSecretAccessKey || !sesRegion) return;
 
-    const recipients = new Set<string>();
-    recipients.add(await decryptDestination(suppressed.email, env.DESTINATION_ENCRYPTION_KEY));
+    const recipientRows = new Map<number, string>();
+    if (suppressionClass === "soft") {
+      recipientRows.set(suppressed.id, suppressed.email);
+    }
     const defaultDestination = await findDefaultDestination(db, suppressed.user_id);
-    if (defaultDestination) {
-      recipients.add(await decryptDestination(defaultDestination.email, env.DESTINATION_ENCRYPTION_KEY));
+    if (defaultDestination && defaultDestination.id !== suppressed.id) {
+      recipientRows.set(defaultDestination.id, defaultDestination.email);
     }
 
     const isSoft = suppressionClass === "soft";
@@ -211,7 +213,8 @@ async function notifySuppression(
         : "A destination was paused after a permanent delivery failure. Hard suppressions protect shared sender reputation and must be cleared by an admin.";
 
     const sesSend: typeof sendRaw = (env as any).__sesSend ?? sendRaw;
-    for (const to of recipients) {
+    for (const encryptedEmail of recipientRows.values()) {
+      const to = await decryptDestination(encryptedEmail, env.DESTINATION_ENCRYPTION_KEY);
       await sesSend({
         accessKeyId: sesAccessKeyId,
         secretAccessKey: sesSecretAccessKey,
@@ -227,11 +230,11 @@ async function notifySuppression(
   }
 }
 
-async function findDefaultDestination(db: D1Database, userId: number): Promise<{ email: string } | null> {
+async function findDefaultDestination(db: D1Database, userId: number): Promise<{ id: number; email: string } | null> {
   try {
     return await db.prepare(
-      "SELECT email FROM destinations WHERE user_id = ? AND is_default = 1 AND verified_at IS NOT NULL LIMIT 1"
-    ).bind(userId).first<{ email: string }>();
+      "SELECT id, email FROM destinations WHERE user_id = ? AND is_default = 1 AND verified_at IS NOT NULL LIMIT 1"
+    ).bind(userId).first<{ id: number; email: string }>();
   } catch (err: any) {
     if (String(err?.message ?? err).includes("no such column")) return null;
     throw err;

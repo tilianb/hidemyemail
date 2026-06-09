@@ -3,6 +3,39 @@ import type { AppEnv } from "../app";
 import { encryptDestination, decryptDestination, hashDestination } from "../../lib/crypto";
 import { getMainGlobalDomain, getEnvWithOverride } from "../../lib/settings";
 
+type ResolvedDefaultDestination = {
+  encrypted: string | null;
+  hash: string | null;
+  publicValue: string | null | undefined;
+};
+
+async function resolveDefaultDestination(
+  db: D1Database,
+  userId: number,
+  defaultDestination: string | null | undefined,
+  encryptionKey: string,
+): Promise<ResolvedDefaultDestination | null> {
+  if (!defaultDestination) {
+    return { encrypted: null, hash: null, publicValue: defaultDestination };
+  }
+
+  const normalizedDestination = defaultDestination === "global" ? "global" : defaultDestination.toLowerCase();
+  const destinationHash = await hashDestination(normalizedDestination, encryptionKey);
+
+  if (normalizedDestination !== "global") {
+    const destVerified = await db.prepare(
+      "SELECT id FROM destinations WHERE user_id = ? AND email_hash = ? AND verified_at IS NOT NULL"
+    ).bind(userId, destinationHash).first();
+    if (!destVerified) return null;
+  }
+
+  return {
+    encrypted: await encryptDestination(normalizedDestination, encryptionKey),
+    hash: destinationHash,
+    publicValue: normalizedDestination,
+  };
+}
+
 export function domainRoutes() {
   const r = new Hono<AppEnv>();
   r.get("/domains", async (c) => {
@@ -89,28 +122,20 @@ export function domainRoutes() {
       }
     }
 
-    if (default_destination && default_destination !== "global") {
-      const emailHash = await hashDestination(default_destination.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY);
-      const destVerified = await c.env.DB.prepare("SELECT id FROM destinations WHERE user_id = ? AND email_hash = ? AND verified_at IS NOT NULL").bind(userId, emailHash).first();
-      if (!destVerified) return c.json({ error: "Destination email not verified" }, 400);
-    }
+    const resolvedDefaultDestination = await resolveDefaultDestination(
+      c.env.DB,
+      userId,
+      default_destination,
+      c.env.DESTINATION_ENCRYPTION_KEY,
+    );
+    if (!resolvedDefaultDestination) return c.json({ error: "Destination email not verified" }, 400);
 
     try {
-      let destEnc = null;
-      let destHash = null;
-      if (default_destination === "global") {
-        destEnc = await encryptDestination("global", c.env.DESTINATION_ENCRYPTION_KEY);
-        destHash = await hashDestination("global", c.env.DESTINATION_ENCRYPTION_KEY);
-      } else if (default_destination) {
-        destEnc = await encryptDestination(default_destination.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY);
-        destHash = await hashDestination(default_destination.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY);
-      }
-      
       const res = await c.env.DB.prepare(
         "INSERT INTO domains (user_id, is_global, domain, default_destination, default_destination_hash, created_at) VALUES (?, 0, ?, ?, ?, ?)"
-      ).bind(userId, fullDomain, destEnc, destHash, Date.now()).run();
+      ).bind(userId, fullDomain, resolvedDefaultDestination.encrypted, resolvedDefaultDestination.hash, Date.now()).run();
       
-      return c.json({ id: res.meta.last_row_id, domain: fullDomain, default_destination });
+      return c.json({ id: res.meta.last_row_id, domain: fullDomain, default_destination: resolvedDefaultDestination.publicValue });
     } catch (err: any) {
       return c.json({ error: "Domain already exists or internal error" }, 500);
     }
@@ -155,23 +180,15 @@ export function domainRoutes() {
     if (b.default_destination !== undefined) {
       // Validate the destination: "global", or a verified destination owned by
       // this user. Mirror POST /domains. Fail closed.
-      let destEnc: string | null = null;
-      let destHash: string | null = null;
-      if (b.default_destination === "global") {
-        destEnc = await encryptDestination("global", c.env.DESTINATION_ENCRYPTION_KEY);
-        destHash = await hashDestination("global", c.env.DESTINATION_ENCRYPTION_KEY);
-      } else if (b.default_destination) {
-        const lower = b.default_destination.toLowerCase();
-        const emailHash = await hashDestination(lower, c.env.DESTINATION_ENCRYPTION_KEY);
-        const destVerified = await c.env.DB.prepare(
-          "SELECT id FROM destinations WHERE user_id = ? AND email_hash = ? AND verified_at IS NOT NULL"
-        ).bind(userId, emailHash).first();
-        if (!destVerified) return c.json({ error: "Destination email not verified" }, 400);
-        destEnc = await encryptDestination(lower, c.env.DESTINATION_ENCRYPTION_KEY);
-        destHash = emailHash;
-      }
-      sets.push("default_destination = ?"); vals.push(destEnc);
-      sets.push("default_destination_hash = ?"); vals.push(destHash);
+      const resolvedDefaultDestination = await resolveDefaultDestination(
+        c.env.DB,
+        userId,
+        b.default_destination,
+        c.env.DESTINATION_ENCRYPTION_KEY,
+      );
+      if (!resolvedDefaultDestination) return c.json({ error: "Destination email not verified" }, 400);
+      sets.push("default_destination = ?"); vals.push(resolvedDefaultDestination.encrypted);
+      sets.push("default_destination_hash = ?"); vals.push(resolvedDefaultDestination.hash);
     }
 
     if (!sets.length) return c.json({ error: "No fields" }, 400);
