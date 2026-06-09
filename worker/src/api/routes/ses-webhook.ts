@@ -176,9 +176,13 @@ async function notifySuppression(
     if (suppressionClass === "soft") {
       recipientRows.set(suppressed.id, suppressed.email);
     }
-    const defaultDestination = await findDefaultDestination(db, suppressed.user_id);
-    if (defaultDestination && defaultDestination.id !== suppressed.id) {
-      recipientRows.set(defaultDestination.id, defaultDestination.email);
+    // Notify another working mailbox of the same user: prefer the default
+    // destination; when the suppressed destination IS the default (the
+    // single-destination common case), fall back to any other verified,
+    // unsuppressed destination so a hard suppression never goes silent.
+    const notifyDestination = await findNotificationDestination(db, suppressed.user_id, suppressed.id);
+    if (notifyDestination) {
+      recipientRows.set(notifyDestination.id, notifyDestination.email);
     }
 
     const isSoft = suppressionClass === "soft";
@@ -208,8 +212,9 @@ async function notifySuppression(
   }
 }
 
-async function findDefaultDestination(db: D1Database, userId: number): Promise<{ id: number; email: string } | null> {
+async function findNotificationDestination(db: D1Database, userId: number, excludeId: number): Promise<{ id: number; email: string } | null> {
   return await db.prepare(
-    "SELECT id, email FROM destinations WHERE user_id = ? AND is_default = 1 AND verified_at IS NOT NULL LIMIT 1"
-  ).bind(userId).first<{ id: number; email: string }>();
+    "SELECT id, email FROM destinations WHERE user_id = ? AND id != ? AND verified_at IS NOT NULL AND suppressed_at IS NULL " +
+    "ORDER BY is_default DESC, created_at ASC LIMIT 1"
+  ).bind(userId, excludeId).first<{ id: number; email: string }>();
 }
