@@ -24,13 +24,13 @@ test("reverse upsert returns stable token per (alias,sender)", async () => {
   expect(found?.external_sender).toBe("boss@store.com");
 });
 
-test("countEventsSince counts only recent rows for alias", async () => {
+test("countEventsByTypeSince counts only recent rows for alias", async () => {
   const d = await q.createDomain(DB(), "hidemyemail.dev", "real@me.com");
   const a = await q.autoCreateAlias(DB(), d, "shop", "shop@hidemyemail.dev");
   const now = Date.now();
   await q.insertEvent(DB(), { alias_id: a!.id, type: "forward", ts: now });
   await q.insertEvent(DB(), { alias_id: a!.id, type: "forward", ts: now - 7200_000 });
-  expect(await q.countEventsSince(DB(), a!.id, now - 3600_000)).toBe(1);
+  expect(await q.countEventsByTypeSince(DB(), a!.id, now - 3600_000, ["forward", "reply"])).toBe(1);
 });
 
 test("ownerDestinations unions domain defaults and alias overrides", async () => {

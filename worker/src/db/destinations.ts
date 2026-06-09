@@ -15,29 +15,22 @@ export async function suppressDestination(
   suppressionClass: string,
   ts: number
 ): Promise<boolean> {
-  try {
-    const current = await db.prepare(
-      "SELECT suppressed_at FROM destinations WHERE id = ?"
-    ).bind(id).first<{ suppressed_at: number | null }>();
-    await db.prepare(
-      "UPDATE destinations SET suppressed_at = ?, suppression_reason = ?, suppression_class = ? WHERE id = ?"
-    ).bind(ts, reason, suppressionClass, id).run();
-    return !current?.suppressed_at;
-  } catch (err: any) {
-    if (String(err?.message ?? err).includes("no such column")) return false;
-    throw err;
-  }
+  // Single conditional UPDATE so concurrent SNS deliveries for the same
+  // destination cannot both observe an unsuppressed row and both fire a
+  // notification. We suppress when the row is not yet suppressed, OR when a
+  // hard signal arrives for a currently-soft suppression (upgrade soft → hard).
+  // `meta.changes` tells us whether this call was the one that changed state.
+  const r = await db.prepare(
+    "UPDATE destinations SET suppressed_at = ?, suppression_reason = ?, suppression_class = ? " +
+    "WHERE id = ? AND (suppressed_at IS NULL OR (suppression_class = 'soft' AND ? = 'hard'))"
+  ).bind(ts, reason, suppressionClass, id, suppressionClass).run();
+  return (r.meta?.changes ?? 0) > 0;
 }
 
 export async function clearSuppression(db: D1Database, id: number): Promise<void> {
-  try {
-    await db.prepare(
-      "UPDATE destinations SET suppressed_at = NULL, suppression_reason = NULL, suppression_class = NULL WHERE id = ?"
-    ).bind(id).run();
-  } catch (err: any) {
-    if (String(err?.message ?? err).includes("no such column")) return;
-    throw err;
-  }
+  await db.prepare(
+    "UPDATE destinations SET suppressed_at = NULL, suppression_reason = NULL, suppression_class = NULL WHERE id = ?"
+  ).bind(id).run();
 }
 
 export async function getDestinationByEmail(db: D1Database, emailHash: string, userId: number): Promise<DestinationRow | null> {
@@ -47,11 +40,22 @@ export async function getDestinationByEmail(db: D1Database, emailHash: string, u
 }
 
 export async function ownerDestinations(db: D1Database, userId: number, key: string): Promise<Set<string>> {
-  const a = await db.prepare("SELECT default_destination AS d FROM domains WHERE user_id = ? OR is_global = 1").bind(userId).all<{ d: string }>();
-  const b = await db.prepare("SELECT DISTINCT destination AS d FROM aliases WHERE destination IS NOT NULL AND user_id = ?").bind(userId).all<{ d: string }>();
+  // The reply gate treats these addresses as "the user's own mailboxes". Scope
+  // strictly to rows this user owns — domains' default destinations, alias
+  // overrides, and the user's verified destinations. The user's is_default
+  // destination (used by aliases on shared global domains) lives in the
+  // destinations table, so global-domain replies still resolve without pulling
+  // OTHER tenants' addresses in via `is_global` — which previously let anyone
+  // aligned as a global domain's default destination relay through every
+  // tenant's alias.
+  const [a, b, c] = await Promise.all([
+    db.prepare("SELECT default_destination AS d FROM domains WHERE user_id = ?").bind(userId).all<{ d: string }>(),
+    db.prepare("SELECT DISTINCT destination AS d FROM aliases WHERE destination IS NOT NULL AND user_id = ?").bind(userId).all<{ d: string }>(),
+    db.prepare("SELECT email AS d FROM destinations WHERE user_id = ?").bind(userId).all<{ d: string }>(),
+  ]);
 
   const decrypted = new Set<string>();
-  for (const x of [...(a.results ?? []), ...(b.results ?? [])]) {
+  for (const x of [...(a.results ?? []), ...(b.results ?? []), ...(c.results ?? [])]) {
     if (x.d) {
       decrypted.add((await decryptDestination(x.d, key)).toLowerCase());
     }

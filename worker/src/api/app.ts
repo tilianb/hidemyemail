@@ -84,19 +84,8 @@ export function createApp() {
     if (!token) return c.json({ error: "Unauthorized" }, 401);
     const userId = await verifySession(c.env.SESSION_SECRET, token);
     if (userId === null) return c.json({ error: "Unauthorized" }, 401);
-    let user: { active: number; deleted_at?: number | null } | null = null;
-    try {
-      user = await c.env.DB.prepare("SELECT active, deleted_at FROM users WHERE id = ?")
-        .bind(userId).first<{ active: number; deleted_at: number | null }>();
-    } catch (err: unknown) {
-      if (err instanceof Error && err.message.includes("no such column")) {
-        // Pre-migration: fall back without deleted_at
-        user = await c.env.DB.prepare("SELECT active FROM users WHERE id = ?")
-          .bind(userId).first<{ active: number }>();
-      } else {
-        throw err;
-      }
-    }
+    const user = await c.env.DB.prepare("SELECT active, deleted_at FROM users WHERE id = ?")
+      .bind(userId).first<{ active: number; deleted_at: number | null }>();
     if (!user || user.active === 0) return c.json({ error: "Account is disabled" }, 403);
     if (user.deleted_at != null) return c.json({ error: "Account has been deleted" }, 403);
     c.set("userId", userId);

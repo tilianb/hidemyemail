@@ -25,10 +25,5 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   reply_distinct_recipient_cap: "15",
 };
 
-// Kept for backward-compat with any imports (tests, etc.)
-export const RATE_PER_HOUR_ALIAS = 20;   // mirrors old ANONADDY_LIMIT
-export const RATE_PER_HOUR_GLOBAL = 1000;
-export const MAX_INBOUND_BYTES = 25 * 1024 * 1024;
-
 /** All valid setting keys. Used to validate admin PATCH requests. */
 export const VALID_SETTING_KEYS = Object.keys(SETTING_DEFAULTS);

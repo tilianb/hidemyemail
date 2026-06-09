@@ -8,7 +8,7 @@ import { parseMime, setHeader, removeHeaders, getHeader, serializeMime } from ".
 import { reverseAddress } from "../lib/reverse";
 import { sendRaw, SesTransientError } from "../lib/ses";
 import { getNumericSetting, getBoolSetting, getEnvWithOverride, getSetting, getMainGlobalDomain } from "../lib/settings";
-import { decryptDestination } from "../lib/crypto";
+import { decryptDestination, hashDestination } from "../lib/crypto";
 import { extractDisplayName, sanitizeDisplay as sanitize, buildForwardedFromDisplay } from "../lib/from-format";
 
 type SesSend = typeof sendRaw;
@@ -94,8 +94,8 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   // Read rate limits from DB settings (falls back to hardcoded defaults)
   const rateLimitAlias = await getNumericSetting(db, "rate_limit_per_alias");
   const rateLimitGlobal = await getNumericSetting(db, "rate_limit_global");
-  const aliasCount = await q.countEventsSince(db, alias.id, now - 3600_000);
-  const globalCount = await q.countEventsSince(db, null, now - 3600_000);
+  const aliasCount = await q.countEventsByTypeSince(db, alias.id, now - 3600_000, ["forward", "reply"]);
+  const globalCount = await q.countEventsByTypeSince(db, null, now - 3600_000, ["forward", "reply"]);
   if ((rateLimitAlias >= 0 && aliasCount >= rateLimitAlias) || (rateLimitGlobal >= 0 && globalCount >= rateLimitGlobal)) {
     await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "rate", ts: now });
     return;
@@ -128,14 +128,8 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
     dest = await decryptDestination(globalDestRow.email, env.DESTINATION_ENCRYPTION_KEY);
   } else {
     // Suppression check for named destination: look up by encrypted email hash
-    const { hashDestination } = await import("../lib/crypto");
     const destHash = await hashDestination(dest.toLowerCase(), env.DESTINATION_ENCRYPTION_KEY);
-    let destRow: { suppressed_at: number | null } | null = null;
-    try {
-      destRow = await db.prepare("SELECT suppressed_at FROM destinations WHERE email_hash = ? AND user_id = ?").bind(destHash, alias.user_id).first<{ suppressed_at: number | null }>();
-    } catch (err: any) {
-      if (!String(err?.message ?? err).includes("no such column")) throw err;
-    }
+    const destRow = await db.prepare("SELECT suppressed_at FROM destinations WHERE email_hash = ? AND user_id = ?").bind(destHash, alias.user_id).first<{ suppressed_at: number | null }>();
     if (destRow?.suppressed_at) {
       await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "suppressed", ts: now });
       return;

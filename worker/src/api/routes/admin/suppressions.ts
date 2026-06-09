@@ -9,51 +9,33 @@ export function registerAdminSuppressionRoutes(r: Hono<AppEnv>) {
     const now = Date.now();
     const since24h = now - 24 * 3600_000;
     const since7d = now - 7 * 24 * 3600_000;
-    const emptySuppressionResponse = {
-      suppressions: [],
-      totals: {
-        bounce_24h: 0,
-        bounce_7d: 0,
-        complaint_24h: 0,
-        complaint_7d: 0,
-        suppressed: 0,
-        hard_suppressed: 0,
-        soft_suppressed: 0,
-      },
-      health: "healthy" as const,
-      migration_pending: true,
+    // Bounce totals sum hard ('bounce') and soft ('soft_bounce') events.
+    const countEvents = (types: string, since: number) =>
+      db.prepare(`SELECT COUNT(*) AS n FROM events WHERE type IN (${types}) AND ts >= ?`).bind(since).first<{ n: number }>();
+    const [bounce24hTotal, bounce7dTotal, complaint24hTotal, complaint7dTotal] = await Promise.all([
+      countEvents("'bounce','soft_bounce'", since24h),
+      countEvents("'bounce','soft_bounce'", since7d),
+      countEvents("'complaint'", since24h),
+      countEvents("'complaint'", since7d),
+    ]);
+    const totalsBase = {
+      bounce_24h: bounce24hTotal?.n ?? 0,
+      bounce_7d: bounce7dTotal?.n ?? 0,
+      complaint_24h: complaint24hTotal?.n ?? 0,
+      complaint_7d: complaint7dTotal?.n ?? 0,
     };
+    const healthFor = (hardSuppressed: number) =>
+      totalsBase.complaint_24h > 0 || totalsBase.bounce_24h >= 10 || hardSuppressed > 0 ? "attention" : "healthy";
 
-    const bounce24hTotal = await db.prepare(
-      "SELECT COUNT(*) AS n FROM events WHERE type = 'bounce' AND ts >= ?"
-    ).bind(since24h).first<{ n: number }>();
-    const bounce7dTotal = await db.prepare(
-      "SELECT COUNT(*) AS n FROM events WHERE type = 'bounce' AND ts >= ?"
-    ).bind(since7d).first<{ n: number }>();
-    const complaint24hTotal = await db.prepare(
-      "SELECT COUNT(*) AS n FROM events WHERE type = 'complaint' AND ts >= ?"
-    ).bind(since24h).first<{ n: number }>();
-    const complaint7dTotal = await db.prepare(
-      "SELECT COUNT(*) AS n FROM events WHERE type = 'complaint' AND ts >= ?"
-    ).bind(since7d).first<{ n: number }>();
-
-    let suppressedRows;
-    try {
-      suppressedRows = await db.prepare(
-        "SELECT id, user_id, email_hash, suppressed_at, suppression_reason, suppression_class FROM destinations WHERE suppressed_at IS NOT NULL ORDER BY suppressed_at DESC"
-      ).all<{ id: number; user_id: number; email_hash: string | null; suppressed_at: number; suppression_reason: string | null; suppression_class: string | null }>();
-    } catch (err: any) {
-      if (String(err?.message ?? err).includes("no such column")) {
-        return c.json(emptySuppressionResponse);
-      }
-      throw err;
-    }
+    const suppressedRows = await db.prepare(
+      "SELECT id, user_id, email_hash, suppressed_at, suppression_reason, suppression_class FROM destinations WHERE suppressed_at IS NOT NULL ORDER BY suppressed_at DESC"
+    ).all<{ id: number; user_id: number; email_hash: string | null; suppressed_at: number; suppression_reason: string | null; suppression_class: string | null }>();
 
     const results = [];
     for (const row of suppressedRows.results ?? []) {
       const [bounce24h, bounce7d, complaint24h, complaint7d] = await Promise.all([
-        countEventsForDestinationSince(db, row.id, "bounce", since24h),
-        countEventsForDestinationSince(db, row.id, "bounce", since7d),
+        countEventsForDestinationSince(db, row.id, ["bounce", "soft_bounce"], since24h),
+        countEventsForDestinationSince(db, row.id, ["bounce", "soft_bounce"], since7d),
         countEventsForDestinationSince(db, row.id, "complaint", since24h),
         countEventsForDestinationSince(db, row.id, "complaint", since7d),
       ]);
@@ -71,18 +53,15 @@ export function registerAdminSuppressionRoutes(r: Hono<AppEnv>) {
       });
     }
 
+    const hardSuppressed = results.filter(s => s.suppression_class === "hard").length;
     const totals = {
-      bounce_24h: bounce24hTotal?.n ?? 0,
-      bounce_7d: bounce7dTotal?.n ?? 0,
-      complaint_24h: complaint24hTotal?.n ?? 0,
-      complaint_7d: complaint7dTotal?.n ?? 0,
+      ...totalsBase,
       suppressed: results.length,
-      hard_suppressed: results.filter(s => s.suppression_class === "hard").length,
+      hard_suppressed: hardSuppressed,
       soft_suppressed: results.filter(s => s.suppression_class === "soft").length,
     };
-    const health = totals.complaint_24h > 0 || totals.bounce_24h >= 10 || totals.hard_suppressed > 0 ? "attention" : "healthy";
 
-    return c.json({ suppressions: results, totals, health });
+    return c.json({ suppressions: results, totals, health: healthFor(hardSuppressed) });
   });
 
   r.post("/suppressions/:id/clear", async (c) => {

@@ -83,24 +83,9 @@ export function authRoutes() {
       userId = 1;
     } else {
       const hash = await derivePassphraseHash(password, c.env.AUTH_PASSWORD_SALT);
-      // Gracefully handle pre-migration DBs that lack the deleted_at column by
-      // selecting it as NULL when absent — the catch below treats that as zero.
-      let user: { id: number; active: number; deleted_at: number | null } | null = null;
-      try {
-        user = await c.env.DB.prepare(
-          "SELECT id, active, deleted_at FROM users WHERE passphrase_hash = ?"
-        ).bind(hash).first<{ id: number; active: number; deleted_at: number | null }>();
-      } catch (err: unknown) {
-        if (err instanceof Error && err.message.includes("no such column")) {
-          // Migration not yet applied — fall back to query without deleted_at
-          const u = await c.env.DB.prepare(
-            "SELECT id, active FROM users WHERE passphrase_hash = ?"
-          ).bind(hash).first<{ id: number; active: number }>();
-          user = u ? { ...u, deleted_at: null } : null;
-        } else {
-          throw err;
-        }
-      }
+      const user = await c.env.DB.prepare(
+        "SELECT id, active, deleted_at FROM users WHERE passphrase_hash = ?"
+      ).bind(hash).first<{ id: number; active: number; deleted_at: number | null }>();
 
       if (!user) {
         await recordFailedAttempt(ip, c.env.DB);
@@ -123,14 +108,9 @@ export function authRoutes() {
       return c.json({ error: "Invalid" }, 401);
     }
 
-    // Fail open only for missing-table (migration not yet applied); re-throw all other errors
-    // so transient D1 failures never silently bypass MFA on protected accounts.
     const mfa = await c.env.DB.prepare(
       "SELECT totp_enabled FROM mfa WHERE user_id = ?"
-    ).bind(userId).first<{ totp_enabled: number }>().catch((err: unknown) => {
-      if (err instanceof Error && err.message.includes("no such table")) return null;
-      throw err;
-    });
+    ).bind(userId).first<{ totp_enabled: number }>();
 
     if (mfa?.totp_enabled === 1) {
       const challenge = await signMfaChallenge(c.env.SESSION_SECRET, userId);
@@ -403,10 +383,7 @@ export function authRoutes() {
 
     await db.prepare(
       "UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL WHERE user_id = ?"
-    ).bind(user.id).run().catch((err: unknown) => {
-      if (err instanceof Error && err.message.includes("no such table")) return;
-      throw err;
-    });
+    ).bind(user.id).run();
 
     // Log them in immediately
     await setAuthenticatedCookies(c, user.id);

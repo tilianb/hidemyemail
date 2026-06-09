@@ -20,33 +20,38 @@ export async function hasPriorInbound(db: D1Database, aliasId: number, externalS
   return !!r;
 }
 
-export async function countEventsSince(db: D1Database, aliasId: number | null, since: number): Promise<number> {
+// Count events of the given type(s) since `since`, optionally scoped to one
+// alias (null = global across all aliases). Single implementation backing both
+// the inbound forward/reply rate limit and the reply-only cap.
+export async function countEventsByTypeSince(
+  db: D1Database,
+  aliasId: number | null,
+  since: number,
+  types: EventType[]
+): Promise<number> {
+  const placeholders = types.map(() => "?").join(",");
   const sql = aliasId == null
-    ? "SELECT COUNT(*) AS n FROM events WHERE ts >= ? AND type IN ('forward','reply')"
-    : "SELECT COUNT(*) AS n FROM events WHERE ts >= ? AND alias_id = ? AND type IN ('forward','reply')";
-  const stmt = aliasId == null ? db.prepare(sql).bind(since) : db.prepare(sql).bind(since, aliasId);
-  const r = await stmt.first<{ n: number }>();
+    ? `SELECT COUNT(*) AS n FROM events WHERE ts >= ? AND type IN (${placeholders})`
+    : `SELECT COUNT(*) AS n FROM events WHERE ts >= ? AND alias_id = ? AND type IN (${placeholders})`;
+  const binds = aliasId == null ? [since, ...types] : [since, aliasId, ...types];
+  const r = await db.prepare(sql).bind(...binds).first<{ n: number }>();
   return r?.n ?? 0;
 }
 
-export async function countRepliesSince(db: D1Database, aliasId: number | null, since: number): Promise<number> {
-  const sql = aliasId == null
-    ? "SELECT COUNT(*) AS n FROM events WHERE ts >= ? AND type = 'reply'"
-    : "SELECT COUNT(*) AS n FROM events WHERE ts >= ? AND alias_id = ? AND type = 'reply'";
-  const stmt = aliasId == null ? db.prepare(sql).bind(since) : db.prepare(sql).bind(since, aliasId);
-  const r = await stmt.first<{ n: number }>();
-  return r?.n ?? 0;
-}
-
+// Count destination-scoped events (bounce/soft_bounce/complaint) since `since`.
+// Accepts multiple types so the dashboard can sum hard + soft bounces while the
+// soft-suppression trigger counts only soft bounces.
 export async function countEventsForDestinationSince(
   db: D1Database,
   destinationId: number,
-  eventType: EventType,
+  eventType: EventType | EventType[],
   since: number
 ): Promise<number> {
+  const types = Array.isArray(eventType) ? eventType : [eventType];
+  const placeholders = types.map(() => "?").join(",");
   const r = await db.prepare(
-    "SELECT COUNT(*) AS n FROM events WHERE detail = ? AND ts >= ? AND type = ?"
-  ).bind(`dest:${destinationId}`, since, eventType).first<{ n: number }>();
+    `SELECT COUNT(*) AS n FROM events WHERE detail = ? AND ts >= ? AND type IN (${placeholders})`
+  ).bind(`dest:${destinationId}`, since, ...types).first<{ n: number }>();
   return r?.n ?? 0;
 }
 

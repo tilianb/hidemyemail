@@ -115,10 +115,7 @@ export function settingsRoutes() {
     // let an attacker with a stolen session pivot the account onto their own TOTP.
     const current = await c.env.DB.prepare(
       "SELECT totp_enabled FROM mfa WHERE user_id = ?"
-    ).bind(userId).first<{ totp_enabled: number }>().catch((err: unknown) => {
-      if (err instanceof Error && err.message.includes("no such table")) return null;
-      throw err;
-    });
+    ).bind(userId).first<{ totp_enabled: number }>();
     if (current?.totp_enabled === 1) {
       return c.json({ error: "MFA already enabled — disable it first to re-enroll" }, 409);
     }

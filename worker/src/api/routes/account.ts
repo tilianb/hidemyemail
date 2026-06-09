@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { deleteCookie } from "hono/cookie";
 import type { AppEnv } from "../app";
-import { derivePassphraseHash } from "../../lib/auth";
+import { derivePassphraseHash, timingSafeEqual } from "../../lib/auth";
 import { decryptDestination } from "../../lib/crypto";
 
 export function accountRoutes() {
@@ -125,7 +125,7 @@ export function accountRoutes() {
     }
 
     const hash = await derivePassphraseHash(password, c.env.AUTH_PASSWORD_SALT);
-    if (hash !== userRow.passphrase_hash) {
+    if (!timingSafeEqual(hash, userRow.passphrase_hash)) {
       return c.json({ error: "Invalid password" }, 401);
     }
 

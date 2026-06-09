@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import * as q from "../../db/queries";
 import { signAction } from "../../email/action";
+import { timingSafeEqual } from "../../lib/auth";
+import { escapeHtml } from "../../lib/html";
 
 // RFC 8058 one-click unsubscribe.
 //
@@ -69,7 +71,7 @@ async function parseSignedRequest(
   if (!Number.isFinite(aliasId) || aliasId <= 0) return { error: { body: "Bad request", status: 400 } };
 
   const expected = await signAction("disable", String(aliasId), c.env);
-  if (!constantTimeEqual(s, expected)) return { error: { body: "Forbidden", status: 403 } };
+  if (!timingSafeEqual(s, expected)) return { error: { body: "Forbidden", status: 403 } };
 
   return { a, s, aliasId };
 }
@@ -78,8 +80,8 @@ async function parseSignedRequest(
 // already constrained — `a` is a positive int, `s` an HMAC hex — but escape
 // defensively before interpolating into HTML attributes).
 function confirmPage(a: string, s: string): string {
-  const ea = escapeAttr(a);
-  const es = escapeAttr(s);
+  const ea = escapeHtml(a);
+  const es = escapeHtml(s);
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
     `<meta name="viewport" content="width=device-width,initial-scale=1">` +
     `<meta name="robots" content="noindex">` +
@@ -90,17 +92,4 @@ function confirmPage(a: string, s: string): string {
     `<p>Confirm to disable this alias. It will no longer forward incoming mail. You can re-enable it from your dashboard.</p>` +
     `<form method="POST" action="/api/unsubscribe?a=${ea}&amp;s=${es}">` +
     `<button type="submit">Unsubscribe</button></form></body></html>`;
-}
-
-function escapeAttr(v: string): string {
-  return v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function constantTimeEqual(a: string, b: string): boolean {
-  let match = a.length === b.length;
-  const len = Math.max(a.length, b.length);
-  for (let i = 0; i < len; i++) {
-    if (a.charCodeAt(i) !== b.charCodeAt(i)) match = false;
-  }
-  return match;
 }

@@ -29,7 +29,7 @@ export interface ParsedReverse { aliasLocal: string; externalSender: string; }
 // SES receipt verdicts threaded into reply routing as the anti-spoof gate.
 export interface ReplyAuth { spf?: string; dmarc?: string; }
 export interface BlockRow { id: number; user_id: number; alias_id: number | null; domain_id: number | null; kind: string; pattern: string; created_at: number; }
-export type EventType = "forward" | "reply" | "block" | "reject" | "error" | "bounce" | "complaint";
+export type EventType = "forward" | "reply" | "block" | "reject" | "error" | "bounce" | "soft_bounce" | "complaint";
 
 export interface DestinationRow {
   id: number;

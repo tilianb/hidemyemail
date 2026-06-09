@@ -79,6 +79,37 @@ export function sesWebhookRoutes() {
   return r;
 }
 
+// Walk an SNS bounce/complaint recipient list: hash each address, look up the
+// matching destinations, log a stable `*_unknown_destination` error when none
+// match, and hand every matched destination to `handle`. Shared by bounce and
+// complaint processing so the unknown-recipient logging and lookup never drift.
+async function processRecipients(
+  env: AppEnv["Bindings"],
+  recipients: any[],
+  encKey: string,
+  now: number,
+  unknownDetail: string,
+  handle: (dest: import("../../types").DestinationRow, addr: string) => Promise<void>,
+): Promise<void> {
+  const db = env.DB;
+  for (const recipient of recipients) {
+    const addr: string = recipient.emailAddress;
+    if (!addr) continue;
+
+    const emailHash = await hashDestination(addr.toLowerCase(), encKey);
+    const destinations = await q.findDestinationsByHash(db, emailHash);
+
+    if (destinations.length === 0) {
+      console.log(`${unknownDetail}: ${addr}`);
+      await q.insertEvent(db, { alias_id: null, type: "error", external_sender: addr, detail: unknownDetail, ts: now });
+    }
+
+    for (const dest of destinations) {
+      await handle(dest, addr);
+    }
+  }
+}
+
 async function processBounce(env: AppEnv["Bindings"], msg: any, encKey: string, now: number): Promise<void> {
   const db = env.DB;
   const bounce = msg.bounce;
@@ -87,54 +118,28 @@ async function processBounce(env: AppEnv["Bindings"], msg: any, encKey: string, 
     return;
   }
 
-  const bounceType: string = bounce.bounceType ?? "";
-  const isHard = bounceType === "Permanent";
+  const isHard = (bounce.bounceType ?? "") === "Permanent";
   const softThreshold = await getNumericSetting(db, "soft_bounce_threshold");
 
-  for (const recipient of bounce.bouncedRecipients) {
-    const addr: string = recipient.emailAddress;
-    if (!addr) continue;
-
-    const emailHash = await hashDestination(addr.toLowerCase(), encKey);
-    const destinations = await q.findDestinationsByHash(db, emailHash);
-
-    if (destinations.length === 0) {
-      console.log(`Bounce for unknown destination: ${addr}`);
-      await q.insertEvent(db, {
-        alias_id: null,
-        type: "error",
-        external_sender: addr,
-        detail: "ses:bounce_unknown_destination",
-        ts: now,
-      });
-    }
-
-    for (const dest of destinations) {
-      // Always insert a bounce event referencing this destination
-      await q.insertEvent(db, {
-        alias_id: null,
-        type: "bounce",
-        external_sender: addr,
-        detail: `dest:${dest.id}`,
-        ts: now,
-      });
-
-      if (isHard) {
-        // Hard bounce: suppress immediately
-        const changed = await q.suppressDestination(db, dest.id, "hard_bounce", "hard", now);
-        if (changed) await notifySuppression(env, dest, "hard_bounce", "hard");
-      } else {
-        // Soft/Transient bounce: count prior soft bounce events in last 24h
-        // The event we just inserted is included in this count
-        const since = now - 24 * 3600_000;
-        const bounceCount = await q.countEventsForDestinationSince(db, dest.id, "bounce", since);
-        if (softThreshold > 0 && bounceCount >= softThreshold) {
-          const changed = await q.suppressDestination(db, dest.id, "soft_bounce", "soft", now);
-          if (changed) await notifySuppression(env, dest, "soft_bounce", "soft");
-        }
+  await processRecipients(env, bounce.bouncedRecipients, encKey, now, "ses:bounce_unknown_destination", async (dest, addr) => {
+    if (isHard) {
+      // Hard bounce: record and suppress immediately.
+      await q.insertEvent(db, { alias_id: null, type: "bounce", external_sender: addr, detail: `dest:${dest.id}`, ts: now });
+      const changed = await q.suppressDestination(db, dest.id, "hard_bounce", "hard", now);
+      if (changed) await notifySuppression(env, dest, "hard_bounce", "hard");
+    } else {
+      // Soft/transient bounce: record as soft_bounce so the threshold counts
+      // ONLY soft bounces (a prior hard bounce must never inflate the count).
+      // The event we just inserted is included in the count.
+      await q.insertEvent(db, { alias_id: null, type: "soft_bounce", external_sender: addr, detail: `dest:${dest.id}`, ts: now });
+      const since = now - 24 * 3600_000;
+      const softCount = await q.countEventsForDestinationSince(db, dest.id, "soft_bounce", since);
+      if (softThreshold > 0 && softCount >= softThreshold) {
+        const changed = await q.suppressDestination(db, dest.id, "soft_bounce", "soft", now);
+        if (changed) await notifySuppression(env, dest, "soft_bounce", "soft");
       }
     }
-  }
+  });
 }
 
 async function processComplaint(env: AppEnv["Bindings"], msg: any, encKey: string, now: number): Promise<void> {
@@ -145,39 +150,12 @@ async function processComplaint(env: AppEnv["Bindings"], msg: any, encKey: strin
     return;
   }
 
-  for (const recipient of complaint.complainedRecipients) {
-    const addr: string = recipient.emailAddress;
-    if (!addr) continue;
-
-    const emailHash = await hashDestination(addr.toLowerCase(), encKey);
-    const destinations = await q.findDestinationsByHash(db, emailHash);
-
-    if (destinations.length === 0) {
-      console.log(`Complaint for unknown destination: ${addr}`);
-      await q.insertEvent(db, {
-        alias_id: null,
-        type: "error",
-        external_sender: addr,
-        detail: "ses:complaint_unknown_destination",
-        ts: now,
-      });
-    }
-
-    for (const dest of destinations) {
-      // Insert complaint event referencing this destination
-      await q.insertEvent(db, {
-        alias_id: null,
-        type: "complaint",
-        external_sender: addr,
-        detail: `dest:${dest.id}`,
-        ts: now,
-      });
-
-      // Always hard-suppress on complaint
-      const changed = await q.suppressDestination(db, dest.id, "complaint", "hard", now);
-      if (changed) await notifySuppression(env, dest, "complaint", "hard");
-    }
-  }
+  await processRecipients(env, complaint.complainedRecipients, encKey, now, "ses:complaint_unknown_destination", async (dest, addr) => {
+    await q.insertEvent(db, { alias_id: null, type: "complaint", external_sender: addr, detail: `dest:${dest.id}`, ts: now });
+    // Always hard-suppress on complaint.
+    const changed = await q.suppressDestination(db, dest.id, "complaint", "hard", now);
+    if (changed) await notifySuppression(env, dest, "complaint", "hard");
+  });
 }
 
 async function notifySuppression(
@@ -231,12 +209,7 @@ async function notifySuppression(
 }
 
 async function findDefaultDestination(db: D1Database, userId: number): Promise<{ id: number; email: string } | null> {
-  try {
-    return await db.prepare(
-      "SELECT id, email FROM destinations WHERE user_id = ? AND is_default = 1 AND verified_at IS NOT NULL LIMIT 1"
-    ).bind(userId).first<{ id: number; email: string }>();
-  } catch (err: any) {
-    if (String(err?.message ?? err).includes("no such column")) return null;
-    throw err;
-  }
+  return await db.prepare(
+    "SELECT id, email FROM destinations WHERE user_id = ? AND is_default = 1 AND verified_at IS NOT NULL LIMIT 1"
+  ).bind(userId).first<{ id: number; email: string }>();
 }

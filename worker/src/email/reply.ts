@@ -92,8 +92,8 @@ export async function handleReply(
   // just because they received many forwards. -1 disables a cap.
   const replyCap = await getNumericSetting(db, "rate_limit_reply_per_alias");
   const globalCap = await getNumericSetting(db, "rate_limit_global");
-  const aliasCount = await q.countRepliesSince(db, alias.id, now - 3600_000);
-  const globalCount = await q.countRepliesSince(db, null, now - 3600_000);
+  const aliasCount = await q.countEventsByTypeSince(db, alias.id, now - 3600_000, ["reply"]);
+  const globalCount = await q.countEventsByTypeSince(db, null, now - 3600_000, ["reply"]);
   if ((replyCap >= 0 && aliasCount >= replyCap) || (globalCap >= 0 && globalCount >= globalCap)) {
     await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: parsed.externalSender, detail: "rate", ts: now });
     return;

@@ -120,10 +120,10 @@ async function setSoftBounceThreshold(threshold: number) {
   ).bind(String(threshold)).run();
 }
 
-/** Count bounce events for a destination. */
+/** Count bounce events (hard + soft) for a destination. */
 async function countBounceEvents(destId: number): Promise<number> {
   const r = await DB().prepare(
-    "SELECT COUNT(*) AS n FROM events WHERE type = 'bounce' AND detail = ?"
+    "SELECT COUNT(*) AS n FROM events WHERE type IN ('bounce','soft_bounce') AND detail = ?"
   ).bind(`dest:${destId}`).first<{ n: number }>();
   return r?.n ?? 0;
 }
