@@ -30,11 +30,27 @@ export function accountRoutes() {
     const domainsResult = await db.prepare(
       "SELECT id, domain, default_destination, active, created_at, verified_at, verification_token, is_global, allow_custom_aliases, allow_subdomain_aliases, catch_all, inline_actions_pref FROM domains WHERE user_id = ?"
     ).bind(userId).all<Record<string, unknown>>();
+    const domains = await Promise.all(
+      (domainsResult.results ?? []).map(async (d) => ({
+        ...d,
+        default_destination: typeof d.default_destination === "string"
+          ? await decryptDestination(d.default_destination, key)
+          : d.default_destination,
+      }))
+    );
 
     // Aliases owned by this user
     const aliasesResult = await db.prepare(
       "SELECT id, domain_id, local_part, full_address, destination, label, active, source, fwd_count, blocked_count, reply_count, created_at, last_seen_at, muted_until FROM aliases WHERE user_id = ?"
     ).bind(userId).all<Record<string, unknown>>();
+    const aliases = await Promise.all(
+      (aliasesResult.results ?? []).map(async (a) => ({
+        ...a,
+        destination: typeof a.destination === "string"
+          ? await decryptDestination(a.destination, key)
+          : a.destination,
+      }))
+    );
 
     // Destinations — decrypt email for plaintext export
     const destinationsResult = await db.prepare(
@@ -73,8 +89,8 @@ export function accountRoutes() {
     const payload = {
       exported_at: ts,
       user,
-      domains: domainsResult.results ?? [],
-      aliases: aliasesResult.results ?? [],
+      domains,
+      aliases,
       destinations,
       blocks: blocksResult.results ?? [],
       events: [...(eventsResult.results ?? []), ...destinationEvents],

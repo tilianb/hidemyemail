@@ -106,6 +106,31 @@ test("export returns only the caller's data", async () => {
   expect(allEmails).not.toContain("other@example.com");
 });
 
+test("export decrypts alias and domain destination overrides", async () => {
+  const app = createApp();
+  const { userId, cookie } = await makeUser();
+  const domainDestination = await encryptDestination("subdomain@example.com", testEnv.DESTINATION_ENCRYPTION_KEY);
+  const aliasDestination = await encryptDestination("alias@example.com", testEnv.DESTINATION_ENCRYPTION_KEY);
+
+  const domRes = await DB().prepare(
+    "INSERT INTO domains (user_id, is_global, domain, default_destination, active, created_at) VALUES (?, 0, 'export.example.com', ?, 1, ?)"
+  ).bind(userId, domainDestination, Date.now()).run();
+  const domainId = Number(domRes.meta.last_row_id);
+
+  await DB().prepare(
+    "INSERT INTO aliases (domain_id, user_id, local_part, full_address, destination, active, source, created_at) VALUES (?, ?, 'desk', 'desk@export.example.com', ?, 1, 'dashboard', ?)"
+  ).bind(domainId, userId, aliasDestination, Date.now()).run();
+
+  const res = await app.request("/api/account/export", {
+    headers: { cookie },
+  }, testEnv);
+
+  expect(res.status).toBe(200);
+  const body = await res.json<any>();
+  expect(body.domains[0].default_destination).toBe("subdomain@example.com");
+  expect(body.aliases[0].destination).toBe("alias@example.com");
+});
+
 test("export includes events only for caller's aliases", async () => {
   const app = createApp();
   const { userId, cookie } = await makeUser();
