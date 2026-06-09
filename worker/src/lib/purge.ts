@@ -21,10 +21,10 @@ export async function hardDeleteUser(db: D1Database, userId: number): Promise<vo
   await db.prepare(
     "DELETE FROM reverse_map WHERE alias_id IN (SELECT id FROM aliases WHERE user_id = ?)"
   ).bind(userId).run();
+  await db.prepare("DELETE FROM blocks WHERE user_id = ?").bind(userId).run();
 
   // 2. Top-level owned rows
   await db.prepare("DELETE FROM aliases WHERE user_id = ?").bind(userId).run();
-  await db.prepare("DELETE FROM blocks WHERE user_id = ?").bind(userId).run();
   await db.prepare("DELETE FROM destinations WHERE user_id = ?").bind(userId).run();
   await db.prepare("DELETE FROM domains WHERE user_id = ?").bind(userId).run();
 

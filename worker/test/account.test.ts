@@ -279,6 +279,7 @@ test("purge: user with deleted_at past 7 days is fully removed", async () => {
   ).bind(domainId, userId, Date.now()).run();
   const aliasId = Number(aliasRes.meta.last_row_id);
   await DB().prepare("INSERT INTO events (alias_id, type, ts) VALUES (?, 'forward', ?)").bind(aliasId, Date.now()).run();
+  await DB().prepare("INSERT INTO blocks (user_id, alias_id, pattern, created_at) VALUES (?, ?, 'spam@example.com', ?)").bind(userId, aliasId, Date.now()).run();
   await DB().prepare("INSERT INTO events (alias_id, type, detail, ts) VALUES (NULL, 'bounce', ?, ?)").bind(`dest:${destId}`, Date.now()).run();
 
   // Set deleted_at 8 days ago (past the 7-day window)
@@ -306,6 +307,10 @@ test("purge: user with deleted_at past 7 days is fully removed", async () => {
   expect(eventRow).toBeNull();
   const destEventRow = await DB().prepare("SELECT id FROM events WHERE detail = ?").bind(`dest:${destId}`).first();
   expect(destEventRow).toBeNull();
+
+  // Alias-scoped blocks must be gone before their parent alias is deleted
+  const blockRow = await DB().prepare("SELECT id FROM blocks WHERE alias_id = ?").bind(aliasId).first();
+  expect(blockRow).toBeNull();
 });
 
 test("purge: user with deleted_at within 7 days is retained", async () => {
