@@ -15,13 +15,16 @@ import { useToast } from "./ui";
 
 type Tab = "domains" | "aliases" | "destinations" | "blocks" | "stats" | "settings" | "admin";
 
-const BASE_NAV = [
+// `overflow` items leave the mobile bottom tab bar (max 5 tabs) and surface
+// as icon buttons in the mobile top bar instead. Desktop sidebar shows all.
+type NavItem = { id: Tab; label: string; icon: typeof Globe; title: string; overflow?: boolean };
+const BASE_NAV: NavItem[] = [
   { id: "domains" as Tab, label: "Domains", icon: Globe, title: "Managed domains" },
   { id: "aliases" as Tab, label: "Aliases", icon: Mail, title: "Email aliases" },
   { id: "destinations" as Tab, label: "Destinations", icon: Send, title: "Verified destinations" },
   { id: "blocks" as Tab, label: "Blocks", icon: Ban, title: "Blocked senders" },
   { id: "stats" as Tab, label: "Stats", icon: BarChart3, title: "Activity & stats" },
-  { id: "settings" as Tab, label: "Settings", icon: SettingsIcon, title: "Account preferences & security" },
+  { id: "settings" as Tab, label: "Settings", icon: SettingsIcon, title: "Account preferences & security", overflow: true },
 ];
 
 export function App() {
@@ -31,8 +34,9 @@ export function App() {
   const { toast } = useToast();
 
   const navItems = isAdmin
-    ? [...BASE_NAV, { id: "admin" as Tab, label: "Admin", icon: Shield, title: "System Administration" }]
+    ? [...BASE_NAV, { id: "admin" as Tab, label: "Admin", icon: Shield, title: "System Administration", overflow: true }]
     : BASE_NAV;
+  const overflowItems = navItems.filter(n => n.overflow);
 
   const logout = async () => {
     try {
@@ -93,9 +97,25 @@ export function App() {
         <span className="sidebar-logo">
           hide<span className="brand-redact" style={{ fontSize: "0.85em", padding: "0 4px", verticalAlign: "middle" }}>my</span>email
         </span>
-        <button className="btn-ghost mobile-signout" onClick={logout} title="Sign out" aria-label="Sign out">
-          <LogOut size={18} />
-        </button>
+        <div className="mobile-top-actions">
+          {overflowItems.map(n => {
+            const Icon = n.icon;
+            return (
+              <button
+                key={n.id}
+                className={`btn-ghost mobile-top-action${tab === n.id ? " active" : ""}`}
+                onClick={() => setTab(n.id)}
+                title={n.title}
+                aria-label={n.label}
+              >
+                <Icon size={18} />
+              </button>
+            );
+          })}
+          <button className="btn-ghost mobile-signout" onClick={logout} title="Sign out" aria-label="Sign out">
+            <LogOut size={18} />
+          </button>
+        </div>
       </header>
 
       {/* Sidebar */}
@@ -113,7 +133,7 @@ export function App() {
             return (
               <button
                 key={n.id}
-                className={`nav-item${tab === n.id ? " active" : ""}`}
+                className={`nav-item${tab === n.id ? " active" : ""}${n.overflow ? " nav-overflow" : ""}`}
                 onClick={() => setTab(n.id)}
                 title={n.title}
               >

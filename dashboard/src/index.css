@@ -1,16 +1,16 @@
 /* ─── Design tokens ─────────────────────────────────────────────────────── */
 :root {
-  /* Canvas layers — warm charcoal, faintly amber-tinted toward the light */
-  --canvas:        #0c0b0a;
-  --surface-0:     #11100e;
-  --surface-1:     #181612;
-  --surface-2:     #1f1d18;
-  --surface-3:     #27241e;
-  --surface-hover: #2d2a23;
+  /* Canvas layers */
+  --canvas:        #0d0d0f;
+  --surface-0:     #111114;
+  --surface-1:     #18181d;
+  --surface-2:     #1f1f26;
+  --surface-3:     #26262f;
+  --surface-hover: #2c2c37;
 
   /* Borders */
-  --border:        rgba(255,224,138,0.07);
-  --border-strong: rgba(255,224,138,0.14);
+  --border:        rgba(255,255,255,0.07);
+  --border-strong: rgba(255,255,255,0.13);
 
   /* Signal accent — phosphor amber */
   --accent:        #ffb300;
@@ -33,7 +33,7 @@
   --blue-dim:      rgba(108,180,255,0.12);
 
   /* Redaction bar (the motif) */
-  --redact:        #0c0b0a;
+  --redact:        #0d0d0f;
   --redact-reveal: #ffb300;
 
   /* Typography */
@@ -62,8 +62,8 @@
   --shadow-md: 0 4px 16px rgba(0,0,0,0.6), 0 1px 3px rgba(0,0,0,0.4);
   --shadow-lg: 0 8px 32px rgba(0,0,0,0.7), 0 2px 8px rgba(0,0,0,0.5);
   --shadow-accent: 0 0 0 1px var(--accent), 0 0 16px var(--accent-glow);
-  /* Soft amber lift for hoverable surfaces */
-  --shadow-lift: 0 6px 24px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,179,0,0.06);
+  /* Soft lift for hoverable surfaces */
+  --shadow-lift: 0 6px 24px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.05);
 
   /* Transitions */
   --t-fast: 120ms ease;
@@ -81,11 +81,8 @@ body {
   line-height: 1.6;
   min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
-  /* atmosphere: faint phosphor glow from the top + film-grain noise */
-  background-image:
-    radial-gradient(1100px 480px at 18% -8%, rgba(255,179,0,0.05), transparent 62%),
-    radial-gradient(800px 420px at 92% 110%, rgba(255,179,0,0.025), transparent 60%),
-    url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.028'/%3E%3C/svg%3E");
+  /* film-grain noise overlay */
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.028'/%3E%3C/svg%3E");
   background-attachment: fixed;
 }
 
@@ -769,7 +766,7 @@ table.dossier tbody td {
 }
 .page-header {
   margin-bottom: var(--space-8);
-  animation: fade-up 350ms ease both;
+  animation: fade-up 350ms ease backwards;
 }
 .page-title-row {
   display: flex;
@@ -1024,14 +1021,17 @@ table.dossier tbody td {
   from { opacity: 0; transform: scale(0.96); }
   to   { opacity: 1; transform: scale(1); }
 }
-.stagger-1 { animation: fade-up 350ms ease both 60ms; }
-.stagger-2 { animation: fade-up 350ms ease both 120ms; }
-.stagger-3 { animation: fade-up 350ms ease both 180ms; }
-.stagger-4 { animation: fade-up 350ms ease both 240ms; }
-.stagger-5 { animation: fade-up 350ms ease both 300ms; }
-.stagger-6 { animation: fade-up 350ms ease both 360ms; }
-.stagger-7 { animation: fade-up 350ms ease both 420ms; }
-.stagger-8 { animation: fade-up 350ms ease both 480ms; }
+/* `backwards` (not `both`): a filled-forward animation pins `transform`
+   forever, which kills hover transforms on the same element (admin panel
+   cards stuttered — shadow lifted but the card couldn't move). */
+.stagger-1 { animation: fade-up 350ms ease backwards 60ms; }
+.stagger-2 { animation: fade-up 350ms ease backwards 120ms; }
+.stagger-3 { animation: fade-up 350ms ease backwards 180ms; }
+.stagger-4 { animation: fade-up 350ms ease backwards 240ms; }
+.stagger-5 { animation: fade-up 350ms ease backwards 300ms; }
+.stagger-6 { animation: fade-up 350ms ease backwards 360ms; }
+.stagger-7 { animation: fade-up 350ms ease backwards 420ms; }
+.stagger-8 { animation: fade-up 350ms ease backwards 480ms; }
 
 /* ─── Environment variable list ─────────────────────────────────────────── */
 .env-list {
@@ -1721,7 +1721,7 @@ table.dossier tbody td {
     align-items: center;
     justify-content: space-between;
     padding: calc(10px + env(safe-area-inset-top)) var(--space-4) 10px;
-    background: rgba(17,16,14,0.86);
+    background: rgba(17,17,20,0.86);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border-bottom: 1px solid var(--border);
@@ -1731,6 +1731,19 @@ table.dossier tbody td {
   }
   .mobile-topbar .sidebar-logo { font-size: 0.95rem; }
   .mobile-signout { padding: 10px; }
+  .mobile-top-actions { display: flex; align-items: center; gap: 2px; }
+  .mobile-top-action {
+    padding: 10px;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+  }
+  .mobile-top-action.active {
+    color: var(--accent);
+    background: var(--accent-dim);
+  }
+
+  /* Settings/Admin live in the top bar on mobile — keep the tab bar at 5 */
+  .nav-item.nav-overflow { display: none; }
 
   /* Sidebar -> fixed bottom tab bar */
   .sidebar {
@@ -1745,7 +1758,7 @@ table.dossier tbody td {
     padding-bottom: env(safe-area-inset-bottom);
     border-right: none;
     border-top: 1px solid var(--border);
-    background: rgba(17,16,14,0.92);
+    background: rgba(17,17,20,0.92);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     overflow: visible;
