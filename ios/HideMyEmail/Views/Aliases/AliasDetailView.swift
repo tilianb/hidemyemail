@@ -14,6 +14,8 @@ struct AliasDetailView: View {
     @State private var showDeleteConfirm = false
     @State private var blocks: [Block] = []
     @State private var loadingBlocks = false
+    @State private var events: [EmailEvent] = []
+    @State private var loadingEvents = false
 
     // Rules that apply to this alias, in the Worker's resolution order:
     // alias-specific, then its subdomain, then account-wide.
@@ -71,6 +73,19 @@ struct AliasDetailView: View {
             }
 
             Section {
+                if loadingEvents && events.isEmpty {
+                    HStack { Spacer(); ProgressView(); Spacer() }
+                } else if events.isEmpty {
+                    Text("No mail yet.")
+                        .foregroundStyle(Theme.textSecondary)
+                } else {
+                    ForEach(events.prefix(20)) { eventRow($0) }
+                }
+            } header: {
+                Text("Recent Mail")
+            }
+
+            Section {
                 if loadingBlocks && blocks.isEmpty {
                     HStack { Spacer(); ProgressView(); Spacer() }
                 } else if scopedBlocks.isEmpty {
@@ -101,6 +116,7 @@ struct AliasDetailView: View {
             if let error { ErrorBanner(message: error) }
         }
         .task { await loadBlocks() }
+        .task { await loadEvents() }
         .onDisappear {
             // Persist a pending label edit when the user navigates back without
             // hitting return. Detached from the view's lifecycle so teardown
@@ -149,6 +165,60 @@ struct AliasDetailView: View {
         defer { loadingBlocks = false }
         do { blocks = try await client.blocks() }
         catch { handle(error) }
+    }
+
+    private func loadEvents() async {
+        guard let client = app.api() else { return }
+        loadingEvents = true
+        defer { loadingEvents = false }
+        do { events = try await client.events(aliasId: alias.id) }
+        catch { handle(error) }
+    }
+
+    private func eventRow(_ e: EmailEvent) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: eventIcon(e.type))
+                .foregroundStyle(eventColor(e.type))
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(e.subject ?? e.externalSender ?? e.detail ?? e.type)
+                    .font(Theme.body(14))
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    if e.subject != nil, let sender = e.externalSender {
+                        Text(sender).font(Theme.mono(11)).lineLimit(1)
+                    }
+                    Text(e.date, format: .relative(presentation: .named))
+                }
+                .font(.caption)
+                .foregroundStyle(Theme.textSecondary)
+            }
+            Spacer()
+            Text(e.type.uppercased())
+                .font(Theme.body(9, .semibold))
+                .foregroundStyle(eventColor(e.type))
+        }
+    }
+
+    private func eventIcon(_ type: String) -> String {
+        switch type {
+        case "forward": return "arrow.right.circle.fill"
+        case "reply":   return "arrowshape.turn.up.left.circle.fill"
+        case "block":   return "hand.raised.fill"
+        case "reject":  return "xmark.circle.fill"
+        case "bounce", "soft_bounce": return "exclamationmark.triangle.fill"
+        default:         return "questionmark.circle"
+        }
+    }
+
+    private func eventColor(_ type: String) -> Color {
+        switch type {
+        case "forward": return Theme.green
+        case "reply":   return Theme.accent
+        case "block", "reject": return Theme.red
+        case "bounce", "soft_bounce", "error": return Theme.red
+        default:         return Theme.textSecondary
+        }
     }
 
     private func setActive(_ value: Bool) async {

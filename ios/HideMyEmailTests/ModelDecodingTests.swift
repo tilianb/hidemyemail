@@ -133,4 +133,44 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(cfg.maxTotalAliases, 10)
         XCTAssertTrue(cfg.aliasQuotaBufferEnabled)
     }
+
+    func testDestinationSuppressionDecodes() throws {
+        // Soft-suppressed destination → user can self-resume.
+        let soft = try decoder.decode(Destination.self, from: Data("""
+        {"id": 1, "email": "me@x.com", "is_default": 1, "verified_at": 1000, "created_at": 1000,
+         "suppressed_at": 2000, "suppression_reason": "soft_bounce", "suppression_class": "soft"}
+        """.utf8))
+        XCTAssertTrue(soft.isSuppressed)
+        XCTAssertTrue(soft.canSelfUnsuppress)
+
+        // Hard suppression → admin-only clear.
+        let hard = try decoder.decode(Destination.self, from: Data("""
+        {"id": 2, "email": "b@x.com", "is_default": 0, "verified_at": 1000, "created_at": 1000,
+         "suppressed_at": 2000, "suppression_reason": "complaint", "suppression_class": "hard"}
+        """.utf8))
+        XCTAssertTrue(hard.isSuppressed)
+        XCTAssertFalse(hard.canSelfUnsuppress)
+
+        // Pre-migration servers omit the fields entirely.
+        let legacy = try decoder.decode(Destination.self, from: Data("""
+        {"id": 3, "email": "c@x.com", "is_default": 0, "verified_at": null, "created_at": 1000}
+        """.utf8))
+        XCTAssertFalse(legacy.isSuppressed)
+    }
+
+    func testEmailEventDecodes() throws {
+        let events = try decoder.decode([EmailEvent].self, from: Data("""
+        [
+          {"id": 1, "alias_id": 7, "type": "forward", "external_sender": "a@store.com",
+           "subject": "Order", "bytes": 1200, "detail": null, "ts": 1700000000000},
+          {"id": 2, "alias_id": 7, "type": "reject", "external_sender": null,
+           "subject": null, "bytes": null, "detail": "rate", "ts": 1700000100000}
+        ]
+        """.utf8))
+        XCTAssertEqual(events.count, 2)
+        XCTAssertEqual(events[0].type, "forward")
+        XCTAssertEqual(events[0].subject, "Order")
+        XCTAssertEqual(events[1].detail, "rate")
+        XCTAssertEqual(events[0].date.timeIntervalSince1970, 1_700_000_000, accuracy: 1)
+    }
 }

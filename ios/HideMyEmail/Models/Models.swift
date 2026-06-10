@@ -48,15 +48,44 @@ struct Destination: Identifiable, Decodable, Hashable {
     let isDefault: Int
     let verifiedAt: Double?
     let createdAt: Double
+    // Bounce/complaint suppression (migration 0020). Optional so the app
+    // still decodes responses from servers that predate the migration.
+    let suppressedAt: Double?
+    let suppressionReason: String?
+    let suppressionClass: String?
 
     var isDefaultDestination: Bool { isDefault == 1 }
     var isVerified: Bool { verifiedAt != nil }
+    var isSuppressed: Bool { suppressedAt != nil }
+    // Soft suppressions (repeated temporary failures) are user-clearable;
+    // hard ones (permanent bounce / spam complaint) need an admin.
+    var canSelfUnsuppress: Bool { isSuppressed && suppressionClass == "soft" }
 
     enum CodingKeys: String, CodingKey {
         case id, email
         case isDefault = "is_default"
         case verifiedAt = "verified_at"
         case createdAt = "created_at"
+        case suppressedAt = "suppressed_at"
+        case suppressionReason = "suppression_reason"
+        case suppressionClass = "suppression_class"
+    }
+}
+
+// One row of an alias's activity feed (GET /api/aliases/:id/events).
+struct EmailEvent: Identifiable, Decodable, Hashable {
+    let id: Int
+    let type: String        // forward | reply | block | reject | error | bounce | …
+    let externalSender: String?
+    let subject: String?
+    let detail: String?
+    let ts: Double
+
+    var date: Date { Date(timeIntervalSince1970: ts / 1000) }
+
+    enum CodingKeys: String, CodingKey {
+        case id, type, subject, detail, ts
+        case externalSender = "external_sender"
     }
 }
 

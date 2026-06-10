@@ -65,7 +65,14 @@ struct DestinationsView: View {
                             .font(.caption2)
                             .foregroundStyle(Theme.accent)
                     }
-                    if dest.isVerified {
+                    if dest.isSuppressed {
+                        // Forwarding to this inbox is paused after bounces or a
+                        // spam complaint. Soft pauses are self-clearable below.
+                        Label(dest.suppressionClass == "hard" ? "Suppressed" : "Paused",
+                              systemImage: "exclamationmark.octagon.fill")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.red)
+                    } else if dest.isVerified {
                         Label("Verified", systemImage: "checkmark.seal.fill")
                             .font(.caption2)
                             .foregroundStyle(Theme.green)
@@ -77,7 +84,12 @@ struct DestinationsView: View {
                 }
             }
             Spacer()
-            if !dest.isDefaultDestination && dest.isVerified {
+            if dest.canSelfUnsuppress {
+                Button("Resume") { Task { await unsuppress(dest) } }
+                    .font(.caption)
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Theme.accent)
+            } else if !dest.isDefaultDestination && dest.isVerified && !dest.isSuppressed {
                 Button("Make Default") { Task { await makeDefault(dest) } }
                     .font(.caption)
                     .buttonStyle(.borderless)
@@ -104,6 +116,12 @@ struct DestinationsView: View {
     private func makeDefault(_ dest: Destination) async {
         guard let client = app.api() else { return }
         do { try await client.setDefaultDestination(id: dest.id); await reload() }
+        catch { handle(error) }
+    }
+
+    private func unsuppress(_ dest: Destination) async {
+        guard let client = app.api() else { return }
+        do { try await client.unsuppressDestination(id: dest.id); await reload() }
         catch { handle(error) }
     }
 

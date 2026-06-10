@@ -139,6 +139,29 @@ actor APIClient {
         try await request("/api/blocks")
     }
 
+    /// Create a sender rule. Scope: pass `aliasId` OR `domainId` (personal
+    /// subdomains only), or neither for an account-wide rule.
+    func createBlock(pattern: String, kind: String, aliasId: Int? = nil, domainId: Int? = nil) async throws -> Block {
+        var body: [String: Any] = ["pattern": pattern, "kind": kind]
+        if let aliasId { body["alias_id"] = aliasId }
+        if let domainId { body["domain_id"] = domainId }
+        return try await request("/api/blocks", method: "POST", body: body)
+    }
+
+    func deleteBlock(id: Int) async throws {
+        try await requestVoid("/api/blocks/\(id)", method: "DELETE")
+    }
+
+    /// Recent activity for one alias, newest first.
+    func events(aliasId: Int) async throws -> [EmailEvent] {
+        try await request("/api/aliases/\(aliasId)/events")
+    }
+
+    /// Resume forwarding to a soft-suppressed destination.
+    func unsuppressDestination(id: Int) async throws {
+        try await requestVoid("/api/destinations/\(id)/unsuppress", method: "POST")
+    }
+
     // MARK: - Core request plumbing
 
     private func request<T: Decodable>(
