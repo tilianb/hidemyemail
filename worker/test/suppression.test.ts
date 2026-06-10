@@ -234,7 +234,32 @@ test("hard suppression notification skips suppressed destination and emails defa
   expect(sent.map(m => m.to)).toEqual(["default@example.com"]);
 });
 
-test("hard suppression notification sends nothing when suppressed destination is the default", async () => {
+test("hard suppression of the default destination falls back to another verified destination", async () => {
+  await insertDestination("default-bad@example.com");
+  const otherId = await insertDestination("backup@example.com");
+  await DB().prepare("UPDATE destinations SET is_default = 0 WHERE id = ?").bind(otherId).run();
+
+  const sent: any[] = [];
+  const app = createApp();
+  const msg = {
+    notificationType: "Bounce",
+    bounce: {
+      bounceType: "Permanent",
+      bouncedRecipients: [{ emailAddress: "default-bad@example.com" }],
+    },
+  };
+  const signed = await signedNotification(msg);
+  const res = await postNotification(app, signed, {
+    SES_ACCESS_KEY_ID: "AKIATEST",
+    SES_SECRET_ACCESS_KEY: "testsecret",
+    __sesSend: async (_c: any, m: any) => { sent.push(m); return `mid-${sent.length}`; },
+  });
+
+  expect(res.status).toBe(200);
+  expect(sent.map(m => m.to)).toEqual(["backup@example.com"]);
+});
+
+test("hard suppression notification sends nothing when the user has no other usable destination", async () => {
   await insertDestination("default-bad@example.com");
 
   const sent: any[] = [];

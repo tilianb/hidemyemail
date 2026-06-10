@@ -8,9 +8,17 @@
 
 # HideMyEmail
 
-Self-hosted, serverless email aliases for your own domains. HideMyEmail runs as
-a Cloudflare Worker with a React dashboard, Cloudflare D1 for state, and AWS
-SES/S3/SNS for receiving and sending mail.
+Self-hosted, **serverless** email aliases for your own domains — no VPS, no
+Postfix, no mail stack to babysit. Runs as a Cloudflare Worker with a React
+dashboard, Cloudflare D1 for state, and AWS SES/S3/SNS for receiving and
+sending mail. Typical running cost: **~$0/month** on the Cloudflare free tier
+plus SES cents.
+
+<p align="center">
+  <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/tilianb/hidemyemail">
+    <img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare Workers">
+  </a>
+</p>
 
 ## Why
 
@@ -18,6 +26,19 @@ Use your own domain without running Postfix, a VPS, or a full mail stack. SES
 receives mail, S3 stores the raw MIME, SNS calls the Worker, and the Worker
 rewrites and forwards mail through SES. Replies work from your normal inbox
 while recipients only see the alias.
+
+## How it compares
+
+|  | HideMyEmail | SimpleLogin | addy.io | Cloudflare Email Routing | ImprovMX |
+|---|---|---|---|---|---|
+| Self-host without a mail server | ✅ serverless (Workers + SES) | ❌ full mail stack (Postfix) | ❌ full mail stack | n/a (hosted only) | n/a (hosted only) |
+| Reply / send from alias | ✅ | ✅ | ✅ | ❌ | ✅ paid |
+| Catch-all + on-the-fly aliases | ✅ | ✅ | ✅ | ❌ manual rules | ✅ |
+| Per-alias / per-subdomain block & allow rules | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Bounce/complaint auto-suppression | ✅ | ✅ | ✅ | n/a | n/a |
+| Multi-user with admin panel | ✅ | hosted plans | hosted plans | ❌ | ❌ |
+| Typical self-host cost | ~$0 + SES cents | VPS $5+/mo | VPS $5+/mo | free (limited) | $9+/mo |
+| Open source | ✅ MIT | ✅ | ✅ | ❌ | ❌ |
 
 ```diagram
 ╭──────────────╮   raw MIME   ╭────╮   SNS   ╭──────────────────╮
@@ -33,11 +54,17 @@ while recipients only see the alias.
 ## Features
 
 - Aliases on your own domain, including catch-all auto-create.
-- Forwarding to verified destination inboxes.
-- Reply-from-alias without exposing your real inbox.
-- One-click unsubscribe headers that can disable aliases.
-- Dashboard for aliases, domains, destinations, block lists, users, MFA, and admin settings.
-- Strict reply gate, SNS signature checks, encrypted destination addresses, and rate limits.
+- Forwarding to verified destination inboxes, with spam/virus verdict handling
+  so forwarded junk never burns your domain's sender reputation.
+- Reply-from-alias without exposing your real inbox — gated by SPF/DMARC
+  checks, first-contact verification, and outbound rate caps.
+- RFC 8058 one-click unsubscribe that can disable aliases (only added to mail
+  that already looks like bulk, so personal forwards stay clean).
+- Bounce/complaint feedback loop with automatic destination suppression.
+- Per-subdomain policies and scoped block/allow sender rules.
+- Dashboard for aliases, domains, destinations, block lists, users, MFA,
+  passkeys, and admin settings; data export and account deletion built in.
+- SNS signature checks, encrypted destination addresses, and rate limits.
 
 ## Quick start
 

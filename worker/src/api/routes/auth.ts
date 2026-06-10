@@ -91,14 +91,16 @@ export function authRoutes() {
         await recordFailedAttempt(ip, c.env.DB);
         return c.json({ error: "Invalid passphrase" }, 401);
       }
+      if (user.deleted_at !== null) {
+        // Account is tombstoned — pending purge. Checked BEFORE active
+        // (deletion also sets active=0): `deleted: true` lets the dashboard
+        // offer POST /restore during the 7-day grace window instead of a
+        // dead-end "disabled" error.
+        return c.json({ error: "Account has been deleted", deleted: true }, 403);
+      }
       if (user.active === 0) {
         // Correct passphrase but disabled account — not a brute-force attempt.
         return c.json({ error: "Account is disabled" }, 403);
-      }
-      if (user.deleted_at !== null) {
-        // Account is tombstoned — pending purge. Reject explicitly even if
-        // somehow re-activated (active=0 already covers the normal path).
-        return c.json({ error: "Account has been deleted" }, 403);
       }
       userId = user.id;
     }
@@ -120,6 +122,55 @@ export function authRoutes() {
 
     await setAuthenticatedCookies(c, userId);
     return c.json({ ok: true, userId });
+  });
+
+  /**
+   * POST /restore
+   * Body: { password: string }
+   * Cancels a pending account deletion during the 7-day grace window. Public
+   * (the tombstoned user cannot log in), authenticated by passphrase and
+   * IP-rate-limited like /login. Restoring re-enables login and forwarding;
+   * with MFA enabled the restored account still requires MFA to log in.
+   */
+  r.post("/restore", async (c) => {
+    const ip = c.req.header("cf-connecting-ip") || "unknown";
+    if (!(await canAttempt(ip, c.env.DB))) {
+      return c.json({ error: "Too many attempts" }, 429);
+    }
+
+    const { password } = await c.req.json<{ password?: string }>().catch(() => ({ password: "" }));
+    if (!password) return c.json({ error: "Password is required" }, 400);
+
+    const hash = await derivePassphraseHash(password, c.env.AUTH_PASSWORD_SALT);
+    const user = await c.env.DB.prepare(
+      "SELECT id, deleted_at FROM users WHERE passphrase_hash = ?"
+    ).bind(hash).first<{ id: number; deleted_at: number | null }>();
+
+    if (!user) {
+      // Wrong passphrase, or the grace period elapsed and the purge already
+      // removed the account — indistinguishable by design.
+      await recordFailedAttempt(ip, c.env.DB);
+      return c.json({ error: "Invalid passphrase or account no longer exists" }, 401);
+    }
+    if (user.deleted_at === null) {
+      return c.json({ error: "Account is not scheduled for deletion" }, 400);
+    }
+    // Enforce the 7-day grace window independently of purge timing: the cron
+    // runs daily (and self-hosted cron can lag), so a tombstone may outlive the
+    // window before purgeDeletedAccounts() removes it. Mirror the purge cutoff
+    // (deleted_at <= now - 7d) and treat an elapsed window like an account that
+    // no longer exists — indistinguishable from a wrong passphrase by design.
+    const graceCutoff = Date.now() - 7 * 24 * 3_600_000;
+    if (user.deleted_at <= graceCutoff) {
+      await recordFailedAttempt(ip, c.env.DB);
+      return c.json({ error: "Invalid passphrase or account no longer exists" }, 401);
+    }
+
+    await c.env.DB.prepare(
+      "UPDATE users SET deleted_at = NULL, active = 1, forwarding = 1 WHERE id = ?"
+    ).bind(user.id).run();
+
+    return c.json({ ok: true });
   });
 
   r.post("/register", async (c) => {

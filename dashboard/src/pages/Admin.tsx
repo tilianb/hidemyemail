@@ -1040,6 +1040,70 @@ export function Admin() {
                 </div>
               </div>
 
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-spam-verdict" className="setting-label">Spam Verdict Action</label>
+                  <div className="setting-desc">
+                    What to do when SES marks an inbound message as spam. Forwarded mail is DKIM-signed
+                    by your domain, so forwarding spam burns your own sender reputation.
+                    {" "}<strong>Flag</strong> adds <code>X-Spam-Flag: YES</code> so the destination inbox can filter it.
+                  </div>
+                </div>
+                <div className="setting-control" style={{ minWidth: 160 }}>
+                  <select
+                    id="setting-spam-verdict"
+                    className="input"
+                    value={editedSettings.spam_verdict_action || "flag"}
+                    onChange={e => setEditedSettings({...editedSettings, spam_verdict_action: e.target.value})}
+                  >
+                    <option value="flag">Flag (recommended)</option>
+                    <option value="drop">Drop</option>
+                    <option value="forward">Forward untouched</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-virus-verdict" className="setting-label">Virus Verdict Action</label>
+                  <div className="setting-desc">What to do when SES detects malware in an inbound message.</div>
+                </div>
+                <div className="setting-control" style={{ minWidth: 160 }}>
+                  <select
+                    id="setting-virus-verdict"
+                    className="input"
+                    value={editedSettings.virus_verdict_action || "drop"}
+                    onChange={e => setEditedSettings({...editedSettings, virus_verdict_action: e.target.value})}
+                  >
+                    <option value="drop">Drop (recommended)</option>
+                    <option value="flag">Flag</option>
+                    <option value="forward">Forward untouched</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <label htmlFor="setting-unsub-mode" className="setting-label">List-Unsubscribe Header</label>
+                  <div className="setting-desc">
+                    When to add the one-click unsubscribe header (disables the alias) to forwards.
+                    Adding it to personal mail makes forwards look like bulk mail to spam filters;
+                    {" "}<strong>Bulk mail only</strong> adds it only when the original message already carried one.
+                  </div>
+                </div>
+                <div className="setting-control" style={{ minWidth: 160 }}>
+                  <select
+                    id="setting-unsub-mode"
+                    className="input"
+                    value={editedSettings.unsubscribe_header_mode || "bulk_only"}
+                    onChange={e => setEditedSettings({...editedSettings, unsubscribe_header_mode: e.target.value})}
+                  >
+                    <option value="bulk_only">Bulk mail only (recommended)</option>
+                    <option value="always">Every forward</option>
+                    <option value="never">Never</option>
+                  </select>
+                </div>
+              </div>
 
               <div className="setting-row">
                 <div className="setting-info">
@@ -1267,6 +1331,9 @@ export function Admin() {
                     cors_allowed_domains: "http://localhost:5173",
                     forwarded_from_format: "name_address_parens",
                     soft_bounce_threshold: "3",
+                    spam_verdict_action: "flag",
+                    virus_verdict_action: "drop",
+                    unsubscribe_header_mode: "bulk_only",
                   });
                 }}
                 type="button"

@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 import { setCookie, deleteCookie, getCookie } from "hono/cookie";
-import type { Context } from "hono";
 import type { AppEnv } from "../app";
-import { signPasskeyRegChallenge, verifyFreshAuth, verifyPasskeyRegChallenge } from "../../lib/auth";
+import { signPasskeyRegChallenge, verifyPasskeyRegChallenge } from "../../lib/auth";
+import { hasFreshAuth } from "../auth-helpers";
 import { fromBase64url, toBase64url, getRpFromOrigin } from "../../lib/webauthn";
 import type { RegistrationResponseJSON } from "@simplewebauthn/server";
 
@@ -29,11 +29,6 @@ async function recordFailedAttempt(ip: string, db: D1Database): Promise<void> {
     return;
   }
   await db.prepare("UPDATE rate_limits SET attempts = attempts + 1 WHERE ip = ?").bind(ip).run();
-}
-
-async function hasFreshAuth(c: Context<AppEnv>): Promise<boolean> {
-  const token = getCookie(c, "__Host-fresh-auth");
-  return !!token && await verifyFreshAuth(c.env.SESSION_SECRET, token, c.get("userId"));
 }
 
 export function settingsRoutes() {

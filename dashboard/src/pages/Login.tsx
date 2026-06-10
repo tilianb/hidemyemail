@@ -13,6 +13,7 @@ export function Login() {
   const [mfaRequired, setMfaRequired] = useState(false);
   const [mfaCode, setMfaCode] = useState("");
   const [mainGlobalDomain, setMainGlobalDomain] = useState("");
+  const [showRestore, setShowRestore] = useState(false);
 
   useEffect(() => {
     api.config().then(conf => setMainGlobalDomain(conf.main_global_domain)).catch(() => {});
@@ -29,9 +30,34 @@ export function Login() {
       } else {
         await refreshAuth();
       }
-    } catch {
-      setErr("Access denied — invalid credentials.");
-      setPw("");
+    } catch (e: any) {
+      if (e?.message === "Account has been deleted") {
+        // Tombstoned during the 7-day grace window — offer to cancel deletion
+        setShowRestore(true);
+        setErr("This account is scheduled for deletion.");
+      } else {
+        setErr("Access denied — invalid credentials.");
+        setPw("");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function restoreAccount() {
+    setErr("");
+    setLoading(true);
+    try {
+      await api.restoreAccount(pw);
+      setShowRestore(false);
+      const result = await api.login(pw);
+      if ("mfa_required" in result && result.mfa_required) {
+        setMfaRequired(true);
+      } else {
+        await refreshAuth();
+      }
+    } catch (e: any) {
+      setErr(e?.message || "Restore failed.");
     } finally {
       setLoading(false);
     }
@@ -240,6 +266,17 @@ export function Login() {
                 <div className="auth-error">
                   {err}
                 </div>
+              )}
+
+              {showRestore && (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-full btn-center"
+                  onClick={restoreAccount}
+                  disabled={loading || !pw}
+                >
+                  {loading ? "Restoring…" : "Cancel deletion & restore account"}
+                </button>
               )}
 
               <div className="inline-actions-lg">

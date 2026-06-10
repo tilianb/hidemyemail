@@ -88,6 +88,20 @@ export function registerAdminSettingsRoutes(r: Hono<AppEnv>) {
         }
       }
 
+      if (key === "spam_verdict_action" || key === "virus_verdict_action") {
+        if (value !== "forward" && value !== "flag" && value !== "drop") {
+          errors.push(`${key}: must be "forward", "flag", or "drop"`);
+          continue;
+        }
+      }
+
+      if (key === "unsubscribe_header_mode") {
+        if (value !== "always" && value !== "bulk_only" && value !== "never") {
+          errors.push(`${key}: must be "always", "bulk_only", or "never"`);
+          continue;
+        }
+      }
+
       if (key === "max_total_aliases" || key === "max_subdomains") {
         const n = parseInt(value, 10);
         if (isNaN(n) || n < -1) {

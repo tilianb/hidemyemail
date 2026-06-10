@@ -64,6 +64,10 @@ The app stores feature settings in D1. Important defaults:
 | `cors_allowed_domains` | `http://localhost:5173` | Add deployed dashboard origins if needed. |
 | `main_global_domain` | empty | Set after verifying a global domain. |
 | `catch_all_auto_create` | enabled | Allows first inbound mail to create aliases. |
+| `spam_verdict_action` | `flag` | What to do when SES marks inbound mail as spam: `forward`, `flag` (adds `X-Spam-Flag: YES`), or `drop`. Forwarded spam is DKIM-signed by your domain, so forwarding it untouched burns your sender reputation. |
+| `virus_verdict_action` | `drop` | Same options for SES malware detection. |
+| `unsubscribe_header_mode` | `bulk_only` | When to add our one-click List-Unsubscribe (disables the alias) to forwards: `always`, `bulk_only` (only when the original already carried List-Unsubscribe or `Precedence: bulk`), or `never`. Adding it to personal mail makes forwards look like bulk mail to spam filters. |
+| `soft_bounce_threshold` | `3` | Soft bounces within 24h before a destination is paused (0 disables). |
 
 Most settings are editable from the Admin dashboard.
 
