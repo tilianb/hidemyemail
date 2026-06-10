@@ -30,6 +30,28 @@ built dashboard assets.
 | `docs/` | Setup/deploy/config docs + `ROADMAP.md` (tracked backlog) |
 | `ios/` | Native SwiftUI app (XcodeGen `project.yml`) — only on its feature branch until merged |
 
+## Mobile (iOS + Android direction)
+
+- The SwiftUI app (`ios/`, branch `claude/mobile-app-effort-v1-Qxt1M`) is the
+  product; the owner wants its look kept. Build: `cd ios && xcodegen generate`
+  then xcodebuild. Team ID is in `project.yml`. Passkey login requires a paid
+  Apple team (Associated Domains); on a personal team, strip
+  `CODE_SIGN_ENTITLEMENTS` locally to sideload — never commit that strip.
+- **Android strategy decided by spike (2026-06-10): Skip (skip.dev), native
+  mode** — the same Swift/SwiftUI source compiles natively for Android
+  (Compose-backed). Spike result: real Models + actor/URLSession APIClient +
+  themed List/NavigationStack/TabView UI built to a working APK. Known
+  porting rules: `@State`/`@StateObject` properties must not be `private`;
+  `ContentUnavailableView` and `.contentShape` are not in SkipUI yet (use
+  portable fallbacks); guard UIKit-only code with `#if canImport(UIKit)`;
+  drop macOS from Package platforms. Spike project: `/tmp/skipspike/hme-app`
+  (disposable).
+- **Toolchain quirk:** Homebrew cannot install anything on this Mac (macOS 27
+  beta → `unknown or unsupported macOS version`). Everything is hand-installed
+  under `~/dev-tools` — source `~/dev-tools/env.sh` for JDK 21, Gradle 9.4.1,
+  Android SDK 35, and PATH for `skip` (`~/bin/skip`) and `swiftly`
+  (`~/.swiftly`). Swift-Android SDK installs via `skip android sdk install`.
+
 ## Build & test
 
 ```bash
