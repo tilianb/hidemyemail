@@ -79,7 +79,11 @@ export function createApp() {
       p === "/api/verify" ||
       p === "/api/ses/notification" ||
       p === "/api/ses/inbound" ||
-      p === "/api/unsubscribe"
+      p === "/api/unsubscribe" ||
+      // App-auth handoff: exchange is pre-auth by definition; code does its
+      // own session-cookie check inside the handler.
+      p === "/api/app-auth/exchange" ||
+      p === "/api/app-auth/code"
     ) return next();
     // Web clients send the HttpOnly __Host-session cookie; native clients send
     // the same signed session token as `Authorization: Bearer <token>`.

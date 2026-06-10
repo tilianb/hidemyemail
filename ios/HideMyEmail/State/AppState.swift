@@ -71,6 +71,20 @@ final class AppState {
         try await finishLogin(token: res.token)
     }
 
+    /// Web-session login: opens the server's own dashboard login (passkeys
+    /// included — the ceremony associates with the server's domain via the
+    /// web, so it works for ANY self-hosted host) and exchanges the returned
+    /// handoff code for a bearer token.
+    func loginViaWebSession() async throws {
+        guard let baseURL else { throw APIError.notConfigured }
+        let client = client ?? APIClient(baseURL: baseURL, token: nil)
+        self.client = client
+
+        let handoff = try await WebSessionAuthenticator().authenticate(server: baseURL)
+        let res = try await client.appAuthExchange(code: handoff.code, verifier: handoff.verifier)
+        try await finishLogin(token: res.token)
+    }
+
     /// Passwordless login with a platform passkey. Fetches a challenge, runs the
     /// AuthenticationServices assertion, and posts the signed result back. The
     /// relying party is the server host (matching the AASA / entitlement).

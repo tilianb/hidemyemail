@@ -51,6 +51,18 @@ actor APIClient {
         try await request("/api/passkey/verify", method: "POST", body: assertion, authMode: true, authed: false)
     }
 
+    /// Exchange a web-session handoff code (+ its PKCE verifier) for a bearer
+    /// token. Used by the self-hosted passkey flow via ASWebAuthenticationSession.
+    func appAuthExchange(code: String, verifier: String) async throws -> LoginResponse {
+        try await request(
+            "/api/app-auth/exchange",
+            method: "POST",
+            body: ["code": code, "verifier": verifier],
+            authMode: true,
+            authed: false
+        )
+    }
+
     func completeMFA(code: String, mfaToken: String?) async throws -> LoginResponse {
         var body: [String: Any] = ["code": code]
         if let mfaToken { body["mfa_token"] = mfaToken }

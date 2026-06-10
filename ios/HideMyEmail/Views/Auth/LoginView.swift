@@ -61,6 +61,22 @@ struct LoginView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.large)
                     .disabled(busy || !app.hasServer)
+
+                    // Native passkey association only covers our own domain;
+                    // self-hosters sign in through their server's web login
+                    // instead (passkeys work there) and hand a token back.
+                    Button(action: webLogin) {
+                        Label("Sign in on the Web", systemImage: "safari")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .disabled(busy || !app.hasServer)
+                    if app.serverURLString != AppState.defaultServer {
+                        Text("Self-hosted server? Use web sign-in for passkeys.")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
                 }
                 .padding(.horizontal)
 
@@ -104,6 +120,21 @@ struct LoginView: View {
                 try await app.loginWithPasskey()
             } catch let e as ASAuthorizationError where e.code == .canceled {
                 // User dismissed the system passkey sheet — not an error.
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
+    private func webLogin() {
+        error = nil
+        busy = true
+        Task {
+            defer { busy = false }
+            do {
+                try await app.loginViaWebSession()
+            } catch let e as ASWebAuthenticationSessionError where e.code == .canceledLogin {
+                // User dismissed the web sheet — not an error.
             } catch {
                 self.error = error.localizedDescription
             }

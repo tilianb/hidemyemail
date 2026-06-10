@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { setCookie, deleteCookie, getCookie } from "hono/cookie";
 import type { Context } from "hono";
 import type { AppEnv } from "../app";
-import { verifyPassword, signFreshAuth, signSession, derivePassphraseHash, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge } from "../../lib/auth";
+import { verifyPassword, signFreshAuth, signSession, verifySession, derivePassphraseHash, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge, signAppAuthCode, verifyAppAuthCode, sha256Base64url } from "../../lib/auth";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { getEnvWithOverride, getMainGlobalDomain } from "../../lib/settings";
 
@@ -82,6 +82,64 @@ export function authRoutes() {
     const max_total_aliases = await getNumericSetting(c.env.DB, "max_total_aliases");
     const alias_quota_buffer_enabled = await getBoolSetting(c.env.DB, "alias_quota_buffer_enabled");
     return c.json({ main_global_domain, max_subdomains, max_total_aliases, alias_quota_buffer_enabled });
+  });
+
+  /**
+   * POST /app-auth/code — first half of the web-session → native-app login
+   * handoff (lets self-hosters use passkeys in the app even though the iOS
+   * binary can only carry webcredentials for our own domain).
+   *
+   * Requires a logged-in dashboard session (cookie). Body: { challenge } —
+   * base64url SHA-256 of a verifier held by the native app. Returns a
+   * short-lived signed code bound to this user + challenge.
+   */
+  r.post("/app-auth/code", async (c) => {
+    const sessionCookie = getCookie(c, "__Host-session");
+    const userId = sessionCookie ? await verifySession(c.env.SESSION_SECRET, sessionCookie) : null;
+    if (userId === null) return c.json({ error: "Unauthorized" }, 401);
+
+    const { challenge } = await c.req.json<{ challenge?: string }>().catch(() => ({ challenge: undefined }));
+    // base64url SHA-256 is exactly 43 chars; reject anything else so the
+    // challenge can never smuggle a delimiter into the signed payload.
+    if (!challenge || !/^[A-Za-z0-9_-]{43}$/.test(challenge)) {
+      return c.json({ error: "Invalid challenge" }, 400);
+    }
+
+    const user = await c.env.DB.prepare("SELECT active FROM users WHERE id = ?")
+      .bind(userId).first<{ active: number }>();
+    if (!user || user.active === 0) return c.json({ error: "Account is disabled" }, 403);
+
+    return c.json({ code: await signAppAuthCode(c.env.SESSION_SECRET, userId, challenge) });
+  });
+
+  /**
+   * POST /app-auth/exchange — second half. Public (the app holds no auth yet),
+   * IP-rate-limited. Body: { code, verifier }. Verifies the code's signature,
+   * expiry, and that SHA-256(verifier) matches the embedded challenge, then
+   * mints a bearer token. A stolen code is useless without the verifier.
+   */
+  r.post("/app-auth/exchange", async (c) => {
+    const ip = c.req.header("cf-connecting-ip") || "unknown";
+    if (!(await canAttempt(ip, c.env.DB))) {
+      return c.json({ error: "Too many attempts" }, 429);
+    }
+
+    const { code, verifier } = await c.req.json<{ code?: string; verifier?: string }>()
+      .catch(() => ({ code: undefined, verifier: undefined }));
+    if (!code || !verifier) return c.json({ error: "Missing code or verifier" }, 400);
+
+    const parsed = await verifyAppAuthCode(c.env.SESSION_SECRET, code);
+    if (!parsed || (await sha256Base64url(verifier)) !== parsed.challenge) {
+      await recordFailedAttempt(ip, c.env.DB);
+      return c.json({ error: "Invalid or expired code" }, 401);
+    }
+
+    const user = await c.env.DB.prepare("SELECT active FROM users WHERE id = ?")
+      .bind(parsed.userId).first<{ active: number }>();
+    if (!user || user.active === 0) return c.json({ error: "Account is disabled" }, 403);
+
+    const token = await signSession(c.env.SESSION_SECRET, parsed.userId, SESSION_TTL);
+    return c.json({ ok: true, userId: parsed.userId, token });
   });
 
   r.post("/login", async (c) => {

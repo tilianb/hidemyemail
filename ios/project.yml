@@ -36,6 +36,11 @@ targets:
       properties:
         CFBundleDisplayName: HideMyEmail
         UILaunchScreen: {}
+        # Callback scheme for the web-session login handoff (self-hosted passkeys).
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.hidemyemail.app.auth
+            CFBundleURLSchemes:
+              - hidemyemail
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         UISupportedInterfaceOrientations~ipad:

@@ -9,6 +9,7 @@ import { Destinations } from "./pages/Destinations";
 import { Admin } from "./pages/Admin";
 import { Settings } from "./pages/Settings";
 import { Recover } from "./pages/Recover";
+import { AppAuth } from "./pages/AppAuth";
 import { api } from "./api";
 import { Globe, Mail, Ban, BarChart3, LogOut, Send, Shield, Settings as SettingsIcon } from "lucide-react";
 import { useToast } from "./ui";
@@ -87,6 +88,7 @@ export function App() {
   }
 
   if (window.location.pathname === "/recover") return <Recover />;
+  if (window.location.pathname === "/app-auth") return <AppAuth />;
 
   if (!authed) return <Login />;
 
