@@ -366,6 +366,29 @@ test("restore: account not scheduled for deletion → 400", async () => {
   expect(res.status).toBe(400);
 });
 
+test("restore: tombstone past the 7-day grace window → 401, not reactivated", async () => {
+  const app = createApp();
+  const { userId } = await makeUser("expired-grace-pass");
+  // Tombstoned 8 days ago: window elapsed, but the daily purge cron has not run yet.
+  const eightDaysAgo = Date.now() - 8 * 24 * 3_600_000;
+  await DB().prepare(
+    "UPDATE users SET deleted_at = ?, active = 0, forwarding = 0 WHERE id = ?"
+  ).bind(eightDaysAgo, userId).run();
+
+  const res = await app.request("/api/restore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password: "expired-grace-pass" }),
+  }, testEnv);
+  expect(res.status).toBe(401);
+
+  // Tombstone untouched — the account stays scheduled for purge, not reactivated.
+  const row = await DB().prepare(
+    "SELECT active, forwarding, deleted_at FROM users WHERE id = ?"
+  ).bind(userId).first<{ active: number; forwarding: number; deleted_at: number | null }>();
+  expect(row).toMatchObject({ active: 0, forwarding: 0, deleted_at: eightDaysAgo });
+});
+
 test("restore: login error carries the deleted flag for the dashboard", async () => {
   const app = createApp();
   const { userId } = await makeUser("deleted-login-pass");

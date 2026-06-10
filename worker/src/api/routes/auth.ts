@@ -155,6 +155,16 @@ export function authRoutes() {
     if (user.deleted_at === null) {
       return c.json({ error: "Account is not scheduled for deletion" }, 400);
     }
+    // Enforce the 7-day grace window independently of purge timing: the cron
+    // runs daily (and self-hosted cron can lag), so a tombstone may outlive the
+    // window before purgeDeletedAccounts() removes it. Mirror the purge cutoff
+    // (deleted_at <= now - 7d) and treat an elapsed window like an account that
+    // no longer exists — indistinguishable from a wrong passphrase by design.
+    const graceCutoff = Date.now() - 7 * 24 * 3_600_000;
+    if (user.deleted_at <= graceCutoff) {
+      await recordFailedAttempt(ip, c.env.DB);
+      return c.json({ error: "Invalid passphrase or account no longer exists" }, 401);
+    }
 
     await c.env.DB.prepare(
       "UPDATE users SET deleted_at = NULL, active = 1, forwarding = 1 WHERE id = ?"
