@@ -129,6 +129,9 @@ export function Login() {
           <div className="login-tagline">
             personal email alias console
           </div>
+          <div className="login-redactions" aria-hidden="true">
+            <span /><span /><span /><span /><span /><span />
+          </div>
         </div>
 
         <div className="login-layer">

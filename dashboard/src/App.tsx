@@ -127,6 +127,13 @@ export function App() {
         </nav>
 
         <div className="sidebar-footer">
+          <div className="user-chip" title={`Signed in as ${userName}`}>
+            <span className="user-chip-dot" />
+            <span style={{ minWidth: 0 }}>
+              <span className="user-chip-role">{isAdmin ? "Operator" : "Session"}</span>
+              <span className="user-chip-name" style={{ display: "block" }}>{userName}</span>
+            </span>
+          </div>
           <button
             className="nav-item"
             onClick={logout}
@@ -141,12 +148,7 @@ export function App() {
       </aside>
 
       {/* Main content */}
-      <main className="page-main" style={{ position: "relative" }}>
-        <div style={{ position: "absolute", top: 32, right: 32, display: "flex", alignItems: "center", gap: 12, zIndex: 10 }}>
-          <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
-            Logged in as <strong style={{ color: "var(--text-primary)", fontWeight: 600 }}>{userName}</strong>
-          </span>
-        </div>
+      <main className="page-main">
         <div className="page-content">
           {tab === "domains" && <Domains />}
           {tab === "aliases" && <Aliases />}
