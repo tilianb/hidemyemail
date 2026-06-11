@@ -1,5 +1,6 @@
 package dev.hidemyemail.app.ui
 
+import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -24,6 +25,7 @@ import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.GppGood
 import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -47,6 +49,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -69,6 +72,7 @@ fun AliasDetailScreen(
 ) {
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
 
     var isActive by remember { mutableStateOf(alias.isActive) }
     var label by remember { mutableStateOf(alias.label ?: "") }
@@ -153,6 +157,15 @@ fun AliasDetailScreen(
                     Text(alias.fullAddress, style = Theme.monoStyle(15.sp), modifier = Modifier.weight(1f))
                     IconButton(onClick = { clipboard.setText(AnnotatedString(alias.fullAddress)) }) {
                         Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = Theme.accent, modifier = Modifier.size(18.dp))
+                    }
+                    IconButton(onClick = {
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, alias.fullAddress)
+                        }
+                        context.startActivity(Intent.createChooser(send, "Share alias"))
+                    }) {
+                        Icon(Icons.Default.Share, contentDescription = "Share", tint = Theme.accent, modifier = Modifier.size(18.dp))
                     }
                 }
             }

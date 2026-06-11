@@ -30,7 +30,7 @@ struct SettingsView: View {
                 Section {
                     LabeledContent("Version", value: appVersion)
                 } footer: {
-                    Text("Passkeys, push notifications, and the share sheet are planned for a future release.")
+                    Text("Push notifications are planned for a future release.")
                 }
             }
             .themedScrollBackground()

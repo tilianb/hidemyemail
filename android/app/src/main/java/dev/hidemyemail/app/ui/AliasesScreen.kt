@@ -2,6 +2,7 @@ package dev.hidemyemail.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -156,9 +157,11 @@ fun AliasesScreen(app: AppViewModel, modifier: Modifier = Modifier) {
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun AliasRow(alias: Alias, onClick: () -> Unit) {
     val clipboard = LocalClipboardManager.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     var copied by remember { mutableStateOf(false) }
 
     LaunchedEffect(copied) {
@@ -172,7 +175,18 @@ private fun AliasRow(alias: Alias, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            // Long-press shares the address — Android's counterpart of the iOS
+            // row context menu.
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(android.content.Intent.EXTRA_TEXT, alias.fullAddress)
+                    }
+                    context.startActivity(android.content.Intent.createChooser(send, "Share alias"))
+                },
+            )
             .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
         Box(

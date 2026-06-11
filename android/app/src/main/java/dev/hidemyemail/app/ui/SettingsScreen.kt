@@ -125,6 +125,7 @@ fun SettingsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
                     )
                 }
             }
+            SectionFooter("Push notifications are planned for a future release.")
             Spacer(Modifier.size(32.dp))
         }
     }

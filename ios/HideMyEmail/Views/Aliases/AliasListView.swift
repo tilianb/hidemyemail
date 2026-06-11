@@ -29,6 +29,14 @@ struct AliasListView: View {
                                 NavigationLink(value: alias) {
                                     AliasRowView(alias: alias)
                                 }
+                                .contextMenu {
+                                    Button("Copy", systemImage: "doc.on.doc") {
+                                        UIPasteboard.general.string = alias.fullAddress
+                                    }
+                                    ShareLink(item: alias.fullAddress) {
+                                        Label("Share", systemImage: "square.and.arrow.up")
+                                    }
+                                }
                             }
                             .onDelete(perform: delete)
                         }

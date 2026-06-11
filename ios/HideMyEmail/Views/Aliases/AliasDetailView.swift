@@ -48,6 +48,10 @@ struct AliasDetailView: View {
                         Image(systemName: "doc.on.doc")
                     }
                     .buttonStyle(.borderless)
+                    ShareLink(item: alias.fullAddress) {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.borderless)
                 }
             } header: {
                 Text("Address")
