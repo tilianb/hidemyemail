@@ -81,6 +81,8 @@ fun AliasDetailScreen(
     var blocks by remember { mutableStateOf<List<Block>>(emptyList()) }
     var events by remember { mutableStateOf<List<EmailEvent>>(emptyList()) }
     var loadingEvents by remember { mutableStateOf(false) }
+    var destinations by remember { mutableStateOf<List<dev.hidemyemail.app.net.Destination>>(emptyList()) }
+    var destinationSelection by remember { mutableStateOf(alias.destination ?: "") }
 
     fun handle(e: Exception) {
         if (e is ApiException && e.isAuthFailure) app.handleAuthFailure() else error = e.message
@@ -110,6 +112,9 @@ fun AliasDetailScreen(
         } catch (e: Exception) {
             handle(e)
         }
+    }
+    LaunchedEffect(alias.id) {
+        destinations = runCatching { app.api()?.destinations() ?: emptyList() }.getOrDefault(emptyList())
     }
 
     fun saveLabelIfChanged() {
@@ -213,6 +218,33 @@ fun AliasDetailScreen(
                         unfocusedLabelColor = Theme.textSecondary,
                     ),
                 )
+                RowDivider()
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                    Text(
+                        "FORWARD TO",
+                        style = Theme.bodyStyle(11.sp).copy(color = Theme.textSecondary, letterSpacing = 0.8.sp),
+                    )
+                    ChoiceChips(
+                        options = listOf("" to "Default") +
+                            destinations.filter { it.isVerified }.map { it.email to it.email },
+                        selected = destinationSelection,
+                        onSelect = { picked ->
+                            val value = picked ?: ""
+                            if (value == destinationSelection) return@ChoiceChips
+                            val previous = destinationSelection
+                            destinationSelection = value
+                            scope.launch {
+                                try {
+                                    app.api()?.updateAliasDestination(alias.id, value.ifEmpty { null })
+                                    onChange()
+                                } catch (e: Exception) {
+                                    destinationSelection = previous
+                                    handle(e)
+                                }
+                            }
+                        },
+                    )
+                }
             }
 
             SectionHeader("Activity")

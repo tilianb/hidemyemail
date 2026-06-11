@@ -235,6 +235,9 @@ private struct EditSubdomainView: View {
     let onSave: () async -> Void
 
     @State private var selection: String
+    // "" = inherit, "1"/"0" for catch-all; "on"/"off" for inline actions.
+    @State private var catchAll: String
+    @State private var inlineActions: String
     @State private var saving = false
     @State private var error: String?
 
@@ -243,6 +246,14 @@ private struct EditSubdomainView: View {
         self.destinations = destinations
         self.onSave = onSave
         _selection = State(initialValue: domain.defaultDestination ?? "global")
+        _catchAll = State(initialValue: domain.catchAll.map(String.init) ?? "")
+        _inlineActions = State(initialValue: domain.inlineActionsPref ?? "")
+    }
+
+    private var hasChanges: Bool {
+        selection != (domain.defaultDestination ?? "global")
+            || catchAll != (domain.catchAll.map(String.init) ?? "")
+            || inlineActions != (domain.inlineActionsPref ?? "")
     }
 
     var body: some View {
@@ -261,6 +272,26 @@ private struct EditSubdomainView: View {
                     Text("Where mail to this subdomain's aliases is forwarded unless an alias overrides it.")
                 }
 
+                Section {
+                    Picker("Catch-all", selection: $catchAll) {
+                        Text("Inherit").tag("")
+                        Text("On").tag("1")
+                        Text("Off").tag("0")
+                    }
+                } footer: {
+                    Text("Catch-all forwards mail sent to any address on this subdomain, even without an alias.")
+                }
+
+                Section {
+                    Picker("Inline actions", selection: $inlineActions) {
+                        Text("Inherit").tag("")
+                        Text("On").tag("on")
+                        Text("Off").tag("off")
+                    }
+                } footer: {
+                    Text("Inline actions add block/deactivate links to forwarded mail for this subdomain.")
+                }
+
                 if let error {
                     Text(error).foregroundStyle(Theme.red).font(.footnote)
                 }
@@ -274,7 +305,7 @@ private struct EditSubdomainView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(saving ? "Saving…" : "Save") { Task { await save() } }
-                        .disabled(saving || selection == (domain.defaultDestination ?? "global"))
+                        .disabled(saving || !hasChanges)
                 }
             }
         }
@@ -284,8 +315,18 @@ private struct EditSubdomainView: View {
         guard let client = app.api() else { return }
         saving = true
         defer { saving = false }
+        var fields: [String: Any] = [:]
+        if selection != (domain.defaultDestination ?? "global") {
+            fields["default_destination"] = selection
+        }
+        if catchAll != (domain.catchAll.map(String.init) ?? "") {
+            fields["catch_all"] = catchAll.isEmpty ? NSNull() : Int(catchAll)!
+        }
+        if inlineActions != (domain.inlineActionsPref ?? "") {
+            fields["inline_actions_pref"] = inlineActions.isEmpty ? NSNull() : inlineActions
+        }
         do {
-            try await client.updateDomainDestination(id: domain.id, destination: selection)
+            try await client.updateDomain(id: domain.id, fields: fields)
             await onSave()
             dismiss()
         } catch {

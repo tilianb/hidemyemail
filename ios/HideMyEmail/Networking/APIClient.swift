@@ -149,6 +149,51 @@ actor APIClient {
         try await requestVoid("/api/domains/\(id)", method: "PATCH", body: ["default_destination": destination])
     }
 
+    /// Patch any combination of a personal subdomain's settings. Pass NSNull to
+    /// reset a field to "inherit" (catch_all, inline_actions_pref).
+    func updateDomain(id: Int, fields: [String: Any]) async throws {
+        try await requestVoid("/api/domains/\(id)", method: "PATCH", body: fields)
+    }
+
+    /// Re-route one alias: a verified destination email, or nil to fall back to
+    /// the default (global domains) / subdomain inheritance.
+    func updateAliasDestination(id: Int, destination: String?) async throws {
+        try await requestVoid("/api/aliases/\(id)", method: "PATCH", body: ["destination": destination ?? NSNull()])
+    }
+
+    // MARK: - Account settings (Settings tab)
+
+    func preferences() async throws -> Preferences {
+        try await request("/api/preferences")
+    }
+
+    /// Update inline-action preferences. Pass NSNull for "inherit".
+    func updatePreferences(fields: [String: Any]) async throws {
+        try await requestVoid("/api/preferences", method: "PATCH", body: fields)
+    }
+
+    func mfaStatus() async throws -> MfaStatus {
+        try await request("/api/mfa")
+    }
+
+    func passkeys() async throws -> [Passkey] {
+        try await request("/api/passkeys")
+    }
+
+    func renamePasskey(id: String, name: String) async throws {
+        try await requestVoid("/api/passkeys/\(id)", method: "PATCH", body: ["deviceName": name])
+    }
+
+    func deletePasskey(id: String) async throws {
+        try await requestVoid("/api/passkeys/\(id)", method: "DELETE")
+    }
+
+    /// Full account export (aliases, domains, destinations, rules…) as raw
+    /// JSON. Requires a fresh session; the Worker 401s otherwise.
+    func exportData() async throws -> Data {
+        try await perform("/api/export", method: "GET", body: nil, authMode: false, authed: true)
+    }
+
     func config() async throws -> ServerConfig {
         try await request("/api/config", authed: false)
     }

@@ -106,6 +106,10 @@ fun SettingsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
                 }
             }
 
+            InlineActionsSection(app)
+            SecuritySection(app)
+            ExportSection(app)
+
             SectionCard(Modifier.padding(top = 20.dp)) {
                 TextButton(onClick = { showSignOut = true }, modifier = Modifier.fillMaxWidth()) {
                     Text("Sign Out", color = Theme.red)

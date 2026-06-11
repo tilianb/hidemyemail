@@ -249,29 +249,73 @@ fun DomainsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
     editing?.let { d ->
         ModalBottomSheet(onDismissRequest = { editing = null }, containerColor = Theme.surface1) {
             var selection by remember { mutableStateOf(d.defaultDestination ?: "global") }
+            // "" = inherit; "1"/"0" for catch-all; "on"/"off" for inline actions.
+            var catchAll by remember { mutableStateOf(d.catchAll?.toString() ?: "") }
+            var inlineActions by remember { mutableStateOf(d.inlineActionsPref ?: "") }
             var saving by remember { mutableStateOf(false) }
+            val hasChanges = selection != (d.defaultDestination ?: "global") ||
+                catchAll != (d.catchAll?.toString() ?: "") ||
+                inlineActions != (d.inlineActionsPref ?: "")
+
+            val chipLabelStyle = Theme.bodyStyle(11.sp).copy(color = Theme.textSecondary, letterSpacing = 0.8.sp)
+
             Column(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text("Edit Subdomain", style = Theme.displayStyle(22.sp))
                 Text(d.domain, style = Theme.monoStyle(14.sp).copy(color = Theme.textSecondary))
-                Text("DEFAULT DESTINATION", style = Theme.bodyStyle(11.sp).copy(color = Theme.textSecondary, letterSpacing = 0.8.sp))
+
+                Text("DEFAULT DESTINATION", style = chipLabelStyle)
                 ChoiceChips(
                     options = listOf("global" to "Global default") + verifiedDestinations.map { it.email to it.email },
                     selected = selection,
                     onSelect = { selection = it ?: "global" },
                 )
+
+                Text("CATCH-ALL", style = chipLabelStyle)
+                ChoiceChips(
+                    options = listOf("" to "Inherit", "1" to "On", "0" to "Off"),
+                    selected = catchAll,
+                    onSelect = { catchAll = it ?: "" },
+                )
                 Text(
-                    "Where mail to this subdomain's aliases is forwarded unless an alias overrides it.",
+                    "Catch-all forwards mail sent to any address on this subdomain, even without an alias.",
                     style = Theme.bodyStyle(12.sp).copy(color = Theme.textSecondary),
                 )
+
+                Text("INLINE ACTIONS", style = chipLabelStyle)
+                ChoiceChips(
+                    options = listOf("" to "Inherit", "on" to "On", "off" to "Off"),
+                    selected = inlineActions,
+                    onSelect = { inlineActions = it ?: "" },
+                )
+
                 Button(
                     onClick = {
                         saving = true
                         scope.launch {
                             try {
-                                app.api()?.updateDomainDestination(d.id, selection)
+                                val fields = kotlinx.serialization.json.buildJsonObject {
+                                    if (selection != (d.defaultDestination ?: "global")) {
+                                        put("default_destination", kotlinx.serialization.json.JsonPrimitive(selection))
+                                    }
+                                    if (catchAll != (d.catchAll?.toString() ?: "")) {
+                                        put(
+                                            "catch_all",
+                                            if (catchAll.isEmpty()) kotlinx.serialization.json.JsonNull
+                                            else kotlinx.serialization.json.JsonPrimitive(catchAll.toInt()),
+                                        )
+                                    }
+                                    if (inlineActions != (d.inlineActionsPref ?: "")) {
+                                        put(
+                                            "inline_actions_pref",
+                                            if (inlineActions.isEmpty()) kotlinx.serialization.json.JsonNull
+                                            else kotlinx.serialization.json.JsonPrimitive(inlineActions),
+                                        )
+                                    }
+                                }
+                                app.api()?.updateDomain(d.id, fields)
                                 editing = null
                                 reload()
                             } catch (e: Exception) {
@@ -281,7 +325,7 @@ fun DomainsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
                             }
                         }
                     },
-                    enabled = !saving && selection != (d.defaultDestination ?: "global"),
+                    enabled = !saving && hasChanges,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Theme.accent, contentColor = Color.Black),

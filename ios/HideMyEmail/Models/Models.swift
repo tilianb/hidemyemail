@@ -100,6 +100,9 @@ struct Domain: Identifiable, Decodable, Hashable {
     let verifiedAt: Double?
     let defaultDestination: String?
     let createdAt: Double?
+    // Per-subdomain overrides (null = inherit the account/server default).
+    let catchAll: Int?
+    let inlineActionsPref: String?   // "on" | "off" | nil
 
     var isGlobalDomain: Bool { isGlobal == 1 }
     var isPersonal: Bool { isGlobal == 0 }
@@ -123,6 +126,53 @@ struct Domain: Identifiable, Decodable, Hashable {
         case verifiedAt = "verified_at"
         case defaultDestination = "default_destination"
         case createdAt = "created_at"
+        case catchAll = "catch_all"
+        case inlineActionsPref = "inline_actions_pref"
+    }
+}
+
+// GET /api/mfa — TOTP status for the signed-in user.
+struct MfaStatus: Decodable {
+    let enabled: Bool
+    let backupCodesRemaining: Int
+}
+
+// GET /api/passkeys — registered WebAuthn credentials.
+struct Passkey: Identifiable, Decodable, Hashable {
+    let id: String
+    let deviceName: String?
+    let createdAt: Double
+
+    var createdDate: Date { Date(timeIntervalSince1970: createdAt / 1000) }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case deviceName = "device_name"
+        case createdAt = "created_at"
+    }
+}
+
+// GET /api/preferences — account-wide inline-action settings. Null means
+// "inherit the server default" (carried in `defaults`).
+struct Preferences: Decodable {
+    struct Defaults: Decodable {
+        let inlineActionsEnabled: Bool
+        let inlineActionsPosition: String
+
+        enum CodingKeys: String, CodingKey {
+            case inlineActionsEnabled = "inline_actions_enabled"
+            case inlineActionsPosition = "inline_actions_position"
+        }
+    }
+
+    let inlineActionsPref: String?       // "on" | "off" | nil
+    let inlineActionsPosition: String?   // "header" | "footer" | nil
+    let defaults: Defaults
+
+    enum CodingKeys: String, CodingKey {
+        case inlineActionsPref = "inline_actions_pref"
+        case inlineActionsPosition = "inline_actions_position"
+        case defaults
     }
 }
 

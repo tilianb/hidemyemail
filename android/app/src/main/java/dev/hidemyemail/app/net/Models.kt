@@ -73,6 +73,9 @@ data class Domain(
     @SerialName("verified_at") val verifiedAt: Double? = null,
     @SerialName("default_destination") val defaultDestination: String? = null,
     @SerialName("created_at") val createdAt: Double? = null,
+    // Per-subdomain overrides (null = inherit the account/server default).
+    @SerialName("catch_all") val catchAll: Int? = null,
+    @SerialName("inline_actions_pref") val inlineActionsPref: String? = null,
 ) {
     val isGlobalDomain: Boolean get() = isGlobal == 1
     val isPersonal: Boolean get() = isGlobal == 0
@@ -136,6 +139,36 @@ data class ServerConfig(
     @SerialName("max_total_aliases") val maxTotalAliases: Int,
     @SerialName("alias_quota_buffer_enabled") val aliasQuotaBufferEnabled: Boolean,
 )
+
+// GET /api/mfa — TOTP status for the signed-in user.
+@Serializable
+data class MfaStatus(
+    val enabled: Boolean,
+    val backupCodesRemaining: Int,
+)
+
+// GET /api/passkeys — registered WebAuthn credentials.
+@Serializable
+data class Passkey(
+    val id: String,
+    @SerialName("device_name") val deviceName: String? = null,
+    @SerialName("created_at") val createdAt: Double,
+)
+
+// GET /api/preferences — account-wide inline-action settings. Null means
+// "inherit the server default" (carried in [defaults]).
+@Serializable
+data class Preferences(
+    @SerialName("inline_actions_pref") val inlineActionsPref: String? = null,
+    @SerialName("inline_actions_position") val inlineActionsPosition: String? = null,
+    val defaults: Defaults,
+) {
+    @Serializable
+    data class Defaults(
+        @SerialName("inline_actions_enabled") val inlineActionsEnabled: Boolean,
+        @SerialName("inline_actions_position") val inlineActionsPosition: String,
+    )
+}
 
 // POST /api/login, /api/mfa/complete, and /api/app-auth/exchange return one of
 // these shapes.

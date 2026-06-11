@@ -149,6 +149,46 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
     suspend fun updateDomainDestination(id: Int, destination: String) =
         requestVoid("/api/domains/$id", "PATCH", buildJsonObject { put("default_destination", destination) })
 
+    /**
+     * Patch any combination of a personal subdomain's settings; JsonNull
+     * resets a field to "inherit" (catch_all, inline_actions_pref).
+     */
+    suspend fun updateDomain(id: Int, fields: JsonObject) =
+        requestVoid("/api/domains/$id", "PATCH", fields)
+
+    /**
+     * Re-route one alias: a verified destination email, or null to fall back
+     * to the default (global domains) / subdomain inheritance.
+     */
+    suspend fun updateAliasDestination(id: Int, destination: String?) {
+        val value: JsonElement = if (destination == null) JsonNull else JsonPrimitive(destination)
+        requestVoid("/api/aliases/$id", "PATCH", JsonObject(mapOf("destination" to value)))
+    }
+
+    // MARK: Account settings (Settings tab)
+
+    suspend fun preferences(): Preferences = request("/api/preferences")
+
+    /** Update inline-action preferences; JsonNull means "inherit". */
+    suspend fun updatePreferences(fields: JsonObject) =
+        requestVoid("/api/preferences", "PATCH", fields)
+
+    suspend fun mfaStatus(): MfaStatus = request("/api/mfa")
+
+    suspend fun passkeys(): List<Passkey> = request("/api/passkeys")
+
+    suspend fun renamePasskey(id: String, name: String) =
+        requestVoid("/api/passkeys/$id", "PATCH", buildJsonObject { put("deviceName", name) })
+
+    suspend fun deletePasskey(id: String) = requestVoid("/api/passkeys/$id", "DELETE")
+
+    /**
+     * Full account export (aliases, domains, destinations, rules…) as raw
+     * JSON text. Requires a fresh session; the Worker 401s otherwise.
+     */
+    suspend fun exportData(): String =
+        perform("/api/export", "GET", null, authMode = false, authed = true)
+
     suspend fun config(): ServerConfig = request("/api/config", authed = false)
 
     suspend fun blocks(): List<Block> = request("/api/blocks")

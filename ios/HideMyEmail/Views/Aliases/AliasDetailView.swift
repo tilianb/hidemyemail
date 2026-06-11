@@ -16,6 +16,8 @@ struct AliasDetailView: View {
     @State private var loadingBlocks = false
     @State private var events: [EmailEvent] = []
     @State private var loadingEvents = false
+    @State private var destinations: [Destination] = []
+    @State private var destinationSelection: String
 
     // Rules that apply to this alias, in the Worker's resolution order:
     // alias-specific, then its subdomain, then account-wide.
@@ -32,6 +34,7 @@ struct AliasDetailView: View {
         self.onChange = onChange
         _isActive = State(initialValue: alias.isActive)
         _label = State(initialValue: alias.label ?? "")
+        _destinationSelection = State(initialValue: alias.destination ?? "")
     }
 
     var body: some View {
@@ -68,6 +71,16 @@ struct AliasDetailView: View {
                     }
                 TextField("Label", text: $label)
                     .onSubmit { Task { await saveLabel() } }
+                Picker("Forward to", selection: $destinationSelection) {
+                    Text("Default").tag("")
+                    ForEach(destinations.filter(\.isVerified), id: \.id) { dest in
+                        Text(dest.email).tag(dest.email)
+                    }
+                }
+                .onChange(of: destinationSelection) { old, newValue in
+                    guard newValue != (alias.destination ?? "") else { return }
+                    Task { await saveDestination(newValue, revertTo: old) }
+                }
             }
 
             Section("Activity") {
@@ -121,6 +134,10 @@ struct AliasDetailView: View {
         }
         .task { await loadBlocks() }
         .task { await loadEvents() }
+        .task {
+            guard let client = app.api() else { return }
+            destinations = (try? await client.destinations()) ?? []
+        }
         .onDisappear {
             // Persist a pending label edit when the user navigates back without
             // hitting return. Detached from the view's lifecycle so teardown
@@ -229,6 +246,17 @@ struct AliasDetailView: View {
         guard let client = app.api() else { return }
         do { try await client.setAliasActive(id: alias.id, active: value); await onChange() }
         catch { isActive = !value; handle(error) }
+    }
+
+    private func saveDestination(_ value: String, revertTo old: String) async {
+        guard let client = app.api() else { return }
+        do {
+            try await client.updateAliasDestination(id: alias.id, destination: value.isEmpty ? nil : value)
+            await onChange()
+        } catch {
+            destinationSelection = old
+            handle(error)
+        }
     }
 
     private func saveLabel() async {
