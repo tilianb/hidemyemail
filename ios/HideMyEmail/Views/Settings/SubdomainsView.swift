@@ -134,11 +134,24 @@ struct SubdomainsView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(personalSubdomains) { d in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(d.domain).font(Theme.mono(14))
-                        Text(destinationLabel(for: d))
-                            .font(.caption)
-                            .foregroundStyle(Theme.textSecondary)
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(d.domain).font(Theme.mono(14))
+                            Text(destinationLabel(for: d))
+                                .font(.caption)
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                        Spacer()
+                        // Visible affordance: the whole row also opens the editor.
+                        HStack(spacing: 5) {
+                            Image(systemName: "pencil")
+                            Text("Edit")
+                                .font(Theme.body(13, .medium))
+                        }
+                        .foregroundStyle(Theme.accent)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(Capsule().fill(Theme.accentDim))
                     }
                     .swipeActions {
                         Button("Delete", role: .destructive) { pendingDelete = d }
