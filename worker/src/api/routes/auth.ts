@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { setCookie, deleteCookie, getCookie } from "hono/cookie";
 import type { Context } from "hono";
 import type { AppEnv } from "../app";
-import { verifyPassword, signFreshAuth, signSession, verifySession, derivePassphraseHash, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge, signAppAuthCode, verifyAppAuthCode, sha256Base64url } from "../../lib/auth";
+import { verifyPassword, signFreshAuth, signSession, verifySession, derivePassphraseHash, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge, signAppAuthCode, verifyAppAuthCode, sha256Base64url, timingSafeEqual } from "../../lib/auth";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { getEnvWithOverride, getMainGlobalDomain } from "../../lib/settings";
 
@@ -129,7 +129,7 @@ export function authRoutes() {
     if (!code || !verifier) return c.json({ error: "Missing code or verifier" }, 400);
 
     const parsed = await verifyAppAuthCode(c.env.SESSION_SECRET, code);
-    if (!parsed || (await sha256Base64url(verifier)) !== parsed.challenge) {
+    if (!parsed || !timingSafeEqual(await sha256Base64url(verifier), parsed.challenge)) {
       await recordFailedAttempt(ip, c.env.DB);
       return c.json({ error: "Invalid or expired code" }, 401);
     }
