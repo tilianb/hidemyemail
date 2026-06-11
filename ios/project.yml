@@ -1,0 +1,51 @@
+# XcodeGen project definition.
+#
+# This repo intentionally does NOT commit a hand-written .xcodeproj — that file
+# is huge, merge-hostile, and easy to corrupt. Instead we declare the project
+# here and generate it deterministically:
+#
+#   brew install xcodegen     # one time
+#   cd ios && xcodegen generate
+#   open HideMyEmail.xcodeproj
+#
+# See ios/README.md for the full setup walkthrough.
+
+name: HideMyEmail
+options:
+  bundleIdPrefix: dev.hidemyemail
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.9"
+    DEVELOPMENT_TEAM: "" # set your Apple Developer Team ID here (or in Xcode signing)
+    CODE_SIGN_STYLE: Automatic
+
+targets:
+  HideMyEmail:
+    type: application
+    platform: iOS
+    sources:
+      - path: HideMyEmail
+    info:
+      path: HideMyEmail/Info.plist
+      properties:
+        CFBundleDisplayName: HideMyEmail
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.hidemyemail.app
+        GENERATE_INFOPLIST_FILE: NO
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+        TARGETED_DEVICE_FAMILY: "1,2"

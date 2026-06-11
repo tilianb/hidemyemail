@@ -1,0 +1,41 @@
+import SwiftUI
+
+struct SettingsView: View {
+    @Environment(AppState.self) private var app
+    @State private var showSignOut = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Account") {
+                    LabeledContent("Signed in as", value: app.userName.isEmpty ? "—" : app.userName)
+                    if app.isAdmin {
+                        Label("Administrator", systemImage: "crown.fill")
+                            .foregroundStyle(Theme.accent)
+                    }
+                }
+                Section("Server") {
+                    LabeledContent("URL", value: app.serverURLString)
+                }
+                Section {
+                    Button("Sign Out", role: .destructive) { showSignOut = true }
+                }
+                Section {
+                    LabeledContent("Version", value: appVersion)
+                } footer: {
+                    Text("Passkeys, push notifications, and the share sheet are planned for a future release.")
+                }
+            }
+            .navigationTitle("Settings")
+            .confirmationDialog("Sign out?", isPresented: $showSignOut, titleVisibility: .visible) {
+                Button("Sign Out", role: .destructive) { Task { await app.signOut() } }
+            }
+        }
+    }
+
+    private var appVersion: String {
+        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+        let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        return "\(v) (\(b))"
+    }
+}
