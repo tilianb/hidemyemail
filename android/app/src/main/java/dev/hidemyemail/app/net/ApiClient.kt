@@ -142,6 +142,13 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
 
     suspend fun deleteDomain(id: Int) = requestVoid("/api/domains/$id", "DELETE")
 
+    /**
+     * Change a personal subdomain's default destination. [destination] is
+     * "global" or a verified destination email (PATCH /api/domains/:id).
+     */
+    suspend fun updateDomainDestination(id: Int, destination: String) =
+        requestVoid("/api/domains/$id", "PATCH", buildJsonObject { put("default_destination", destination) })
+
     suspend fun config(): ServerConfig = request("/api/config", authed = false)
 
     suspend fun blocks(): List<Block> = request("/api/blocks")

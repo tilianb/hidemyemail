@@ -21,6 +21,9 @@ struct SubdomainsView: View {
     // Delete confirmation
     @State private var pendingDelete: Domain?
 
+    // Destination edit sheet
+    @State private var editing: Domain?
+
     private var baseDomains: [Domain] { domains.filter { $0.canHostSubdomains } }
     private var personalSubdomains: [Domain] { domains.filter { $0.isPersonal } }
     private var verifiedDestinations: [Destination] { destinations.filter { $0.isVerified } }
@@ -61,6 +64,11 @@ struct SubdomainsView: View {
                 Button("Cancel", role: .cancel) { pendingDelete = nil }
             }
             .task { if domains.isEmpty { await reload() } }
+            .sheet(item: $editing) { d in
+                EditSubdomainView(domain: d, destinations: verifiedDestinations) {
+                    await reload()
+                }
+            }
         }
     }
 
@@ -134,7 +142,10 @@ struct SubdomainsView: View {
                     }
                     .swipeActions {
                         Button("Delete", role: .destructive) { pendingDelete = d }
+                        Button("Edit") { editing = d }.tint(Theme.accent)
                     }
+                    .contentShape(Rectangle())
+                    .onTapGesture { editing = d }
                 }
             }
         }
@@ -195,6 +206,76 @@ struct SubdomainsView: View {
         if let err = error as? APIError, err.isAuthFailure {
             Task { await app.handleAuthFailure() }
         } else {
+            self.error = error.localizedDescription
+        }
+    }
+}
+
+/// Edit a personal subdomain's default destination — the native counterpart of
+/// the dashboard's inline destination editor on the Domains page.
+private struct EditSubdomainView: View {
+    @Environment(AppState.self) private var app
+    @Environment(\.dismiss) private var dismiss
+
+    let domain: Domain
+    let destinations: [Destination]
+    let onSave: () async -> Void
+
+    @State private var selection: String
+    @State private var saving = false
+    @State private var error: String?
+
+    init(domain: Domain, destinations: [Destination], onSave: @escaping () async -> Void) {
+        self.domain = domain
+        self.destinations = destinations
+        self.onSave = onSave
+        _selection = State(initialValue: domain.defaultDestination ?? "global")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("Default destination", selection: $selection) {
+                        Text("Global default").tag("global")
+                        ForEach(destinations, id: \.id) { dest in
+                            Text(dest.email).tag(dest.email)
+                        }
+                    }
+                } header: {
+                    Text(domain.domain)
+                } footer: {
+                    Text("Where mail to this subdomain's aliases is forwarded unless an alias overrides it.")
+                }
+
+                if let error {
+                    Text(error).foregroundStyle(Theme.red).font(.footnote)
+                }
+            }
+            .themedScrollBackground()
+            .navigationTitle("Edit Subdomain")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(saving ? "Saving…" : "Save") { Task { await save() } }
+                        .disabled(saving || selection == (domain.defaultDestination ?? "global"))
+                }
+            }
+        }
+    }
+
+    private func save() async {
+        guard let client = app.api() else { return }
+        saving = true
+        defer { saving = false }
+        do {
+            try await client.updateDomainDestination(id: domain.id, destination: selection)
+            await onSave()
+            dismiss()
+        } catch {
             self.error = error.localizedDescription
         }
     }

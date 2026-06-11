@@ -14,6 +14,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -49,6 +52,7 @@ import kotlinx.coroutines.launch
  * Manage personal subdomains (`name.<base global domain>`). Mirrors the iOS
  * `SubdomainsView` / the create-list-delete subset of the web dashboard.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DomainsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
@@ -63,6 +67,7 @@ fun DomainsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
     var selectedDestination by remember { mutableStateOf("global") }
     var creating by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<Domain?>(null) }
+    var editing by remember { mutableStateOf<Domain?>(null) }
 
     val baseDomains = domains.filter { it.canHostSubdomains }
     val personalSubdomains = domains.filter { it.isPersonal }
@@ -225,6 +230,9 @@ fun DomainsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
                                     style = Theme.bodyStyle(11.sp).copy(color = Theme.textSecondary),
                                 )
                             }
+                            IconButton(onClick = { editing = d }) {
+                                Icon(Icons.Default.Edit, contentDescription = "Edit destination", tint = Theme.textSecondary, modifier = Modifier.size(18.dp))
+                            }
                             IconButton(onClick = { pendingDelete = d }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Theme.red, modifier = Modifier.size(18.dp))
                             }
@@ -236,6 +244,52 @@ fun DomainsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
         }
 
         error?.let { ErrorBanner(it, Modifier.align(Alignment.BottomCenter)) }
+    }
+
+    editing?.let { d ->
+        ModalBottomSheet(onDismissRequest = { editing = null }, containerColor = Theme.surface1) {
+            var selection by remember { mutableStateOf(d.defaultDestination ?: "global") }
+            var saving by remember { mutableStateOf(false) }
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text("Edit Subdomain", style = Theme.displayStyle(22.sp))
+                Text(d.domain, style = Theme.monoStyle(14.sp).copy(color = Theme.textSecondary))
+                Text("DEFAULT DESTINATION", style = Theme.bodyStyle(11.sp).copy(color = Theme.textSecondary, letterSpacing = 0.8.sp))
+                ChoiceChips(
+                    options = listOf("global" to "Global default") + verifiedDestinations.map { it.email to it.email },
+                    selected = selection,
+                    onSelect = { selection = it ?: "global" },
+                )
+                Text(
+                    "Where mail to this subdomain's aliases is forwarded unless an alias overrides it.",
+                    style = Theme.bodyStyle(12.sp).copy(color = Theme.textSecondary),
+                )
+                Button(
+                    onClick = {
+                        saving = true
+                        scope.launch {
+                            try {
+                                app.api()?.updateDomainDestination(d.id, selection)
+                                editing = null
+                                reload()
+                            } catch (e: Exception) {
+                                handle(e)
+                            } finally {
+                                saving = false
+                            }
+                        }
+                    },
+                    enabled = !saving && selection != (d.defaultDestination ?: "global"),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Theme.accent, contentColor = Color.Black),
+                ) {
+                    Text(if (saving) "Saving…" else "Save")
+                }
+            }
+        }
     }
 
     pendingDelete?.let { d ->

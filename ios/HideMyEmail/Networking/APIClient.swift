@@ -143,6 +143,12 @@ actor APIClient {
         try await requestVoid("/api/domains/\(id)", method: "DELETE")
     }
 
+    /// Change a personal subdomain's default destination. `destination` is
+    /// "global" or a verified destination email (PATCH /api/domains/:id).
+    func updateDomainDestination(id: Int, destination: String) async throws {
+        try await requestVoid("/api/domains/\(id)", method: "PATCH", body: ["default_destination": destination])
+    }
+
     func config() async throws -> ServerConfig {
         try await request("/api/config", authed: false)
     }
