@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeEach, expect, test } from "vitest";
 import * as q from "../src/db/queries";
+import { encryptDestination, hashDestination } from "../src/lib/crypto";
 import { resetDb } from "./helpers";
 
 const DB = () => env.DB as D1Database;
@@ -40,4 +41,26 @@ test("ownerDestinations unions domain defaults and alias overrides", async () =>
   const set = await q.ownerDestinations(DB(), 1, env.DESTINATION_ENCRYPTION_KEY as string || "sek");
   expect(set.has("real@me.com")).toBe(true);
   expect(set.has("work@me.com")).toBe(true);
+});
+
+test("ownerDestinations excludes unverified destinations", async () => {
+  const key = (env.DESTINATION_ENCRYPTION_KEY as string) || "sek";
+  const insert = async (email: string, verified: boolean) => {
+    await DB().prepare(
+      "INSERT INTO destinations (user_id, email, email_hash, token, verified_at, created_at, is_default) VALUES (1, ?, ?, ?, ?, ?, 0)"
+    ).bind(
+      await encryptDestination(email, key),
+      await hashDestination(email, key),
+      `tok-${email}`,
+      verified ? Date.now() : null,
+      Date.now(),
+    ).run();
+  };
+  await insert("verified@me.com", true);
+  await insert("pending@me.com", false);
+
+  const set = await q.ownerDestinations(DB(), 1, key);
+  expect(set.has("verified@me.com")).toBe(true);
+  // An unverified destination must never authorise reverse-alias replies.
+  expect(set.has("pending@me.com")).toBe(false);
 });

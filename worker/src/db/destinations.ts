@@ -51,7 +51,7 @@ export async function ownerDestinations(db: D1Database, userId: number, key: str
   const [a, b, c] = await Promise.all([
     db.prepare("SELECT default_destination AS d FROM domains WHERE user_id = ?").bind(userId).all<{ d: string }>(),
     db.prepare("SELECT DISTINCT destination AS d FROM aliases WHERE destination IS NOT NULL AND user_id = ?").bind(userId).all<{ d: string }>(),
-    db.prepare("SELECT email AS d FROM destinations WHERE user_id = ?").bind(userId).all<{ d: string }>(),
+    db.prepare("SELECT email AS d FROM destinations WHERE user_id = ? AND verified_at IS NOT NULL").bind(userId).all<{ d: string }>(),
   ]);
 
   const decrypted = new Set<string>();
