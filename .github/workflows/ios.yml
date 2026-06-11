@@ -1,0 +1,60 @@
+name: iOS
+
+on:
+  push:
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
+      - '!**.md'
+  pull_request:
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
+      - '!**.md'
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Build & Test (iOS Simulator)
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: ios
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Select Xcode
+        run: sudo xcode-select -switch /Applications/Xcode.app
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      # Pick whatever iPhone simulator the runner image actually ships, so we
+      # don't hard-code a device name that drifts between Xcode versions.
+      - name: Resolve simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available \
+            | grep -E 'iPhone' \
+            | grep -oE '[0-9A-Fa-f-]{36}' \
+            | head -n1)
+          if [ -z "$UDID" ]; then
+            echo "No iPhone simulator available" >&2
+            exit 1
+          fi
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Build & test
+        run: |
+          xcodebuild test \
+            -project HideMyEmail.xcodeproj \
+            -scheme HideMyEmail \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO

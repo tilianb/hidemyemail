@@ -166,7 +166,12 @@ actor APIClient {
         guard let http = response as? HTTPURLResponse else {
             throw APIError.server(status: -1, message: "Invalid response")
         }
-        if http.statusCode == 401 { throw APIError.unauthorized }
+        // A 401 on an authenticated request means the session token is gone or
+        // expired → drop it and bounce to login. On the unauthenticated auth
+        // endpoints (login / mfa-complete) a 401 instead carries a meaningful
+        // message like "Invalid passphrase" / "Invalid code", so fall through
+        // and surface that rather than masking it as a stale session.
+        if http.statusCode == 401 && authed { throw APIError.unauthorized }
         guard (200..<300).contains(http.statusCode) else {
             let message = (try? Self.decoder.decode(APIErrorBody.self, from: data))?.error
                 ?? "Request failed (\(http.statusCode))"
