@@ -1,8 +1,7 @@
 name: Docker
 
 # Builds the self-host container.
-# - PRs: build only (no push), uses GHA cache to keep iteration fast.
-# - Push to dev: validate linux/amd64 only (no push).
+# - PRs and pushes to dev: validate linux/amd64 only (no push), GHA cache keeps iteration fast.
 # - Push to main: build + push multi-arch :latest, :main, :sha-<short> to GHCR + Docker Hub.
 # - Tag v*.*.*: retag existing GHCR :sha-<short>; copy release tags to Docker Hub.
 
@@ -17,7 +16,6 @@ on:
       - ".github/workflows/docker.yml"
       - "!**.md"
   pull_request:
-    branches: ['**']
     paths:
       - "docker/**"
       - "worker/**"
@@ -42,61 +40,13 @@ env:
   DOCKERHUB_IMAGE: docker.io/${{ github.repository_owner }}/hidemyemail
 
 jobs:
-  validate-dev:
-    name: Validate Docker Image (linux/amd64)
-    if: github.ref == 'refs/heads/dev'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v4
-        with:
-          registry: docker.io
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=sha,format=short,prefix=sha-
-          labels: |
-            org.opencontainers.image.title=hidemyemail
-            org.opencontainers.image.description=Self-host container for hidemyemail.dev (Worker via Miniflare)
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.licenses=MIT
-
-      - name: Build for validation
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: docker/Dockerfile
-          platforms: linux/amd64
-          labels: ${{ steps.meta.outputs.labels }}
-          push: false
-          cache-from: type=gha,scope=build-linux/amd64
-          cache-to: type=gha,mode=max,scope=build-linux/amd64
-          provenance: true
-          sbom: true
-
   build:
     name: Build & Push by Digest
-    if: github.ref != 'refs/heads/dev' && !startsWith(github.ref, 'refs/tags/')
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     strategy:
       matrix:
-        include:
-          - os: ubuntu-latest
-            platform: linux/amd64
-          - os: ubuntu-24.04-arm
-            platform: linux/arm64
+        # Validation-only runs (PRs, dev pushes) build linux/amd64 only; main pushes build both.
+        include: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/dev') && fromJSON('[{"os":"ubuntu-latest","platform":"linux/amd64"}]') || fromJSON('[{"os":"ubuntu-latest","platform":"linux/amd64"},{"os":"ubuntu-24.04-arm","platform":"linux/arm64"}]') }}
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -115,7 +65,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/dev'
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
@@ -144,7 +94,7 @@ jobs:
             org.opencontainers.image.licenses=MIT
 
       - name: Build for validation
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/dev'
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -158,7 +108,7 @@ jobs:
           sbom: true
 
       - name: Build and push by digest
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/dev'
         id: build
         uses: docker/build-push-action@v7
         with:
@@ -178,14 +128,14 @@ jobs:
           sbom: false
 
       - name: Export digest
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/dev'
         run: |
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
 
       - name: Upload digest
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/dev'
         uses: actions/upload-artifact@v7
         with:
           name: digests-${{ strategy.job-index }}
