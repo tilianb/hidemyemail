@@ -41,11 +41,17 @@ async function recordFailedAttempt(ip: string, db: D1Database): Promise<void> {
 
 // Native clients (iOS/Android) can't use the HttpOnly __Host- cookie jar, so
 // they opt into bearer-token auth by sending `X-Auth-Mode: token`. Only then do
-// we echo the session token in the response body. Browsers never send this
-// header, so the web app keeps its HttpOnly cookie and the token stays
-// unreadable to page JS — preserving XSS protection for the dominant client.
+// we echo the session token in the response body.
+//
+// We additionally require the absence of an `Origin` header. `Origin` is a
+// forbidden header: page JavaScript can neither set nor strip it, and browsers
+// attach it to every POST (login/register/mfa-complete are all POST). Native
+// URLSession requests carry no Origin. So "token mode AND no Origin" is an
+// unspoofable native-only signal — even an XSS on the app's own (or a
+// CORS-allowed) origin can't flip a cookie-bound HttpOnly session into an
+// exfiltratable bearer token, because the browser always pins Origin on.
 function wantsToken(c: Context<AppEnv>): boolean {
-  return c.req.header("X-Auth-Mode") === "token";
+  return c.req.header("X-Auth-Mode") === "token" && !c.req.header("Origin");
 }
 
 async function setAuthenticatedCookies(c: Context<AppEnv>, userId: number): Promise<string> {
