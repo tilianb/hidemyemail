@@ -89,7 +89,7 @@ async function processRecipients(
   encKey: string,
   now: number,
   unknownDetail: string,
-  handle: (dest: import("../../types").DestinationRow, addr: string) => Promise<void>,
+  handle: (dest: import("../../types").DestinationRow) => Promise<void>,
 ): Promise<void> {
   const db = env.DB;
   for (const recipient of recipients) {
@@ -100,12 +100,14 @@ async function processRecipients(
     const destinations = await q.findDestinationsByHash(db, emailHash);
 
     if (destinations.length === 0) {
-      console.log(`${unknownDetail}: ${addr}`);
-      await q.insertEvent(db, { alias_id: null, type: "error", external_sender: addr, detail: unknownDetail, ts: now });
+      // Destination emails are encrypted at rest and looked up by hash; never
+      // persist (or log) the raw address — the hash is enough to correlate.
+      console.log(`${unknownDetail}: hash:${emailHash}`);
+      await q.insertEvent(db, { alias_id: null, type: "error", external_sender: `hash:${emailHash}`, detail: unknownDetail, ts: now });
     }
 
     for (const dest of destinations) {
-      await handle(dest, addr);
+      await handle(dest);
     }
   }
 }
@@ -121,17 +123,18 @@ async function processBounce(env: AppEnv["Bindings"], msg: any, encKey: string, 
   const isHard = (bounce.bounceType ?? "") === "Permanent";
   const softThreshold = await getNumericSetting(db, "soft_bounce_threshold");
 
-  await processRecipients(env, bounce.bouncedRecipients, encKey, now, "ses:bounce_unknown_destination", async (dest, addr) => {
+  await processRecipients(env, bounce.bouncedRecipients, encKey, now, "ses:bounce_unknown_destination", async (dest) => {
     if (isHard) {
-      // Hard bounce: record and suppress immediately.
-      await q.insertEvent(db, { alias_id: null, type: "bounce", external_sender: addr, detail: `dest:${dest.id}`, ts: now });
+      // Hard bounce: record and suppress immediately. `dest:<id>` is the only
+      // reference stored — the plaintext address must never land in events.
+      await q.insertEvent(db, { alias_id: null, type: "bounce", detail: `dest:${dest.id}`, ts: now });
       const changed = await q.suppressDestination(db, dest.id, "hard_bounce", "hard", now);
       if (changed) await notifySuppression(env, dest, "hard_bounce", "hard");
     } else {
       // Soft/transient bounce: record as soft_bounce so the threshold counts
       // ONLY soft bounces (a prior hard bounce must never inflate the count).
       // The event we just inserted is included in the count.
-      await q.insertEvent(db, { alias_id: null, type: "soft_bounce", external_sender: addr, detail: `dest:${dest.id}`, ts: now });
+      await q.insertEvent(db, { alias_id: null, type: "soft_bounce", detail: `dest:${dest.id}`, ts: now });
       const since = now - 24 * 3600_000;
       const softCount = await q.countEventsForDestinationSince(db, dest.id, "soft_bounce", since);
       if (softThreshold > 0 && softCount >= softThreshold) {
@@ -150,8 +153,8 @@ async function processComplaint(env: AppEnv["Bindings"], msg: any, encKey: strin
     return;
   }
 
-  await processRecipients(env, complaint.complainedRecipients, encKey, now, "ses:complaint_unknown_destination", async (dest, addr) => {
-    await q.insertEvent(db, { alias_id: null, type: "complaint", external_sender: addr, detail: `dest:${dest.id}`, ts: now });
+  await processRecipients(env, complaint.complainedRecipients, encKey, now, "ses:complaint_unknown_destination", async (dest) => {
+    await q.insertEvent(db, { alias_id: null, type: "complaint", detail: `dest:${dest.id}`, ts: now });
     // Always hard-suppress on complaint.
     const changed = await q.suppressDestination(db, dest.id, "complaint", "hard", now);
     if (changed) await notifySuppression(env, dest, "complaint", "hard");

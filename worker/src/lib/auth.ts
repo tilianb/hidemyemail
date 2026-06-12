@@ -123,6 +123,42 @@ export async function verifyFreshAuth(secret: string, token: string, userId: num
   return Number(expStr) > Math.floor(Date.now() / 1000);
 }
 
+// App-auth handoff codes (web-session login → native bearer token).
+//
+// The native app opens the dashboard login in an ASWebAuthenticationSession
+// with a PKCE-style challenge (= base64url SHA-256 of a verifier the app keeps
+// secret). After the web login succeeds, the dashboard asks the (session-
+// authenticated) Worker for a short-lived code bound to that challenge, and
+// redirects back to the app's custom URL scheme. The app exchanges
+// code + verifier for a bearer token. A leaked or replayed code is useless
+// without the verifier, which never leaves the app.
+const APP_AUTH_CODE_TTL = 120; // seconds
+
+export async function signAppAuthCode(secret: string, userId: number, challenge: string): Promise<string> {
+  const exp = Math.floor(Date.now() / 1000) + APP_AUTH_CODE_TTL;
+  const payload = `appauth.${userId}.${exp}.${challenge}`;
+  return `${payload}.${await hmac(secret, payload)}`;
+}
+
+export async function verifyAppAuthCode(secret: string, code: string): Promise<{ userId: number; challenge: string } | null> {
+  const parts = code.split(".");
+  if (parts.length !== 5 || parts[0] !== "appauth") return null;
+  const [, userIdStr, expStr, challenge, sig] = parts;
+  const payload = `appauth.${userIdStr}.${expStr}.${challenge}`;
+  const expected = await hmac(secret, payload);
+  if (!timingSafeEqual(sig!, expected)) return null;
+  if (Number(expStr) <= Math.floor(Date.now() / 1000)) return null;
+  return { userId: Number(userIdStr), challenge: challenge! };
+}
+
+/// base64url (no padding) SHA-256 — the PKCE challenge derivation.
+export async function sha256Base64url(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", enc.encode(input));
+  let s = "";
+  for (const b of new Uint8Array(digest)) s += String.fromCharCode(b);
+  return btoa(s).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+}
+
 export async function verifySession(secret: string, token: string): Promise<number | null> {
   const parts = token.split(".");
   if (parts.length === 4) {

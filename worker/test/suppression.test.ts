@@ -390,6 +390,31 @@ test("bounce for unknown destination → 200, no crash", async () => {
   expect(row?.detail).toBe("ses:bounce_unknown_destination");
 });
 
+test("webhook events never store plaintext destination addresses", async () => {
+  const destId = await insertDestination("plain@example.com");
+  const app = createApp();
+
+  const bounce = {
+    notificationType: "Bounce",
+    bounce: { bounceType: "Permanent", bouncedRecipients: [{ emailAddress: "plain@example.com" }] },
+  };
+  await postNotification(app, await signedNotification(bounce));
+
+  const unknown = {
+    notificationType: "Complaint",
+    complaint: { complainedRecipients: [{ emailAddress: "ghost@nowhere.invalid" }] },
+  };
+  await postNotification(app, await signedNotification(unknown));
+
+  expect(await countBounceEvents(destId)).toBe(1);
+  // Destination emails are encrypted at rest: no webhook event may carry a raw
+  // address in external_sender — matched rows use `dest:<id>`, unknowns a hash.
+  const leak = await DB().prepare(
+    "SELECT COUNT(*) AS n FROM events WHERE external_sender LIKE '%@%'"
+  ).first<{ n: number }>();
+  expect(leak?.n).toBe(0);
+});
+
 test("soft bounce threshold 0 disables transient suppression", async () => {
   await setSoftBounceThreshold(0);
   const destId = await insertDestination("disabled-soft@example.com");

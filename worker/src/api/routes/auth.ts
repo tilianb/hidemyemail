@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { setCookie, deleteCookie, getCookie } from "hono/cookie";
 import type { Context } from "hono";
 import type { AppEnv } from "../app";
-import { verifyPassword, signFreshAuth, signSession, derivePassphraseHash, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge } from "../../lib/auth";
+import { verifyPassword, signFreshAuth, verifyFreshAuth, signSession, verifySession, derivePassphraseHash, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge, signAppAuthCode, verifyAppAuthCode, sha256Base64url, timingSafeEqual } from "../../lib/auth";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { getEnvWithOverride, getMainGlobalDomain } from "../../lib/settings";
 
@@ -39,11 +39,27 @@ async function recordFailedAttempt(ip: string, db: D1Database): Promise<void> {
   await db.prepare("UPDATE rate_limits SET attempts = attempts + 1 WHERE ip = ?").bind(ip).run();
 }
 
-async function setAuthenticatedCookies(c: Context<AppEnv>, userId: number): Promise<void> {
+// Native clients (iOS/Android) can't use the HttpOnly __Host- cookie jar, so
+// they opt into bearer-token auth by sending `X-Auth-Mode: token`. Only then do
+// we echo the session token in the response body.
+//
+// We additionally require the absence of an `Origin` header. `Origin` is a
+// forbidden header: page JavaScript can neither set nor strip it, and browsers
+// attach it to every POST (login/register/mfa-complete are all POST). Native
+// URLSession requests carry no Origin. So "token mode AND no Origin" is an
+// unspoofable native-only signal — even an XSS on the app's own (or a
+// CORS-allowed) origin can't flip a cookie-bound HttpOnly session into an
+// exfiltratable bearer token, because the browser always pins Origin on.
+function wantsToken(c: Context<AppEnv>): boolean {
+  return c.req.header("X-Auth-Mode") === "token" && !c.req.header("Origin");
+}
+
+async function setAuthenticatedCookies(c: Context<AppEnv>, userId: number): Promise<{ token: string; freshAuth: string }> {
   const sessionToken = await signSession(c.env.SESSION_SECRET, userId, SESSION_TTL);
   const freshAuthToken = await signFreshAuth(c.env.SESSION_SECRET, userId, FRESH_AUTH_TTL);
   setCookie(c, "__Host-session", sessionToken, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
   setCookie(c, "__Host-fresh-auth", freshAuthToken, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: FRESH_AUTH_TTL });
+  return { token: sessionToken, freshAuth: freshAuthToken };
 }
 
 function randomSixDigitCode(): string {
@@ -66,6 +82,87 @@ export function authRoutes() {
     const max_total_aliases = await getNumericSetting(c.env.DB, "max_total_aliases");
     const alias_quota_buffer_enabled = await getBoolSetting(c.env.DB, "alias_quota_buffer_enabled");
     return c.json({ main_global_domain, max_subdomains, max_total_aliases, alias_quota_buffer_enabled });
+  });
+
+  /**
+   * POST /app-auth/code — first half of the web-session → native-app login
+   * handoff (lets self-hosters use passkeys in the app even though the iOS
+   * binary can only carry webcredentials for our own domain).
+   *
+   * Requires a logged-in dashboard session (cookie). Body: { challenge } —
+   * base64url SHA-256 of a verifier held by the native app. Returns a
+   * short-lived signed code bound to this user + challenge.
+   */
+  r.post("/app-auth/code", async (c) => {
+    const sessionCookie = getCookie(c, "__Host-session");
+    const userId = sessionCookie ? await verifySession(c.env.SESSION_SECRET, sessionCookie) : null;
+    if (userId === null) return c.json({ error: "Unauthorized" }, 401);
+
+    // Minting a code creates a NEW device credential (the exchanged bearer
+    // token), so a stolen long-lived session cookie alone must not be enough —
+    // require fresh auth, same as the other sensitive account operations.
+    // This also narrows what same-origin XSS can do with the cookie jar to
+    // the 10-minute window right after an interactive login.
+    const freshAuth = getCookie(c, "__Host-fresh-auth");
+    if (!freshAuth || !(await verifyFreshAuth(c.env.SESSION_SECRET, freshAuth, userId))) {
+      return c.json({ error: "Fresh authentication required" }, 401);
+    }
+
+    const { challenge } = await c.req.json<{ challenge?: string }>().catch(() => ({ challenge: undefined }));
+    // base64url SHA-256 is exactly 43 chars; reject anything else so the
+    // challenge can never smuggle a delimiter into the signed payload.
+    if (!challenge || !/^[A-Za-z0-9_-]{43}$/.test(challenge)) {
+      return c.json({ error: "Invalid challenge" }, 400);
+    }
+
+    const user = await c.env.DB.prepare("SELECT active FROM users WHERE id = ?")
+      .bind(userId).first<{ active: number }>();
+    if (!user || user.active === 0) return c.json({ error: "Account is disabled" }, 403);
+
+    return c.json({ code: await signAppAuthCode(c.env.SESSION_SECRET, userId, challenge) });
+  });
+
+  /**
+   * POST /app-auth/exchange — second half. Public (the app holds no auth yet),
+   * IP-rate-limited. Body: { code, verifier }. Verifies the code's signature,
+   * expiry, and that SHA-256(verifier) matches the embedded challenge, then
+   * mints a bearer token. A stolen code is useless without the verifier.
+   */
+  r.post("/app-auth/exchange", async (c) => {
+    // Native-only, same unspoofable signal as wantsToken(): browsers pin the
+    // forbidden Origin header onto every POST, native HTTP stacks send none.
+    // Without this, same-origin JS could mint a code with the cookie jar and
+    // exchange it here, converting an HttpOnly session into an exfiltratable
+    // bearer token — exactly what the wantsToken() Origin check prevents on
+    // the login endpoints.
+    if (c.req.header("Origin")) {
+      return c.json({ error: "Forbidden" }, 403);
+    }
+
+    const ip = c.req.header("cf-connecting-ip") || "unknown";
+    if (!(await canAttempt(ip, c.env.DB))) {
+      return c.json({ error: "Too many attempts" }, 429);
+    }
+
+    const { code, verifier } = await c.req.json<{ code?: string; verifier?: string }>()
+      .catch(() => ({ code: undefined, verifier: undefined }));
+    if (!code || !verifier) return c.json({ error: "Missing code or verifier" }, 400);
+
+    const parsed = await verifyAppAuthCode(c.env.SESSION_SECRET, code);
+    if (!parsed || !timingSafeEqual(await sha256Base64url(verifier), parsed.challenge)) {
+      await recordFailedAttempt(ip, c.env.DB);
+      return c.json({ error: "Invalid or expired code" }, 401);
+    }
+
+    const user = await c.env.DB.prepare("SELECT active FROM users WHERE id = ?")
+      .bind(parsed.userId).first<{ active: number }>();
+    if (!user || user.active === 0) return c.json({ error: "Account is disabled" }, 403);
+
+    const token = await signSession(c.env.SESSION_SECRET, parsed.userId, SESSION_TTL);
+    // The user just completed an interactive web login seconds ago, so the
+    // exchanged session is as fresh as a direct token-mode login.
+    const freshAuth = await signFreshAuth(c.env.SESSION_SECRET, parsed.userId, FRESH_AUTH_TTL);
+    return c.json({ ok: true, userId: parsed.userId, token, fresh_auth: freshAuth });
   });
 
   r.post("/login", async (c) => {
@@ -117,11 +214,13 @@ export function authRoutes() {
     if (mfa?.totp_enabled === 1) {
       const challenge = await signMfaChallenge(c.env.SESSION_SECRET, userId);
       setCookie(c, "__Host-mfa-challenge", challenge, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: 300 });
-      return c.json({ mfa_required: true });
+      // Native clients carry the short-lived challenge themselves since they
+      // can't rely on the __Host-mfa-challenge cookie round-trip.
+      return c.json(wantsToken(c) ? { mfa_required: true, mfa_token: challenge } : { mfa_required: true });
     }
 
-    await setAuthenticatedCookies(c, userId);
-    return c.json({ ok: true, userId });
+    const { token, freshAuth } = await setAuthenticatedCookies(c, userId);
+    return c.json(wantsToken(c) ? { ok: true, userId, token, fresh_auth: freshAuth } : { ok: true, userId });
   });
 
   /**
@@ -199,8 +298,8 @@ export function authRoutes() {
       ).bind(hash, Date.now()).run();
 
       const userId = res.meta.last_row_id;
-      await setAuthenticatedCookies(c, userId);
-      return c.json({ ok: true, userId });
+      const { token, freshAuth } = await setAuthenticatedCookies(c, userId);
+      return c.json(wantsToken(c) ? { ok: true, userId, token, fresh_auth: freshAuth } : { ok: true, userId });
     } catch (err: any) {
       if (err.message && err.message.includes("UNIQUE constraint failed")) {
         await recordFailedAttempt(ip, c.env.DB);
@@ -222,13 +321,15 @@ export function authRoutes() {
       return c.json({ error: "Too many attempts" }, 429);
     }
 
-    const challenge = getCookie(c, "__Host-mfa-challenge");
+    const { code, mfa_token } = await c.req.json<{ code: string; mfa_token?: string }>().catch(() => ({ code: "", mfa_token: undefined }));
+
+    // Cookie for the web app; body fallback (mfa_token) for native bearer clients.
+    const challenge = getCookie(c, "__Host-mfa-challenge") || mfa_token;
     if (!challenge) return c.json({ error: "No challenge" }, 401);
 
     const userId = await verifyMfaChallenge(c.env.SESSION_SECRET, challenge);
     if (!userId) return c.json({ error: "Challenge expired" }, 401);
 
-    const { code } = await c.req.json<{ code: string }>().catch(() => ({ code: "" }));
     if (!code) return c.json({ error: "Missing code" }, 400);
 
     const mfa = await c.env.DB.prepare(
@@ -268,8 +369,8 @@ export function authRoutes() {
     }
 
     deleteCookie(c, "__Host-mfa-challenge", { path: "/", secure: true });
-    await setAuthenticatedCookies(c, userId);
-    return c.json({ ok: true, userId });
+    const { token, freshAuth } = await setAuthenticatedCookies(c, userId);
+    return c.json(wantsToken(c) ? { ok: true, userId, token, fresh_auth: freshAuth } : { ok: true, userId });
   });
 
   // ── Passkey authentication (discoverable credentials, no passphrase needed) ──
@@ -278,7 +379,10 @@ export function authRoutes() {
     const { generateAuthenticationOptions } = await import("@simplewebauthn/server");
     const { getRpFromOrigin } = await import("../../lib/webauthn");
 
-    const { rpID } = getRpFromOrigin(c.req.header("origin"));
+    // Native clients send no Origin; fall back to the configured app origin so
+    // the rpID matches the iOS associated-domains entitlement (app.hidemyemail.dev).
+    const origin = c.req.header("origin") || c.env.APP_ORIGIN || "https://app.hidemyemail.dev";
+    const { rpID } = getRpFromOrigin(origin);
 
     const options = await generateAuthenticationOptions({
       rpID,
@@ -289,7 +393,9 @@ export function authRoutes() {
     const cookie = await signPasskeyAuthChallenge(c.env.SESSION_SECRET, options.challenge);
     setCookie(c, "__Host-passkey-challenge", cookie, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: 300 });
 
-    return c.json(options);
+    // Token-mode (native) clients can't persist the HttpOnly cookie, so echo the
+    // signed challenge token in the body to round-trip back on verify.
+    return c.json(wantsToken(c) ? { ...options, passkey_token: cookie } : options);
   });
 
   r.post("/passkey/verify", async (c) => {
@@ -298,14 +404,16 @@ export function authRoutes() {
       return c.json({ error: "Too many attempts" }, 429);
     }
 
-    const cookie = getCookie(c, "__Host-passkey-challenge");
+    // Read the assertion first: native clients carry the challenge token in the
+    // body (`passkey_token`) because they have no cookie jar.
+    const response = await c.req.json<AuthenticationResponseJSON & { passkey_token?: string }>().catch(() => null);
+    if (!response?.id) return c.json({ error: "Invalid request" }, 400);
+
+    const cookie = getCookie(c, "__Host-passkey-challenge") || response.passkey_token || null;
     if (!cookie) return c.json({ error: "No challenge" }, 401);
 
     const expectedChallenge = await verifyPasskeyAuthChallenge(c.env.SESSION_SECRET, cookie);
     if (!expectedChallenge) return c.json({ error: "Challenge expired" }, 401);
-
-    const response = await c.req.json<AuthenticationResponseJSON>().catch(() => null);
-    if (!response?.id) return c.json({ error: "Invalid request" }, 400);
 
     const cred = await c.env.DB.prepare(
       "SELECT user_id, public_key, sign_count, transports FROM passkey_credentials WHERE id = ?"
@@ -318,7 +426,8 @@ export function authRoutes() {
 
     const { verifyAuthenticationResponse } = await import("@simplewebauthn/server");
     const { fromBase64url, getRpFromOrigin } = await import("../../lib/webauthn");
-    const { rpID, expectedOrigin } = getRpFromOrigin(c.req.header("origin"));
+    const origin = c.req.header("origin") || c.env.APP_ORIGIN || "https://app.hidemyemail.dev";
+    const { rpID, expectedOrigin } = getRpFromOrigin(origin);
 
     const result = await verifyAuthenticationResponse({
       response,
@@ -349,9 +458,9 @@ export function authRoutes() {
       .bind(result.authenticationInfo.newCounter, response.id).run();
 
     deleteCookie(c, "__Host-passkey-challenge", { path: "/", secure: true });
-    await setAuthenticatedCookies(c, cred.user_id);
+    const { token, freshAuth } = await setAuthenticatedCookies(c, cred.user_id);
 
-    return c.json({ ok: true, userId: cred.user_id });
+    return c.json(wantsToken(c) ? { ok: true, userId: cred.user_id, token, fresh_auth: freshAuth } : { ok: true, userId: cred.user_id });
   });
 
   r.post("/recover/send-code", async (c) => {

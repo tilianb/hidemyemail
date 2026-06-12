@@ -1,3 +1,5 @@
+import { timingSafeEqual } from "./auth";
+
 const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 function base32Decode(input: string): Uint8Array {
@@ -56,15 +58,18 @@ async function hotp(keyBytes: Uint8Array, counter: number): Promise<string> {
   return (code % 1_000_000).toString().padStart(6, "0");
 }
 
-// Accepts ±1 time-step window to tolerate clock drift
+// Accepts ±1 time-step window to tolerate clock drift.
+// Compares all three windows in constant time so the response timing
+// doesn't reveal which window (if any) matched.
 export async function verifyTOTP(secret: string, token: string): Promise<boolean> {
   if (!/^\d{6}$/.test(token)) return false;
   const keyBytes = base32Decode(secret);
   const counter = Math.floor(Date.now() / 1000 / 30);
+  let matched = false;
   for (let i = -1; i <= 1; i++) {
-    if (await hotp(keyBytes, counter + i) === token) return true;
+    if (timingSafeEqual(await hotp(keyBytes, counter + i), token)) matched = true;
   }
-  return false;
+  return matched;
 }
 
 export function makeTOTPUri(secret: string, issuer: string, account: string): string {
@@ -92,8 +97,14 @@ export async function generateBackupCodes(): Promise<{ plain: string[]; hashed: 
   return { plain, hashed };
 }
 
-// Returns index in hashedCodes array, or -1 if not found
+// Returns index in hashedCodes array, or -1 if not found.
+// Scans the full list with constant-time comparisons (no early exit) so
+// timing doesn't reveal whether or where a candidate matched.
 export async function verifyBackupCode(inputCode: string, hashedCodes: string[]): Promise<number> {
   const h = await hashBackupCode(inputCode);
-  return hashedCodes.findIndex(c => c === h);
+  let found = -1;
+  for (let i = 0; i < hashedCodes.length; i++) {
+    if (timingSafeEqual(hashedCodes[i]!, h) && found === -1) found = i;
+  }
+  return found;
 }

@@ -57,7 +57,7 @@ export function createApp() {
       } catch (e) {}
       return "";
     },
-    allowHeaders: ["Content-Type", "Cookie"],
+    allowHeaders: ["Content-Type", "Cookie", "Authorization", "X-Auth-Mode"],
     credentials: true
   }));
 
@@ -79,9 +79,19 @@ export function createApp() {
       p === "/api/verify" ||
       p === "/api/ses/notification" ||
       p === "/api/ses/inbound" ||
-      p === "/api/unsubscribe"
+      p === "/api/unsubscribe" ||
+      // App-auth handoff: exchange is pre-auth by definition; code does its
+      // own session-cookie check inside the handler.
+      p === "/api/app-auth/exchange" ||
+      p === "/api/app-auth/code"
     ) return next();
-    const token = getCookie(c, "__Host-session");
+    // Web clients send the HttpOnly __Host-session cookie; native clients send
+    // the same signed session token as `Authorization: Bearer <token>`.
+    let token = getCookie(c, "__Host-session");
+    if (!token) {
+      const authHeader = c.req.header("Authorization");
+      if (authHeader?.startsWith("Bearer ")) token = authHeader.slice(7).trim();
+    }
     if (!token) return c.json({ error: "Unauthorized" }, 401);
     const userId = await verifySession(c.env.SESSION_SECRET, token);
     if (userId === null) return c.json({ error: "Unauthorized" }, 401);
@@ -102,6 +112,16 @@ export function createApp() {
   app.route("/api/admin", adminRoutes());
   app.route("/api/settings", settingsRoutes());
   app.route("/api/account", accountRoutes());
+
+  // Apple App Site Association — lets the iOS app claim `webcredentials` for
+  // passkeys on this domain. Served by the Worker (not a static asset) so the
+  // App ID stays configurable via the APPLE_APP_ID env var. Requires this path
+  // in the assets `run_worker_first` list (see wrangler.jsonc).
+  app.get("/.well-known/apple-app-site-association", (c) => {
+    const appID = c.env.APPLE_APP_ID;
+    if (!appID) return c.json({ error: "Not configured" }, 404);
+    return c.json({ webcredentials: { apps: [appID] } });
+  });
 
   return app;
 }
