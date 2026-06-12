@@ -22,6 +22,8 @@ beforeEach(async () => {
 
 const VERIFIER = "test-verifier-test-verifier-test-verifier-12";
 
+// Returns BOTH login cookies (session + fresh-auth): /app-auth/code is
+// fresh-auth gated, so the dashboard sends the full cookie jar.
 async function loginCookie(app: ReturnType<typeof createApp>): Promise<string> {
   const ok = await app.request("/api/login", {
     method: "POST",
@@ -29,7 +31,10 @@ async function loginCookie(app: ReturnType<typeof createApp>): Promise<string> {
     headers: { "Content-Type": "application/json" },
   }, testEnv);
   expect(ok.status).toBe(200);
-  return ok.headers.get("set-cookie")!.split(";")[0]!;
+  // workerd's Headers type lacks getSetCookie(); both cookies use Max-Age
+  // (never Expires), so name=value pairs are safely comma/semicolon-free.
+  const header = ok.headers.get("set-cookie")!;
+  return [...header.matchAll(/__Host-[\w-]+=[^;,]+/g)].map((m) => m[0]).join("; ");
 }
 
 test("full handoff: code from web session, exchange yields a working bearer token", async () => {
@@ -71,6 +76,40 @@ test("code requires a session", async () => {
     body: JSON.stringify({ challenge: await sha256Base64url(VERIFIER) }),
   }, testEnv);
   expect(res.status).toBe(401);
+});
+
+test("code requires fresh auth, not just a session", async () => {
+  const app = createApp();
+  const sessionOnly = (await loginCookie(app)).split("; ").find((c) => c.startsWith("__Host-session="))!;
+  const res = await app.request("/api/app-auth/code", {
+    method: "POST",
+    headers: { cookie: sessionOnly, "Content-Type": "application/json" },
+    body: JSON.stringify({ challenge: await sha256Base64url(VERIFIER) }),
+  }, testEnv);
+  expect(res.status).toBe(401);
+  expect(((await res.json()) as any).error).toBe("Fresh authentication required");
+});
+
+test("exchange refuses browser requests (Origin present)", async () => {
+  const app = createApp();
+  const cookie = await loginCookie(app);
+  const challenge = await sha256Base64url(VERIFIER);
+
+  const codeRes = await app.request("/api/app-auth/code", {
+    method: "POST",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ challenge }),
+  }, testEnv);
+  const { code } = await codeRes.json() as { code: string };
+
+  // Same-origin JS holds code + verifier, but the browser pins Origin onto
+  // the POST — the exchange must refuse to convert it into a bearer token.
+  const exchange = await app.request("/api/app-auth/exchange", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "https://app.hidemyemail.dev" },
+    body: JSON.stringify({ code, verifier: VERIFIER }),
+  }, testEnv);
+  expect(exchange.status).toBe(403);
 });
 
 test("code rejects a malformed challenge", async () => {

@@ -22,6 +22,13 @@ final class WebSessionAuthenticator: NSObject, ASWebAuthenticationPresentationCo
         let verifier: String
     }
 
+    /// ASWebAuthenticationSession must be kept alive for the whole ceremony —
+    /// nothing else holds a strong reference once `start()` returns, and a
+    /// deallocated session cancels (or never delivers) the callback. `self` is
+    /// retained by the suspended `authenticate(server:)` frame, which keeps
+    /// this reference valid until the completion handler clears it.
+    private var activeSession: ASWebAuthenticationSession?
+
     func authenticate(server: URL) async throws -> Handoff {
         let verifier = Self.randomVerifier()
         let challenge = Self.challenge(for: verifier)
@@ -35,7 +42,8 @@ final class WebSessionAuthenticator: NSObject, ASWebAuthenticationPresentationCo
             let session = ASWebAuthenticationSession(
                 url: url,
                 callbackURLScheme: Self.callbackScheme
-            ) { callbackURL, error in
+            ) { [weak self] callbackURL, error in
+                Task { @MainActor in self?.activeSession = nil }
                 if let callbackURL {
                     continuation.resume(returning: callbackURL)
                 } else {
@@ -46,6 +54,7 @@ final class WebSessionAuthenticator: NSObject, ASWebAuthenticationPresentationCo
             // An ephemeral session would forget the server's cookies each time;
             // keeping shared storage lets returning users skip straight through.
             session.prefersEphemeralWebBrowserSession = false
+            activeSession = session
             session.start()
         }
 

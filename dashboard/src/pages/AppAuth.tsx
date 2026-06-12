@@ -33,7 +33,17 @@ export function AppAuth() {
       setDone(true);
       window.location.href = `hidemyemail://auth?code=${encodeURIComponent(code)}`;
     } catch (e: any) {
-      setErr(e?.message || "Could not authorize the app.");
+      const message = e?.message || "Could not authorize the app.";
+      // The Worker requires fresh auth to mint a code. A returning web sheet
+      // can carry a valid session with an expired fresh-auth cookie — sign
+      // out and reload (query string survives) so the user lands on the
+      // login form and comes back here with fresh credentials.
+      if (message.includes("Fresh authentication")) {
+        await api.logout().catch(() => {});
+        window.location.reload();
+        return;
+      }
+      setErr(message);
     } finally {
       setBusy(false);
     }

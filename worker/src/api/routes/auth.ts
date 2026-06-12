@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { setCookie, deleteCookie, getCookie } from "hono/cookie";
 import type { Context } from "hono";
 import type { AppEnv } from "../app";
-import { verifyPassword, signFreshAuth, signSession, verifySession, derivePassphraseHash, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge, signAppAuthCode, verifyAppAuthCode, sha256Base64url, timingSafeEqual } from "../../lib/auth";
+import { verifyPassword, signFreshAuth, verifyFreshAuth, signSession, verifySession, derivePassphraseHash, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge, signAppAuthCode, verifyAppAuthCode, sha256Base64url, timingSafeEqual } from "../../lib/auth";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { getEnvWithOverride, getMainGlobalDomain } from "../../lib/settings";
 
@@ -98,6 +98,16 @@ export function authRoutes() {
     const userId = sessionCookie ? await verifySession(c.env.SESSION_SECRET, sessionCookie) : null;
     if (userId === null) return c.json({ error: "Unauthorized" }, 401);
 
+    // Minting a code creates a NEW device credential (the exchanged bearer
+    // token), so a stolen long-lived session cookie alone must not be enough —
+    // require fresh auth, same as the other sensitive account operations.
+    // This also narrows what same-origin XSS can do with the cookie jar to
+    // the 10-minute window right after an interactive login.
+    const freshAuth = getCookie(c, "__Host-fresh-auth");
+    if (!freshAuth || !(await verifyFreshAuth(c.env.SESSION_SECRET, freshAuth, userId))) {
+      return c.json({ error: "Fresh authentication required" }, 401);
+    }
+
     const { challenge } = await c.req.json<{ challenge?: string }>().catch(() => ({ challenge: undefined }));
     // base64url SHA-256 is exactly 43 chars; reject anything else so the
     // challenge can never smuggle a delimiter into the signed payload.
@@ -119,6 +129,16 @@ export function authRoutes() {
    * mints a bearer token. A stolen code is useless without the verifier.
    */
   r.post("/app-auth/exchange", async (c) => {
+    // Native-only, same unspoofable signal as wantsToken(): browsers pin the
+    // forbidden Origin header onto every POST, native HTTP stacks send none.
+    // Without this, same-origin JS could mint a code with the cookie jar and
+    // exchange it here, converting an HttpOnly session into an exfiltratable
+    // bearer token — exactly what the wantsToken() Origin check prevents on
+    // the login endpoints.
+    if (c.req.header("Origin")) {
+      return c.json({ error: "Forbidden" }, 403);
+    }
+
     const ip = c.req.header("cf-connecting-ip") || "unknown";
     if (!(await canAttempt(ip, c.env.DB))) {
       return c.json({ error: "Too many attempts" }, 429);
