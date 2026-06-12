@@ -25,6 +25,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,7 +35,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,6 +53,7 @@ fun LoginScreen(app: AppViewModel, serverUrl: String) {
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var showServerSheet by remember { mutableStateOf(false) }
+    var showRecoverSheet by remember { mutableStateOf(false) }
 
     fun submit() {
         if (password.isEmpty()) return
@@ -155,6 +159,11 @@ fun LoginScreen(app: AppViewModel, serverUrl: String) {
                 "Web sign-in supports passkeys on any server.",
                 style = Theme.bodyStyle(11.sp).copy(color = Theme.textSecondary),
             )
+
+            Spacer(Modifier.height(4.dp))
+            TextButton(onClick = { showRecoverSheet = true }, enabled = !busy && app.hasServer) {
+                Text("Forgot passphrase? Recover with a code", color = Theme.accent, fontSize = 13.sp)
+            }
         }
     }
 
@@ -165,5 +174,123 @@ fun LoginScreen(app: AppViewModel, serverUrl: String) {
         ) {
             ServerSettingsSheet(app = app, onDone = { showServerSheet = false })
         }
+    }
+
+    if (showRecoverSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showRecoverSheet = false },
+            containerColor = Theme.surface1,
+        ) {
+            RecoverWithCodeSheet(app = app, onDone = { showRecoverSheet = false })
+        }
+    }
+}
+
+/**
+ * Self-service recovery: enter username + one-time recovery code, receive a new
+ * passphrase to save, then continue into the app.
+ */
+@Composable
+private fun RecoverWithCodeSheet(app: AppViewModel, onDone: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
+    var username by remember { mutableStateOf("") }
+    var code by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var newPassphrase by remember { mutableStateOf<String?>(null) }
+
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = Theme.accent,
+        unfocusedBorderColor = Theme.borderStrong,
+        focusedLabelColor = Theme.accent,
+        unfocusedLabelColor = Theme.textSecondary,
+        focusedContainerColor = Theme.surface1,
+        unfocusedContainerColor = Theme.surface1,
+    )
+
+    Column(Modifier.fillMaxWidth().padding(24.dp)) {
+        val passphrase = newPassphrase
+        if (passphrase != null) {
+            Text("New Passphrase", style = Theme.displayStyle(20.sp, androidx.compose.ui.text.font.FontWeight.Bold))
+            Spacer(Modifier.height(8.dp))
+            Text(passphrase, style = Theme.monoStyle(15.sp))
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Save this in your password manager now — it won't be shown again.",
+                style = Theme.bodyStyle(12.sp).copy(color = Theme.textSecondary),
+            )
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = { clipboard.setText(AnnotatedString(passphrase)) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Theme.accent),
+            ) { Text("Copy Passphrase") }
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = { scope.launch { runCatching { app.finishRecoveredLogin() }; onDone() } },
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Theme.accent, contentColor = Color.Black),
+            ) { Text("Continue to App", style = Theme.bodyStyle(16.sp, androidx.compose.ui.text.font.FontWeight.SemiBold).copy(color = Color.Black)) }
+        } else {
+            Text("Recover Account", style = Theme.displayStyle(20.sp, androidx.compose.ui.text.font.FontWeight.Bold))
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Enter your username and one of the recovery codes you saved when you created your account.",
+                style = Theme.bodyStyle(12.sp).copy(color = Theme.textSecondary),
+            )
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = username,
+                onValueChange = { username = it },
+                label = { Text("username") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+                colors = fieldColors,
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = code,
+                onValueChange = { code = it },
+                label = { Text("XXXX-XXXX") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+                colors = fieldColors,
+            )
+            error?.let {
+                Spacer(Modifier.height(8.dp))
+                Text(it, color = Theme.red, fontSize = 13.sp, modifier = Modifier.fillMaxWidth())
+            }
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = {
+                    error = null
+                    busy = true
+                    scope.launch {
+                        try {
+                            newPassphrase = app.recoverWithCode(username.trim(), code.trim())
+                        } catch (e: Exception) {
+                            error = e.message
+                        } finally {
+                            busy = false
+                        }
+                    }
+                },
+                enabled = !busy && username.trim().isNotEmpty() && code.trim().isNotEmpty(),
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Theme.accent, contentColor = Color.Black),
+            ) {
+                if (busy) {
+                    CircularProgressIndicator(modifier = Modifier.size(22.dp), color = Color.Black, strokeWidth = 2.dp)
+                } else {
+                    Text("Recover Account", style = Theme.bodyStyle(16.sp, androidx.compose.ui.text.font.FontWeight.SemiBold).copy(color = Color.Black))
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
     }
 }

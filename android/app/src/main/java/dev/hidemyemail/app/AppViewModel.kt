@@ -150,6 +150,38 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _isAdmin.value = stats.isAdmin ?: false
     }
 
+    /**
+     * Refresh the displayed identity (e.g. after a username change). Best-effort:
+     * failures leave the current name in place.
+     */
+    fun reloadIdentity() {
+        viewModelScope.launch { runCatching { refreshIdentity() } }
+    }
+
+    // MARK: Self-service recovery (username + recovery code)
+
+    // Token + freshAuth from a successful recovery, held until the user has
+    // saved the new passphrase and taps continue.
+    private var pendingRecovery: Pair<String?, String?>? = null
+
+    /**
+     * Recover with a username and one-time recovery code. Returns the freshly
+     * generated passphrase to show the user; call [finishRecoveredLogin] once
+     * they've saved it to complete sign-in.
+     */
+    suspend fun recoverWithCode(username: String, code: String): String {
+        val client = ensureClient()
+        val res = client.recoverWithCode(username, code)
+        pendingRecovery = res.token to res.freshAuth
+        return res.passphrase
+    }
+
+    suspend fun finishRecoveredLogin() {
+        val pending = pendingRecovery ?: return
+        pendingRecovery = null
+        finishLogin(pending.first, pending.second)
+    }
+
     fun signOut() {
         tokenStore.delete()
         client?.token = null

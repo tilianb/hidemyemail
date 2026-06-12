@@ -106,8 +106,10 @@ fun SettingsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
                 }
             }
 
+            UsernameSection(app)
             InlineActionsSection(app)
             SecuritySection(app)
+            RecoveryCodesSection(app)
             ExportSection(app)
 
             SectionCard(Modifier.padding(top = 20.dp)) {

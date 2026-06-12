@@ -24,8 +24,10 @@ struct SettingsView: View {
                         Label("Destinations", systemImage: "tray.and.arrow.down")
                     }
                 }
+                UsernameSection()
                 InlineActionsSection()
                 SecuritySection()
+                RecoveryCodesSection()
                 ExportSection()
                 Section {
                     Button("Sign Out", role: .destructive) { showSignOut = true }

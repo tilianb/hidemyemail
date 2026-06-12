@@ -10,7 +10,7 @@ type PasskeyRow = { id: string; device_name: string | null; created_at: number }
 
 export function Settings() {
   const { toast } = useToast();
-  const { isAdmin, setAuthed } = useAuth();
+  const { isAdmin, setAuthed, refreshAuth } = useAuth();
   const [enabled, setEnabled] = useState(false);
   const [backupCodesRemaining, setBackupCodesRemaining] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -59,10 +59,19 @@ export function Settings() {
   const [defaultsPosition, setDefaultsPosition] = useState("footer");
   const [savingInlineActions, setSavingInlineActions] = useState(false);
 
+  // Profile (username) + self-service recovery codes
+  const [username, setUsername] = useState<string | null>(null);
+  const [usernameInput, setUsernameInput] = useState("");
+  const [savingUsername, setSavingUsername] = useState(false);
+  const [recoveryRemaining, setRecoveryRemaining] = useState(0);
+  const [newRecoveryCodes, setNewRecoveryCodes] = useState<string[]>([]);
+  const [showRecoveryRegen, setShowRecoveryRegen] = useState(false);
+  const [regeneratingRecovery, setRegeneratingRecovery] = useState(false);
+
   async function loadStatus() {
     setLoading(true);
     try {
-      const [mfa, pks, prefs] = await Promise.all([
+      const [mfa, pks, prefs, profile] = await Promise.all([
         api.mfaStatus(),
         api.passkeyList().catch(() => []),
         api.preferences().catch(() => ({
@@ -70,10 +79,16 @@ export function Settings() {
           inline_actions_position: null as Pos,
           defaults: { inline_actions_enabled: false, inline_actions_position: "footer" },
         })),
+        api.profile().catch(() => null),
       ]);
       setEnabled(mfa.enabled);
       setBackupCodesRemaining(mfa.backupCodesRemaining);
       setPasskeys(pks);
+      if (profile) {
+        setUsername(profile.username);
+        setUsernameInput(profile.username ?? "");
+        setRecoveryRemaining(profile.recovery_codes_remaining);
+      }
       setInlineActionsPref(prefs.inline_actions_pref);
       setInlineActionsPosition(prefs.inline_actions_position);
       setDefaultsEnabled(prefs.defaults.inline_actions_enabled);
@@ -258,6 +273,43 @@ export function Settings() {
       () => toast(`${label} copied`, "success"),
       () => toast("Failed to copy", "error")
     );
+  }
+
+  async function saveUsername(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = usernameInput.trim();
+    if (trimmed === (username ?? "")) return;
+    setSavingUsername(true);
+    try {
+      const res = await api.setUsername(trimmed === "" ? null : trimmed);
+      setUsername(res.username);
+      setUsernameInput(res.username ?? "");
+      toast(res.username ? "Username saved" : "Username cleared", "success");
+      // Refresh the shell so the header/menu shows the new display name.
+      await refreshAuth();
+    } catch (err: any) {
+      toast(err?.message || "Failed to save username", "error");
+    } finally {
+      setSavingUsername(false);
+    }
+  }
+
+  async function regenerateRecovery() {
+    setRegeneratingRecovery(true);
+    try {
+      const res = await api.regenerateRecoveryCodes();
+      setNewRecoveryCodes(res.codes);
+      setRecoveryRemaining(res.codes.length);
+      setShowRecoveryRegen(false);
+      toast("New recovery codes generated", "success");
+    } catch (err: any) {
+      // Regeneration is fresh-auth gated, same as export/delete.
+      toast(err?.message === "Fresh authentication required" || err?.message === "unauthorized"
+        ? "Session is not fresh — log out and back in, then retry"
+        : err?.message || "Failed to generate recovery codes", "error");
+    } finally {
+      setRegeneratingRecovery(false);
+    }
   }
 
   async function handleExport() {
@@ -462,6 +514,44 @@ export function Settings() {
       <div className="page-header">
         <h1 className="page-title">Settings</h1>
         <p className="page-subtitle">Manage your account preferences and security.</p>
+      </div>
+
+      {/* Profile / username card */}
+      <div className="card stagger-1 card-spaced-bottom">
+        <div className="card-header">
+          <span className="card-title">Username</span>
+        </div>
+        <div className="card-body">
+          <p className="muted-copy card-spaced-bottom">
+            A public handle that replaces the default <strong>User&nbsp;#…</strong> label wherever your account is shown, and identifies your account when you recover it with a recovery code. It is not a password and not used to log in. Leave blank to stay anonymous.
+          </p>
+          <form onSubmit={saveUsername} className="security-inline-form">
+            <input
+              className="input flex-input"
+              value={usernameInput}
+              onChange={e => setUsernameInput(e.target.value)}
+              placeholder="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              maxLength={32}
+              disabled={savingUsername}
+            />
+            <button type="submit" className="btn btn-primary shrink-0" disabled={savingUsername || usernameInput.trim() === (username ?? "")}>
+              {savingUsername ? <Loader2 size={14} className="spin" /> : "Save"}
+            </button>
+            {username && (
+              <button
+                type="button"
+                className="btn btn-soft"
+                onClick={() => { setUsernameInput(""); }}
+                disabled={savingUsername}
+              >
+                Clear
+              </button>
+            )}
+          </form>
+        </div>
       </div>
 
       {/* Email preferences card */}
@@ -768,6 +858,73 @@ export function Settings() {
             <p className="muted-copy-sm">
               Passkeys are not supported in this browser.
             </p>
+          )}
+        </div>
+      </div>
+
+      {/* Self-service recovery codes card */}
+      <div className="card stagger-3 card-spaced-top">
+        <div className="card-header">
+          <span className="card-title">Recovery Codes</span>
+          <span className="badge badge-muted">{recoveryRemaining} remaining</span>
+        </div>
+        <div className="card-body">
+          <p className="muted-copy card-spaced-bottom">
+            Recovery codes let you regain access with your username if you lose your passphrase and passkeys — no admin or email required. Each code works once. Regenerating creates 10 new codes and invalidates all existing ones. Set a username above before you'll be able to use them.
+          </p>
+
+          {newRecoveryCodes.length > 0 && (
+            <div className="security-code-block">
+              <div className="backup-code-grid">
+                {newRecoveryCodes.map((code, i) => (
+                  <div key={i} className="backup-code">{code}</div>
+                ))}
+              </div>
+              <div className="inline-actions">
+                <button
+                  type="button"
+                  className="btn btn-soft btn-compact"
+                  onClick={() => copyToClipboard(newRecoveryCodes.join("\n"), "Recovery codes")}
+                >
+                  <Copy size={12} /> Copy All
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-compact"
+                  onClick={() => setNewRecoveryCodes([])}
+                >
+                  Hide
+                </button>
+              </div>
+              <p className="muted-copy-sm">
+                These codes will not be shown again. Save them in a password manager or a safe place.
+              </p>
+            </div>
+          )}
+
+          {showRecoveryRegen ? (
+            <div className="security-form-stack">
+              <div className="muted-copy-sm">
+                Regenerating invalidates your existing recovery codes. Continue?
+              </div>
+              <div className="inline-actions">
+                <button type="button" className="btn btn-primary" onClick={regenerateRecovery} disabled={regeneratingRecovery}>
+                  {regeneratingRecovery ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
+                  Generate 10 New Codes
+                </button>
+                <button type="button" className="btn btn-soft" onClick={() => setShowRecoveryRegen(false)} disabled={regeneratingRecovery}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-soft"
+              onClick={() => { setShowRecoveryRegen(true); setNewRecoveryCodes([]); }}
+            >
+              <RefreshCw size={14} /> {recoveryRemaining > 0 ? "Regenerate Recovery Codes" : "Generate Recovery Codes"}
+            </button>
           )}
         </div>
       </div>

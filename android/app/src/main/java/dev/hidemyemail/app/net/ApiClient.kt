@@ -182,6 +182,39 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
 
     suspend fun mfaStatus(): MfaStatus = request("/api/settings/mfa")
 
+    // MARK: Username & self-service recovery codes
+
+    /** Current user's username + recovery-code status. */
+    suspend fun profile(): Profile = request("/api/account/profile")
+
+    /**
+     * Set or clear the public username (null clears). Not a secret and not a
+     * login credential, so a normal session is enough. Returns the new value.
+     */
+    suspend fun setUsername(username: String?): UsernameResponse {
+        val value: JsonElement = if (username == null) JsonNull else JsonPrimitive(username)
+        return request("/api/account/username", "PATCH", JsonObject(mapOf("username" to value)))
+    }
+
+    suspend fun recoveryCodesStatus(): RecoveryCodesStatus = request("/api/account/recovery-codes")
+
+    /**
+     * (Re)generate recovery codes. Fresh-auth gated; the Worker 401s without a
+     * fresh session. Returns the new plaintext codes (shown once).
+     */
+    suspend fun regenerateRecoveryCodes(): RecoveryCodesResponse =
+        request("/api/account/recovery-codes", "POST")
+
+    /**
+     * Self-service recovery: username identifies the account, a one-time code is
+     * the secret proof. Public (no session yet), token mode for native.
+     */
+    suspend fun recoverWithCode(username: String, code: String): RecoverResponse = request(
+        "/api/recover/code", "POST",
+        buildJsonObject { put("username", username); put("code", code) },
+        authMode = true, authed = false,
+    )
+
     suspend fun passkeys(): List<Passkey> = request("/api/settings/passkeys")
 
     suspend fun renamePasskey(id: String, name: String) =

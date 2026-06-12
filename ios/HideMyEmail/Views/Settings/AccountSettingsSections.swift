@@ -73,6 +73,172 @@ struct InlineActionsSection: View {
     }
 }
 
+/// Public username (PATCH /api/account/username). Replaces the "User #N" label
+/// everywhere and identifies the account during recovery-code recovery. Not a
+/// secret and not a login credential — a normal session can change it.
+struct UsernameSection: View {
+    @Environment(AppState.self) private var app
+
+    @State private var loaded = false
+    @State private var draft = ""
+    @State private var current: String?
+    @State private var saving = false
+    @State private var error: String?
+
+    private var trimmed: String { draft.trimmingCharacters(in: .whitespaces) }
+    private var dirty: Bool { trimmed != (current ?? "") }
+
+    var body: some View {
+        Section {
+            TextField("username", text: $draft)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.done)
+                .onSubmit { if dirty { Task { await save() } } }
+            HStack {
+                Button(saving ? "Saving…" : "Save") { Task { await save() } }
+                    .disabled(saving || !dirty)
+                if current != nil {
+                    Spacer()
+                    Button("Clear", role: .destructive) {
+                        draft = ""
+                        Task { await save() }
+                    }
+                    .disabled(saving)
+                }
+            }
+        } header: {
+            Text("Username")
+        } footer: {
+            if let error {
+                Text(error).foregroundStyle(Theme.red)
+            } else {
+                Text("A public handle shown instead of “User #…”, and used with a recovery code to recover your account. Not a password. Leave blank to stay anonymous.")
+            }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        guard !loaded, let client = app.api() else { return }
+        do {
+            let p = try await client.profile()
+            current = p.username
+            draft = p.username ?? ""
+            loaded = true
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func save() async {
+        guard let client = app.api() else { return }
+        saving = true
+        defer { saving = false }
+        do {
+            let next = trimmed.isEmpty ? nil : trimmed
+            let saved = try await client.setUsername(next)
+            current = saved
+            draft = saved ?? ""
+            error = nil
+            await app.reloadIdentity()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+}
+
+/// Self-service recovery codes (GET/POST /api/account/recovery-codes). Generating
+/// is fresh-auth gated; the freshly minted codes are shown once for the user to
+/// save.
+struct RecoveryCodesSection: View {
+    @Environment(AppState.self) private var app
+
+    @State private var remaining: Int?
+    @State private var generating = false
+    @State private var newCodes: [String] = []
+    @State private var error: String?
+    @State private var confirming = false
+
+    var body: some View {
+        Section {
+            HStack {
+                Label("Recovery codes", systemImage: "key.horizontal")
+                Spacer()
+                Text(remaining.map { "\($0) remaining" } ?? "—")
+                    .foregroundStyle(Theme.textSecondary)
+                    .font(.callout)
+            }
+            if !newCodes.isEmpty {
+                ForEach(newCodes, id: \.self) { code in
+                    Text(code).font(.system(.body, design: .monospaced))
+                }
+                Button {
+                    UIPasteboard.general.string = newCodes.joined(separator: "\n")
+                } label: {
+                    Label("Copy All Codes", systemImage: "doc.on.doc")
+                }
+            }
+            Button {
+                confirming = true
+            } label: {
+                if generating {
+                    HStack { Text("Generating…"); Spacer(); ProgressView() }
+                } else {
+                    Label((remaining ?? 0) > 0 ? "Regenerate Codes" : "Generate Codes",
+                          systemImage: "arrow.triangle.2.circlepath")
+                }
+            }
+            .disabled(generating)
+        } header: {
+            Text("Recovery")
+        } footer: {
+            if let error {
+                Text(error).foregroundStyle(Theme.red)
+            } else {
+                Text("Use your username + a recovery code to regain access if you lose your passphrase and passkeys. Each code works once. Requires a recent sign-in.")
+            }
+        }
+        .task { await loadStatus() }
+        .confirmationDialog(
+            (remaining ?? 0) > 0 ? "Regenerating invalidates your existing recovery codes." : "Generate recovery codes?",
+            isPresented: $confirming,
+            titleVisibility: .visible
+        ) {
+            Button((remaining ?? 0) > 0 ? "Regenerate" : "Generate", role: .destructive) {
+                Task { await regenerate() }
+            }
+        }
+    }
+
+    private func loadStatus() async {
+        guard let client = app.api() else { return }
+        do {
+            remaining = try await client.recoveryCodesStatus().remaining
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func regenerate() async {
+        guard let client = app.api() else { return }
+        generating = true
+        defer { generating = false }
+        do {
+            let codes = try await client.regenerateRecoveryCodes()
+            newCodes = codes
+            remaining = codes.count
+            error = nil
+        } catch APIError.server(let status, let message) where status == 401 {
+            error = message == "Fresh authentication required"
+                ? "Session is not fresh — sign out and back in, then retry."
+                : message
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+}
+
 /// Read-mostly security overview: TOTP status and registered passkeys, with
 /// rename/delete. Enrolment (QR codes, WebAuthn create) stays on the web.
 struct SecuritySection: View {

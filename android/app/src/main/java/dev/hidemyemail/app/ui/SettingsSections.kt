@@ -29,10 +29,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.hidemyemail.app.AppViewModel
+import dev.hidemyemail.app.net.ApiException
 import dev.hidemyemail.app.net.MfaStatus
 import dev.hidemyemail.app.net.Passkey
 import dev.hidemyemail.app.net.Preferences
@@ -107,6 +110,201 @@ fun InlineActionsSection(app: AppViewModel) {
         }
     }
     SectionFooter(error ?: "Subdomains can override this.")
+}
+
+/**
+ * Public username (PATCH /api/account/username). Replaces the "User #N" label
+ * and identifies the account during recovery-code recovery. Not a secret and not
+ * a login credential — a normal session can change it.
+ */
+@Composable
+fun UsernameSection(app: AppViewModel) {
+    val scope = rememberCoroutineScope()
+    var draft by remember { mutableStateOf("") }
+    var current by remember { mutableStateOf<String?>(null) }
+    var loaded by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        try {
+            val p = app.api()?.profile() ?: return@LaunchedEffect
+            current = p.username
+            draft = p.username ?: ""
+            loaded = true
+        } catch (e: Exception) {
+            error = e.message
+        }
+    }
+
+    fun save(next: String?) {
+        saving = true
+        scope.launch {
+            try {
+                val res = app.api()?.setUsername(next)
+                current = res?.username
+                draft = res?.username ?: ""
+                error = null
+                app.reloadIdentity()
+            } catch (e: Exception) {
+                error = e.message
+            } finally {
+                saving = false
+            }
+        }
+    }
+
+    val trimmed = draft.trim()
+    val dirty = trimmed != (current ?: "")
+
+    SectionHeader("Username")
+    SectionCard {
+        Column(Modifier.padding(16.dp)) {
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                singleLine = true,
+                placeholder = { Text("username") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.size(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                TextButton(
+                    onClick = { save(trimmed.ifEmpty { null }) },
+                    enabled = loaded && !saving && dirty,
+                ) {
+                    Text(if (saving) "Saving…" else "Save", color = Theme.accent)
+                }
+                if (current != null) {
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { draft = ""; save(null) }, enabled = !saving) {
+                        Text("Clear", color = Theme.red)
+                    }
+                }
+            }
+        }
+    }
+    SectionFooter(
+        error
+            ?: "A public handle shown instead of \"User #…\", and used with a recovery code to recover your account. Not a password. Leave blank to stay anonymous.",
+    )
+}
+
+/**
+ * Self-service recovery codes (GET/POST /api/account/recovery-codes). Generating
+ * is fresh-auth gated; the freshly minted codes are shown once to save.
+ */
+@Composable
+fun RecoveryCodesSection(app: AppViewModel) {
+    val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
+    var remaining by remember { mutableStateOf<Int?>(null) }
+    var newCodes by remember { mutableStateOf<List<String>>(emptyList()) }
+    var generating by remember { mutableStateOf(false) }
+    var confirming by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        try {
+            remaining = app.api()?.recoveryCodesStatus()?.remaining
+        } catch (e: Exception) {
+            error = e.message
+        }
+    }
+
+    fun regenerate() {
+        generating = true
+        scope.launch {
+            try {
+                val codes = app.api()?.regenerateRecoveryCodes()?.codes ?: emptyList()
+                newCodes = codes
+                remaining = codes.size
+                error = null
+            } catch (e: ApiException.Server) {
+                error = if (e.status == 401 && e.message == "Fresh authentication required") {
+                    "Session is not fresh — sign out and back in, then retry."
+                } else {
+                    e.message
+                }
+            } catch (e: Exception) {
+                error = e.message
+            } finally {
+                generating = false
+            }
+        }
+    }
+
+    SectionHeader("Recovery")
+    SectionCard {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+            Text("Recovery codes", style = Theme.bodyStyle(15.sp), modifier = Modifier.weight(1f))
+            Text(
+                remaining?.let { "$it remaining" } ?: "—",
+                style = Theme.bodyStyle(13.sp).copy(color = Theme.textSecondary),
+            )
+        }
+        if (newCodes.isNotEmpty()) {
+            RowDivider()
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                newCodes.forEach { code ->
+                    Text(code, style = Theme.monoStyle(14.sp), modifier = Modifier.padding(vertical = 2.dp))
+                }
+                TextButton(onClick = { clipboard.setText(AnnotatedString(newCodes.joinToString("\n"))) }) {
+                    Text("Copy All Codes", color = Theme.accent)
+                }
+            }
+        }
+        RowDivider()
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = !generating) { confirming = true }
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+            Text(
+                if ((remaining ?: 0) > 0) "Regenerate Codes" else "Generate Codes",
+                style = Theme.bodyStyle(15.sp).copy(color = Theme.accent),
+                modifier = Modifier.weight(1f),
+            )
+            if (generating) {
+                CircularProgressIndicator(color = Theme.accent, modifier = Modifier.size(16.dp))
+            }
+        }
+    }
+    SectionFooter(
+        error
+            ?: "Use your username + a recovery code to regain access if you lose your passphrase and passkeys. Each code works once. Requires a recent sign-in.",
+    )
+
+    if (confirming) {
+        AlertDialog(
+            onDismissRequest = { confirming = false },
+            containerColor = Theme.surface2,
+            title = { Text("Recovery codes", style = Theme.displayStyle(18.sp)) },
+            text = {
+                Text(
+                    if ((remaining ?: 0) > 0) {
+                        "Regenerating invalidates your existing recovery codes. Continue?"
+                    } else {
+                        "Generate a fresh set of recovery codes?"
+                    },
+                    style = Theme.bodyStyle(14.sp),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { confirming = false; regenerate() }) {
+                    Text(if ((remaining ?: 0) > 0) "Regenerate" else "Generate", color = Theme.red)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirming = false }) { Text("Cancel", color = Theme.accent) }
+            },
+        )
+    }
 }
 
 /** Read-mostly security overview: TOTP status, passkey list with rename/delete. */

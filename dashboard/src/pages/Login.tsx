@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { generatePassphrase } from "../lib/passphrase";
+import { CopyButton } from "../ui";
 import { Fingerprint } from "lucide-react";
 
 export function Login() {
@@ -10,6 +11,7 @@ export function Login() {
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
   const [generated, setGenerated] = useState<string | null>(null);
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [mfaRequired, setMfaRequired] = useState(false);
   const [mfaCode, setMfaCode] = useState("");
   const [mainGlobalDomain, setMainGlobalDomain] = useState("");
@@ -103,8 +105,9 @@ export function Login() {
     setLoading(true);
     const newPw = generatePassphrase();
     try {
-      await api.register(newPw);
+      const res = await api.register(newPw);
       setGenerated(newPw);
+      setRecoveryCodes(res.recovery_codes ?? []);
       setPw(newPw);
       // We don't auto-login immediately so they have a chance to copy the password.
       // Or we can let them log in after they see it.
@@ -222,6 +225,22 @@ export function Login() {
                   {generated}
                 </div>
               </div>
+              {recoveryCodes.length > 0 && (
+                <div className="login-success-card">
+                  <h3 className="login-success-title">Recovery codes</h3>
+                  <p className="login-success-copy">
+                    Save these too. Set a username later, then use any one of these (each works once) to recover your account if you lose your passphrase. They won't be shown again.
+                  </p>
+                  <div className="backup-code-grid">
+                    {recoveryCodes.map((code, i) => (
+                      <div key={i} className="backup-code">{code}</div>
+                    ))}
+                  </div>
+                  <div className="inline-actions" style={{ marginTop: "var(--space-3)" }}>
+                    <CopyButton text={recoveryCodes.join("\n")} />
+                  </div>
+                </div>
+              )}
               <button
                 className="btn btn-primary btn-full btn-center"
                 onClick={() => refreshAuth()}

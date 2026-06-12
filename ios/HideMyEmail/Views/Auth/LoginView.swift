@@ -8,6 +8,7 @@ struct LoginView: View {
     @State private var error: String?
     @State private var busy = false
     @State private var showServerSheet = false
+    @State private var showRecoverSheet = false
 
     var body: some View {
         NavigationStack {
@@ -77,6 +78,12 @@ struct LoginView: View {
                             .font(.caption2)
                             .foregroundStyle(Theme.textSecondary)
                     }
+
+                    Button("Forgot passphrase? Recover with a code") {
+                        showRecoverSheet = true
+                    }
+                    .font(.footnote)
+                    .disabled(busy || !app.hasServer)
                 }
                 .padding(.horizontal)
 
@@ -92,6 +99,9 @@ struct LoginView: View {
             }
             .sheet(isPresented: $showServerSheet) {
                 ServerSettingsView()
+            }
+            .sheet(isPresented: $showRecoverSheet) {
+                RecoverWithCodeView()
             }
         }
     }
@@ -135,6 +145,101 @@ struct LoginView: View {
                 try await app.loginViaWebSession()
             } catch let e as ASWebAuthenticationSessionError where e.code == .canceledLogin {
                 // User dismissed the web sheet — not an error.
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
+    }
+}
+
+/// Self-service recovery: enter username + one-time recovery code, receive a new
+/// passphrase to save, then continue into the app.
+struct RecoverWithCodeView: View {
+    @Environment(AppState.self) private var app
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var username = ""
+    @State private var code = ""
+    @State private var error: String?
+    @State private var busy = false
+    @State private var newPassphrase: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let newPassphrase {
+                    Section {
+                        Text(newPassphrase)
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                        Button {
+                            UIPasteboard.general.string = newPassphrase
+                        } label: {
+                            Label("Copy Passphrase", systemImage: "doc.on.doc")
+                        }
+                    } header: {
+                        Text("New Passphrase")
+                    } footer: {
+                        Text("Save this in your password manager now — it won't be shown again.")
+                    }
+                    Section {
+                        Button("Continue to App") {
+                            Task {
+                                try? await app.finishRecoveredLogin()
+                                dismiss()
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                } else {
+                    Section {
+                        TextField("username", text: $username)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        TextField("XXXX-XXXX", text: $code)
+                            .textInputAutocapitalization(.characters)
+                            .autocorrectionDisabled()
+                    } header: {
+                        Text("Recover Account")
+                    } footer: {
+                        if let error {
+                            Text(error).foregroundStyle(Theme.red)
+                        } else {
+                            Text("Enter your username and one of the recovery codes you saved when you created your account.")
+                        }
+                    }
+                    Section {
+                        Button(action: recover) {
+                            if busy {
+                                HStack { Text("Recovering…"); Spacer(); ProgressView() }
+                            } else {
+                                Text("Recover Account").frame(maxWidth: .infinity)
+                            }
+                        }
+                        .disabled(busy || username.trimmingCharacters(in: .whitespaces).isEmpty || code.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                }
+            }
+            .navigationTitle("Recovery")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func recover() {
+        error = nil
+        busy = true
+        Task {
+            defer { busy = false }
+            do {
+                let passphrase = try await app.recoverWithCode(
+                    username: username.trimmingCharacters(in: .whitespaces),
+                    code: code.trimmingCharacters(in: .whitespaces)
+                )
+                newPassphrase = passphrase
             } catch {
                 self.error = error.localizedDescription
             }

@@ -4,6 +4,8 @@ import type { AppEnv } from "../app";
 import { derivePassphraseHash, timingSafeEqual } from "../../lib/auth";
 import { hasFreshAuth } from "../auth-helpers";
 import { decryptDestination } from "../../lib/crypto";
+import { validateUsername } from "../../lib/username";
+import { generateRecoveryCodes } from "../../lib/recovery";
 
 export function accountRoutes() {
   const r = new Hono<AppEnv>();
@@ -166,5 +168,96 @@ export function accountRoutes() {
     return c.json({ ok: true });
   });
 
+  /**
+   * GET /profile
+   * Current user's public-ish profile for the dashboard: id, username, admin
+   * label name, whether self-service recovery codes exist and how many remain.
+   * Secret columns (hashes, passphrase) never leave the server.
+   */
+  r.get("/profile", async (c) => {
+    const userId = c.get("userId");
+    const row = await c.env.DB.prepare(
+      "SELECT username, name, recovery_codes FROM users WHERE id = ?"
+    ).bind(userId).first<{ username: string | null; name: string | null; recovery_codes: string | null }>();
+    return c.json({
+      id: userId,
+      username: row?.username ?? null,
+      name: row?.name ?? null,
+      isAdmin: userId === 1,
+      recovery_codes_remaining: recoveryCodesRemaining(row?.recovery_codes ?? null),
+    });
+  });
+
+  /**
+   * PATCH /username
+   * Body: { username: string | null }
+   * Set or clear the caller's public username. Not a secret and not a login
+   * credential, so a normal session is enough (no fresh-auth gate). Uniqueness
+   * is case-insensitive, enforced by the DB index — a collision returns 409.
+   */
+  r.patch("/username", async (c) => {
+    const userId = c.get("userId");
+    const body = await c.req.json<{ username?: string | null }>().catch(() => ({ username: undefined }));
+
+    // Explicit clear: null or empty string removes the username.
+    if (body.username === null || body.username === "") {
+      await c.env.DB.prepare("UPDATE users SET username = NULL WHERE id = ?").bind(userId).run();
+      return c.json({ ok: true, username: null });
+    }
+
+    const result = validateUsername(body.username);
+    if (!result.ok) return c.json({ error: result.error }, 400);
+
+    try {
+      await c.env.DB.prepare("UPDATE users SET username = ? WHERE id = ?").bind(result.value, userId).run();
+    } catch (err: any) {
+      if (err.message && err.message.includes("UNIQUE constraint failed")) {
+        return c.json({ error: "That username is already taken" }, 409);
+      }
+      return c.json({ error: "Internal error" }, 500);
+    }
+    return c.json({ ok: true, username: result.value });
+  });
+
+  /**
+   * GET /recovery-codes
+   * How many unused recovery codes remain. Never returns the codes themselves
+   * (only hashes are stored); plaintext is shown once at generation time.
+   */
+  r.get("/recovery-codes", async (c) => {
+    const userId = c.get("userId");
+    const row = await c.env.DB.prepare(
+      "SELECT recovery_codes FROM users WHERE id = ?"
+    ).bind(userId).first<{ recovery_codes: string | null }>();
+    return c.json({ remaining: recoveryCodesRemaining(row?.recovery_codes ?? null) });
+  });
+
+  /**
+   * POST /recovery-codes
+   * (Re)generate the caller's recovery codes. Returns the fresh plaintext set
+   * exactly once; only hashes are stored. Regenerating invalidates any previous
+   * codes. Fresh-auth gated: minting a new account-recovery secret is exactly
+   * the kind of operation a stolen long-lived cookie must not be able to do.
+   */
+  r.post("/recovery-codes", async (c) => {
+    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
+    const userId = c.get("userId");
+    const { plain, hashed } = await generateRecoveryCodes();
+    await c.env.DB.prepare("UPDATE users SET recovery_codes = ? WHERE id = ?")
+      .bind(JSON.stringify(hashed), userId).run();
+    return c.json({ codes: plain });
+  });
+
   return r;
+}
+
+/** Count of unused recovery codes from the stored JSON hash array. */
+function recoveryCodesRemaining(json: string | null): number {
+  if (!json) return 0;
+  try {
+    const arr = JSON.parse(json);
+    return Array.isArray(arr) ? arr.length : 0;
+  } catch {
+    return 0;
+  }
 }

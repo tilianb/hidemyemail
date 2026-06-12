@@ -184,6 +184,51 @@ actor APIClient {
         try await request("/api/settings/mfa")
     }
 
+    // MARK: - Username & self-service recovery codes
+
+    /// Current user's username + recovery-code status.
+    func profile() async throws -> Profile {
+        try await request("/api/account/profile")
+    }
+
+    /// Set or clear the public username. Pass nil to clear. Not a secret and not
+    /// a login credential, so a normal session is enough. Returns the new value.
+    func setUsername(_ username: String?) async throws -> String? {
+        let resp: UsernameResponse = try await request(
+            "/api/account/username",
+            method: "PATCH",
+            body: ["username": username ?? NSNull()]
+        )
+        return resp.username
+    }
+
+    func recoveryCodesStatus() async throws -> RecoveryCodesStatus {
+        try await request("/api/account/recovery-codes")
+    }
+
+    /// (Re)generate recovery codes. Fresh-auth gated; the Worker 401s without a
+    /// fresh session. Returns the new plaintext codes (shown once).
+    func regenerateRecoveryCodes() async throws -> [String] {
+        let resp: RecoveryCodesResponse = try await request(
+            "/api/account/recovery-codes",
+            method: "POST",
+            body: [:]
+        )
+        return resp.codes
+    }
+
+    /// Self-service recovery: username identifies the account, a one-time code
+    /// is the secret proof. Public (no session yet), token mode for native.
+    func recoverWithCode(username: String, code: String) async throws -> RecoverResponse {
+        try await request(
+            "/api/recover/code",
+            method: "POST",
+            body: ["username": username, "code": code],
+            authMode: true,
+            authed: false
+        )
+    }
+
     func passkeys() async throws -> [Passkey] {
         try await request("/api/settings/passkeys")
     }

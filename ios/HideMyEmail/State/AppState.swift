@@ -143,6 +143,34 @@ final class AppState {
         isAdmin = stats.isAdmin ?? false
     }
 
+    /// Refresh the displayed identity (e.g. after the user changes their
+    /// username). Best-effort: failures leave the current name in place.
+    func reloadIdentity() async {
+        try? await refreshIdentity()
+    }
+
+    // MARK: - Self-service recovery (username + recovery code)
+
+    /// Token + freshAuth from a successful recovery, held until the user has
+    /// saved the new passphrase and taps continue.
+    private var pendingRecovery: (token: String?, freshAuth: String?)?
+
+    /// Recover with a username and one-time recovery code. Returns the freshly
+    /// generated passphrase to show the user; call `finishRecoveredLogin()` once
+    /// they've saved it to complete sign-in.
+    func recoverWithCode(username: String, code: String) async throws -> String {
+        guard let client else { throw APIError.notConfigured }
+        let res = try await client.recoverWithCode(username: username, code: code)
+        pendingRecovery = (res.token, res.freshAuth)
+        return res.passphrase
+    }
+
+    func finishRecoveredLogin() async throws {
+        guard let pending = pendingRecovery else { return }
+        pendingRecovery = nil
+        try await finishLogin(token: pending.token, freshAuth: pending.freshAuth)
+    }
+
     func signOut() async {
         KeychainStore.deleteToken()
         await client?.setToken(nil)

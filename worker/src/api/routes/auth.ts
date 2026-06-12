@@ -293,13 +293,21 @@ export function authRoutes() {
     const hash = await derivePassphraseHash(password, c.env.AUTH_PASSWORD_SALT);
 
     try {
+      // Generate self-service recovery codes up front so a brand-new account
+      // is recoverable from the very first session. Plaintext is returned once
+      // here for the client to surface ("save these"); only hashes are stored.
+      const { generateRecoveryCodes } = await import("../../lib/recovery");
+      const { plain, hashed } = await generateRecoveryCodes();
+
       const res = await c.env.DB.prepare(
-        "INSERT INTO users (passphrase_hash, created_at) VALUES (?, ?)"
-      ).bind(hash, Date.now()).run();
+        "INSERT INTO users (passphrase_hash, created_at, recovery_codes) VALUES (?, ?, ?)"
+      ).bind(hash, Date.now(), JSON.stringify(hashed)).run();
 
       const userId = res.meta.last_row_id;
       const { token, freshAuth } = await setAuthenticatedCookies(c, userId);
-      return c.json(wantsToken(c) ? { ok: true, userId, token, fresh_auth: freshAuth } : { ok: true, userId });
+      return c.json(wantsToken(c)
+        ? { ok: true, userId, token, fresh_auth: freshAuth, recovery_codes: plain }
+        : { ok: true, userId, recovery_codes: plain });
     } catch (err: any) {
       if (err.message && err.message.includes("UNIQUE constraint failed")) {
         await recordFailedAttempt(ip, c.env.DB);
@@ -547,8 +555,75 @@ export function authRoutes() {
 
     // Log them in immediately
     await setAuthenticatedCookies(c, user.id);
-    
+
     return c.json({ ok: true, passphrase: newPassphrase });
+  });
+
+  /**
+   * POST /recover/code — self-service recovery with username + recovery code.
+   * Body: { username, code }. No admin and no destination email required: the
+   * username says WHICH account, the one-time recovery code is the secret proof.
+   * On success the code is consumed, a new passphrase is issued, MFA is cleared
+   * (mirrors /recover/verify — a possession factor resets the account), and the
+   * user is logged in. Rate-limited on the shared per-IP failure budget.
+   */
+  r.post("/recover/code", async (c) => {
+    const ip = c.req.header("cf-connecting-ip") || "unknown";
+    if (!(await canAttempt(ip, c.env.DB))) {
+      return c.json({ error: "Too many attempts" }, 429);
+    }
+
+    const { username, code } = await c.req.json<{ username?: string; code?: string }>()
+      .catch(() => ({ username: undefined, code: undefined }));
+    if (!username || !code) return c.json({ error: "Invalid request" }, 400);
+
+    const db = c.env.DB;
+    const user = await db.prepare(
+      "SELECT id, recovery_codes FROM users WHERE lower(username) = lower(?) AND active = 1 AND deleted_at IS NULL"
+    ).bind(username).first<{ id: number; recovery_codes: string | null }>();
+
+    // Unknown username and wrong code are indistinguishable by design — both
+    // consume rate-limit budget and return the same generic error.
+    if (!user || !user.recovery_codes) {
+      await recordFailedAttempt(ip, c.env.DB);
+      return c.json({ error: "Invalid username or recovery code" }, 400);
+    }
+
+    const { verifyBackupCode } = await import("../../lib/totp");
+    let hashed: string[];
+    try {
+      hashed = JSON.parse(user.recovery_codes);
+      if (!Array.isArray(hashed)) throw new Error("bad");
+    } catch {
+      await recordFailedAttempt(ip, c.env.DB);
+      return c.json({ error: "Invalid username or recovery code" }, 400);
+    }
+
+    const idx = await verifyBackupCode(code, hashed);
+    if (idx === -1) {
+      await recordFailedAttempt(ip, c.env.DB);
+      return c.json({ error: "Invalid username or recovery code" }, 400);
+    }
+
+    // Consume the used code so it can't be replayed.
+    hashed.splice(idx, 1);
+
+    const { generatePassphrase } = await import("../../lib/passphrase");
+    const newPassphrase = generatePassphrase();
+    const newHash = await derivePassphraseHash(newPassphrase, c.env.AUTH_PASSWORD_SALT);
+
+    await db.prepare(
+      "UPDATE users SET passphrase_hash = ?, recovery_codes = ?, recovery_token = NULL, recovery_expires_at = NULL, recovery_mfa_code = NULL WHERE id = ?"
+    ).bind(newHash, JSON.stringify(hashed), user.id).run();
+
+    await db.prepare(
+      "UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL WHERE user_id = ?"
+    ).bind(user.id).run();
+
+    const { token, freshAuth } = await setAuthenticatedCookies(c, user.id);
+    return c.json(wantsToken(c)
+      ? { ok: true, userId: user.id, passphrase: newPassphrase, codes_remaining: hashed.length, token, fresh_auth: freshAuth }
+      : { ok: true, passphrase: newPassphrase, codes_remaining: hashed.length });
   });
 
   return r;

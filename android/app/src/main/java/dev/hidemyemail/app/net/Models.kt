@@ -181,3 +181,36 @@ data class LoginResponse(
     @SerialName("mfa_required") val mfaRequired: Boolean? = null,
     @SerialName("mfa_token") val mfaToken: String? = null,
 )
+
+// GET /api/account/profile — username + self-service recovery status.
+@Serializable
+data class Profile(
+    val id: Int,
+    val username: String? = null,
+    val name: String? = null,
+    val isAdmin: Boolean = false,
+    @SerialName("recovery_codes_remaining") val recoveryCodesRemaining: Int = 0,
+)
+
+// PATCH /api/account/username
+@Serializable
+data class UsernameResponse(val ok: Boolean? = null, val username: String? = null)
+
+// POST /api/account/recovery-codes (plaintext, shown once)
+@Serializable
+data class RecoveryCodesResponse(val codes: List<String>)
+
+// GET /api/account/recovery-codes
+@Serializable
+data class RecoveryCodesStatus(val remaining: Int)
+
+// POST /api/recover/code — self-service recovery (username + recovery code).
+@Serializable
+data class RecoverResponse(
+    val ok: Boolean? = null,
+    val passphrase: String,
+    @SerialName("codes_remaining") val codesRemaining: Int? = null,
+    val userId: Int? = null,
+    val token: String? = null,
+    @SerialName("fresh_auth") val freshAuth: String? = null,
+)

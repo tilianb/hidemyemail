@@ -140,7 +140,7 @@ export const api = {
   // code bound to the app's PKCE challenge (see pages/AppAuth.tsx)
   appAuthCode: (challenge: string) => req<{ code: string }>("/api/app-auth/code", { method: "POST", body: JSON.stringify({ challenge }) }),
   completeMfa: (code: string) => req<{ ok: true; userId: number }>("/api/mfa/complete", { method: "POST", body: JSON.stringify({ code }) }),
-  register: (password: string) => req<{ ok: true, userId: number }>("/api/register", { method: "POST", body: JSON.stringify({ password }) }),
+  register: (password: string) => req<{ ok: true, userId: number; recovery_codes: string[] }>("/api/register", { method: "POST", body: JSON.stringify({ password }) }),
   // Cancel a pending account deletion during the 7-day grace window
   restoreAccount: (password: string) => req<{ ok: true }>("/api/restore", { method: "POST", body: JSON.stringify({ password }) }),
   logout: () => req<{ ok: true }>("/api/logout", { method: "POST" }),
@@ -232,6 +232,15 @@ export const api = {
   // Recovery endpoints
   recoverSendCode: (token: string) => req<{ ok: true }>("/api/recover/send-code", { method: "POST", body: JSON.stringify({ token }) }),
   recoverVerify: (token: string, code: string) => req<{ ok: true; passphrase: string }>("/api/recover/verify", { method: "POST", body: JSON.stringify({ token, code }) }),
+  // Self-service recovery: username identifies the account, a one-time recovery
+  // code is the secret proof. No admin token or destination email needed.
+  recoverWithCode: (username: string, code: string) => req<{ ok: true; passphrase: string; codes_remaining: number }>("/api/recover/code", { method: "POST", body: JSON.stringify({ username, code }) }),
+
+  // Account profile (username + recovery-code status)
+  profile: () => req<{ id: number; username: string | null; name: string | null; isAdmin: boolean; recovery_codes_remaining: number }>("/api/account/profile"),
+  setUsername: (username: string | null) => req<{ ok: true; username: string | null }>("/api/account/username", { method: "PATCH", body: JSON.stringify({ username }) }),
+  recoveryCodesStatus: () => req<{ remaining: number }>("/api/account/recovery-codes"),
+  regenerateRecoveryCodes: () => req<{ codes: string[] }>("/api/account/recovery-codes", { method: "POST" }),
 
   // Admin environment & settings
   adminEnv: () => req<{ vars: Record<string, { value: string; secret: false }>; secrets: Record<string, { configured: boolean; preview?: string }> }>("/api/admin/env"),

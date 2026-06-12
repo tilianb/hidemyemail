@@ -256,6 +256,48 @@ struct PasskeyChallengeOptions: Decodable {
     }
 }
 
+// GET /api/account/profile — username + self-service recovery status.
+struct Profile: Decodable {
+    let id: Int
+    let username: String?
+    let name: String?
+    let isAdmin: Bool
+    let recoveryCodesRemaining: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id, username, name, isAdmin
+        case recoveryCodesRemaining = "recovery_codes_remaining"
+    }
+}
+
+// PATCH /api/account/username
+struct UsernameResponse: Decodable {
+    let ok: Bool?
+    let username: String?
+}
+
+// POST /api/account/recovery-codes (plaintext, shown once)
+struct RecoveryCodesResponse: Decodable { let codes: [String] }
+
+// GET /api/account/recovery-codes
+struct RecoveryCodesStatus: Decodable { let remaining: Int }
+
+// POST /api/recover/code — self-service recovery (username + recovery code).
+struct RecoverResponse: Decodable {
+    let ok: Bool?
+    let passphrase: String
+    let codesRemaining: Int?
+    let userId: Int?
+    let token: String?
+    let freshAuth: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok, passphrase, userId, token
+        case codesRemaining = "codes_remaining"
+        case freshAuth = "fresh_auth"
+    }
+}
+
 // POST /api/login and /api/mfa/complete return one of these shapes.
 struct LoginResponse: Decodable {
     let ok: Bool?
