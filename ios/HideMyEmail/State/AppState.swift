@@ -68,7 +68,7 @@ final class AppState {
             phase = .awaitingMFA(token: res.mfaToken)
             return
         }
-        try await finishLogin(token: res.token)
+        try await finishLogin(token: res.token, freshAuth: res.freshAuth)
     }
 
     /// Web-session login: opens the server's own dashboard login (passkeys
@@ -82,7 +82,7 @@ final class AppState {
 
         let handoff = try await WebSessionAuthenticator().authenticate(server: baseURL)
         let res = try await client.appAuthExchange(code: handoff.code, verifier: handoff.verifier)
-        try await finishLogin(token: res.token)
+        try await finishLogin(token: res.token, freshAuth: res.freshAuth)
     }
 
     /// Passwordless login with a platform passkey. Fetches a challenge, runs the
@@ -116,7 +116,7 @@ final class AppState {
         if let token = opts.passkeyToken { response["passkey_token"] = token }
 
         let res = try await client.passkeyVerify(assertion: response)
-        try await finishLogin(token: res.token)
+        try await finishLogin(token: res.token, freshAuth: res.freshAuth)
     }
 
     func completeMFA(code: String) async throws {
@@ -124,12 +124,13 @@ final class AppState {
         let mfaToken: String?
         if case .awaitingMFA(let t) = phase { mfaToken = t } else { mfaToken = nil }
         let res = try await client.completeMFA(code: code, mfaToken: mfaToken)
-        try await finishLogin(token: res.token)
+        try await finishLogin(token: res.token, freshAuth: res.freshAuth)
     }
 
-    private func finishLogin(token: String?) async throws {
+    private func finishLogin(token: String?, freshAuth: String?) async throws {
         guard let token, let client else { throw APIError.server(status: 500, message: "No token returned") }
         await client.setToken(token)
+        await client.setFreshAuth(freshAuth)
         KeychainStore.saveToken(token)
         try await refreshIdentity()
         phase = .loggedIn
@@ -145,6 +146,7 @@ final class AppState {
     func signOut() async {
         KeychainStore.deleteToken()
         await client?.setToken(nil)
+        await client?.setFreshAuth(nil)
         userName = ""
         isAdmin = false
         phase = .loggedOut

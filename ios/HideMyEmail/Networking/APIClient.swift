@@ -7,6 +7,10 @@ import Foundation
 actor APIClient {
     private let baseURL: URL
     private var token: String?
+    /// Short-lived (10 min) token gating sensitive actions (export, passkey and
+    /// MFA changes). Held in memory only — it expires long before app restart
+    /// matters, and persisting it would defeat the freshness guarantee.
+    private var freshAuth: String?
     private let session: URLSession
 
     init(baseURL: URL, token: String?) {
@@ -23,6 +27,10 @@ actor APIClient {
 
     func setToken(_ token: String?) {
         self.token = token
+    }
+
+    func setFreshAuth(_ freshAuth: String?) {
+        self.freshAuth = freshAuth
     }
 
     // MARK: - Auth
@@ -191,7 +199,7 @@ actor APIClient {
     /// Full account export (aliases, domains, destinations, rules…) as raw
     /// JSON. Requires a fresh session; the Worker 401s otherwise.
     func exportData() async throws -> Data {
-        try await perform("/api/export", method: "GET", body: nil, authMode: false, authed: true)
+        try await perform("/api/account/export", method: "GET", body: nil, authMode: false, authed: true)
     }
 
     func config() async throws -> ServerConfig {
@@ -267,6 +275,9 @@ actor APIClient {
         if authed {
             guard let token else { throw APIError.unauthorized }
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            if let freshAuth {
+                req.setValue(freshAuth, forHTTPHeaderField: "X-Fresh-Auth")
+            }
         }
         if let body {
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -288,7 +299,17 @@ actor APIClient {
         // endpoints (login / mfa-complete) a 401 instead carries a meaningful
         // message like "Invalid passphrase" / "Invalid code", so fall through
         // and surface that rather than masking it as a stale session.
-        if http.statusCode == 401 && authed { throw APIError.unauthorized }
+        if http.statusCode == 401 && authed {
+            // Fresh-auth expiry is not a dead session: the bearer token is
+            // still valid, only the 10-minute freshness window lapsed. Surface
+            // the message so the UI can ask for a re-login on that action
+            // instead of signing the whole app out.
+            let message = (try? Self.decoder.decode(APIErrorBody.self, from: data))?.error
+            if message == "Fresh authentication required" {
+                throw APIError.server(status: 401, message: message!)
+            }
+            throw APIError.unauthorized
+        }
         guard (200..<300).contains(http.statusCode) else {
             let message = (try? Self.decoder.decode(APIErrorBody.self, from: data))?.error
                 ?? "Request failed (\(http.statusCode))"

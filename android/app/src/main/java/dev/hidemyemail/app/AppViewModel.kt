@@ -93,14 +93,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _phase.value = AuthPhase.AwaitingMfa(res.mfaToken)
             return
         }
-        finishLogin(res.token)
+        finishLogin(res.token, res.freshAuth)
     }
 
     suspend fun completeMfa(code: String) {
         val client = client ?: throw ApiException.NotConfigured()
         val mfaToken = (_phase.value as? AuthPhase.AwaitingMfa)?.mfaToken
         val res = client.completeMfa(code, mfaToken)
-        finishLogin(res.token)
+        finishLogin(res.token, res.freshAuth)
     }
 
     /** Step 1 of web sign-in: open the server's dashboard login in a Custom Tab. */
@@ -117,7 +117,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val client = ensureClient()
                 val res = client.appAuthExchange(code, pending.verifier)
-                finishLogin(res.token)
+                finishLogin(res.token, res.freshAuth)
             } catch (e: Exception) {
                 onError(e.message ?: "Sign-in failed")
             }
@@ -131,12 +131,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         return ApiClient(serverUrl.value, null).also { client = it }
     }
 
-    private suspend fun finishLogin(token: String?) {
+    private suspend fun finishLogin(token: String?, freshAuth: String?) {
         val client = client
         if (token == null || client == null) {
             throw ApiException.Server(500, "No token returned")
         }
         client.token = token
+        client.freshAuth = freshAuth
         tokenStore.save(token)
         refreshIdentity()
         _phase.value = AuthPhase.LoggedIn
@@ -152,6 +153,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun signOut() {
         tokenStore.delete()
         client?.token = null
+        client?.freshAuth = null
         _userName.value = ""
         _isAdmin.value = false
         _phase.value = AuthPhase.LoggedOut

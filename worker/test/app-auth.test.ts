@@ -52,7 +52,10 @@ test("full handoff: code from web session, exchange yields a working bearer toke
     body: JSON.stringify({ code, verifier: VERIFIER }),
   }, testEnv);
   expect(exchange.status).toBe(200);
-  const { token } = await exchange.json() as { token: string };
+  const { token, fresh_auth } = await exchange.json() as { token: string; fresh_auth: string };
+  // The exchange follows an interactive web login moments earlier, so it also
+  // hands the app a fresh-auth token for the sensitive-action gate.
+  expect(typeof fresh_auth).toBe("string");
 
   const authed = await app.request("/api/stats", {
     headers: { Authorization: `Bearer ${token}` },

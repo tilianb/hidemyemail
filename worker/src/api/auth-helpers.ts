@@ -9,6 +9,8 @@ import { verifyFreshAuth } from "../lib/auth";
  * reach on its own: MFA/passkey changes, data export, account deletion.
  */
 export async function hasFreshAuth(c: Context<AppEnv>): Promise<boolean> {
-  const token = getCookie(c, "__Host-fresh-auth");
+  // Web clients hold the HttpOnly cookie; native bearer clients carry the
+  // fresh-auth token returned by the token-mode login response in this header.
+  const token = getCookie(c, "__Host-fresh-auth") || c.req.header("X-Fresh-Auth");
   return !!token && await verifyFreshAuth(c.env.SESSION_SECRET, token, c.get("userId"));
 }

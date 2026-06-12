@@ -32,6 +32,13 @@ import kotlin.coroutines.resumeWithException
  */
 class ApiClient(private val baseUrl: String, @Volatile var token: String? = null) {
 
+    /**
+     * Short-lived (10 min) token gating sensitive actions (export, passkey and
+     * MFA changes). Held in memory only — it expires long before app restart
+     * matters, and persisting it would defeat the freshness guarantee.
+     */
+    @Volatile var freshAuth: String? = null
+
     private val http = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
@@ -187,7 +194,7 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
      * JSON text. Requires a fresh session; the Worker 401s otherwise.
      */
     suspend fun exportData(): String =
-        perform("/api/export", "GET", null, authMode = false, authed = true)
+        perform("/api/account/export", "GET", null, authMode = false, authed = true)
 
     suspend fun config(): ServerConfig = request("/api/config", authed = false)
 
@@ -252,6 +259,7 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
         if (authed) {
             val t = token ?: throw ApiException.Unauthorized()
             builder.header("Authorization", "Bearer $t")
+            freshAuth?.let { builder.header("X-Fresh-Auth", it) }
         }
         // OkHttp requires a body for POST/PATCH/PUT — send `{}` when empty
         // (e.g. PATCH /destinations/:id/default), matching what the Worker expects.
@@ -273,7 +281,21 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
             // or expired → drop it and bounce to login. On the unauthenticated
             // auth endpoints a 401 instead carries a meaningful message like
             // "Invalid passphrase", so fall through and surface that.
-            if (res.code == 401 && authed) throw ApiException.Unauthorized()
+            if (res.code == 401 && authed) {
+                // Fresh-auth expiry is not a dead session: the bearer token is
+                // still valid, only the 10-minute freshness window lapsed.
+                // Surface the message so the UI can ask for a re-login on that
+                // action instead of signing the whole app out.
+                val message = try {
+                    json.decodeFromString<ErrorBody>(text).error
+                } catch (_: Exception) {
+                    null
+                }
+                if (message == "Fresh authentication required") {
+                    throw ApiException.Server(res.code, message)
+                }
+                throw ApiException.Unauthorized()
+            }
             if (res.code !in 200..299) {
                 val message = try {
                     json.decodeFromString<ErrorBody>(text).error

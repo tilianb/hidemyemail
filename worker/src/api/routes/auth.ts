@@ -54,12 +54,12 @@ function wantsToken(c: Context<AppEnv>): boolean {
   return c.req.header("X-Auth-Mode") === "token" && !c.req.header("Origin");
 }
 
-async function setAuthenticatedCookies(c: Context<AppEnv>, userId: number): Promise<string> {
+async function setAuthenticatedCookies(c: Context<AppEnv>, userId: number): Promise<{ token: string; freshAuth: string }> {
   const sessionToken = await signSession(c.env.SESSION_SECRET, userId, SESSION_TTL);
   const freshAuthToken = await signFreshAuth(c.env.SESSION_SECRET, userId, FRESH_AUTH_TTL);
   setCookie(c, "__Host-session", sessionToken, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
   setCookie(c, "__Host-fresh-auth", freshAuthToken, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: FRESH_AUTH_TTL });
-  return sessionToken;
+  return { token: sessionToken, freshAuth: freshAuthToken };
 }
 
 function randomSixDigitCode(): string {
@@ -139,7 +139,10 @@ export function authRoutes() {
     if (!user || user.active === 0) return c.json({ error: "Account is disabled" }, 403);
 
     const token = await signSession(c.env.SESSION_SECRET, parsed.userId, SESSION_TTL);
-    return c.json({ ok: true, userId: parsed.userId, token });
+    // The user just completed an interactive web login seconds ago, so the
+    // exchanged session is as fresh as a direct token-mode login.
+    const freshAuth = await signFreshAuth(c.env.SESSION_SECRET, parsed.userId, FRESH_AUTH_TTL);
+    return c.json({ ok: true, userId: parsed.userId, token, fresh_auth: freshAuth });
   });
 
   r.post("/login", async (c) => {
@@ -196,8 +199,8 @@ export function authRoutes() {
       return c.json(wantsToken(c) ? { mfa_required: true, mfa_token: challenge } : { mfa_required: true });
     }
 
-    const token = await setAuthenticatedCookies(c, userId);
-    return c.json(wantsToken(c) ? { ok: true, userId, token } : { ok: true, userId });
+    const { token, freshAuth } = await setAuthenticatedCookies(c, userId);
+    return c.json(wantsToken(c) ? { ok: true, userId, token, fresh_auth: freshAuth } : { ok: true, userId });
   });
 
   /**
@@ -275,8 +278,8 @@ export function authRoutes() {
       ).bind(hash, Date.now()).run();
 
       const userId = res.meta.last_row_id;
-      const token = await setAuthenticatedCookies(c, userId);
-      return c.json(wantsToken(c) ? { ok: true, userId, token } : { ok: true, userId });
+      const { token, freshAuth } = await setAuthenticatedCookies(c, userId);
+      return c.json(wantsToken(c) ? { ok: true, userId, token, fresh_auth: freshAuth } : { ok: true, userId });
     } catch (err: any) {
       if (err.message && err.message.includes("UNIQUE constraint failed")) {
         await recordFailedAttempt(ip, c.env.DB);
@@ -346,8 +349,8 @@ export function authRoutes() {
     }
 
     deleteCookie(c, "__Host-mfa-challenge", { path: "/", secure: true });
-    const token = await setAuthenticatedCookies(c, userId);
-    return c.json(wantsToken(c) ? { ok: true, userId, token } : { ok: true, userId });
+    const { token, freshAuth } = await setAuthenticatedCookies(c, userId);
+    return c.json(wantsToken(c) ? { ok: true, userId, token, fresh_auth: freshAuth } : { ok: true, userId });
   });
 
   // ── Passkey authentication (discoverable credentials, no passphrase needed) ──
@@ -435,9 +438,9 @@ export function authRoutes() {
       .bind(result.authenticationInfo.newCounter, response.id).run();
 
     deleteCookie(c, "__Host-passkey-challenge", { path: "/", secure: true });
-    const token = await setAuthenticatedCookies(c, cred.user_id);
+    const { token, freshAuth } = await setAuthenticatedCookies(c, cred.user_id);
 
-    return c.json(wantsToken(c) ? { ok: true, userId: cred.user_id, token } : { ok: true, userId: cred.user_id });
+    return c.json(wantsToken(c) ? { ok: true, userId: cred.user_id, token, fresh_auth: freshAuth } : { ok: true, userId: cred.user_id });
   });
 
   r.post("/recover/send-code", async (c) => {

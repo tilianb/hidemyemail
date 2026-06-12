@@ -261,6 +261,7 @@ struct LoginResponse: Decodable {
     let ok: Bool?
     let userId: Int?
     let token: String?
+    let freshAuth: String?
     let mfaRequired: Bool?
     let mfaToken: String?
 
@@ -268,6 +269,7 @@ struct LoginResponse: Decodable {
         case ok
         case userId = "userId"
         case token
+        case freshAuth = "fresh_auth"
         case mfaRequired = "mfa_required"
         case mfaToken = "mfa_token"
     }

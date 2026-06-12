@@ -52,6 +52,34 @@ test("native bearer flow: login returns token, guarded route accepts it", async 
   expect(bad.status).toBe(401);
 });
 
+test("native bearer flow: fresh_auth token unlocks fresh-auth-gated routes", async () => {
+  const app = createApp();
+  await (env.DB as D1Database).prepare("DELETE FROM rate_limits").run();
+
+  // Web mode must not leak the fresh-auth token into the body (cookie only).
+  const webLogin = await app.request("/api/login", { method: "POST", body: JSON.stringify({ password: "hunter2" }), headers: { "Content-Type": "application/json" } }, testEnv);
+  expect((await webLogin.json() as any).fresh_auth).toBeUndefined();
+
+  const login = await app.request("/api/login", { method: "POST", body: JSON.stringify({ password: "hunter2" }), headers: { "Content-Type": "application/json", "X-Auth-Mode": "token" } }, testEnv);
+  const body = await login.json() as any;
+  const token = body.token as string;
+  const freshAuth = body.fresh_auth as string;
+  expect(typeof freshAuth).toBe("string");
+
+  // Bearer token alone must not reach a fresh-auth-gated route…
+  const stale = await app.request("/api/account/export", { headers: { Authorization: `Bearer ${token}` } }, testEnv);
+  expect(stale.status).toBe(401);
+  expect(((await stale.json()) as any).error).toBe("Fresh authentication required");
+
+  // …but the X-Fresh-Auth header from the login response does.
+  const fresh = await app.request("/api/account/export", { headers: { Authorization: `Bearer ${token}`, "X-Fresh-Auth": freshAuth } }, testEnv);
+  expect(fresh.status).toBe(200);
+
+  // A forged header is rejected.
+  const forged = await app.request("/api/account/export", { headers: { Authorization: `Bearer ${token}`, "X-Fresh-Auth": "not.a.real.token" } }, testEnv);
+  expect(forged.status).toBe(401);
+});
+
 test("token mode is refused when a browser Origin is present (XSS guard)", async () => {
   const app = createApp();
   await (env.DB as D1Database).prepare("DELETE FROM rate_limits").run();

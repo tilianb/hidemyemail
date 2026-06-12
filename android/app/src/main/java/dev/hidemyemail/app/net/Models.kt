@@ -177,6 +177,7 @@ data class LoginResponse(
     val ok: Boolean? = null,
     val userId: Int? = null,
     val token: String? = null,
+    @SerialName("fresh_auth") val freshAuth: String? = null,
     @SerialName("mfa_required") val mfaRequired: Boolean? = null,
     @SerialName("mfa_token") val mfaToken: String? = null,
 )
