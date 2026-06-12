@@ -64,9 +64,27 @@ export interface StatsData {
   userName?: string;
 }
 
+// Fresh-auth expiry is not a dead session: the Worker 401s with this message
+// when the session is valid but the 10-minute freshness window lapsed. Surface
+// it so callers (AppAuth, Settings) can prompt a re-login for that one action
+// instead of treating the whole session as gone.
+const FRESH_AUTH_REQUIRED = "Fresh authentication required";
+
+async function error401(res: Response): Promise<Error> {
+  try {
+    const b = await res.json();
+    if (b && typeof b === "object" && "error" in b && b.error === FRESH_AUTH_REQUIRED) {
+      return new Error(FRESH_AUTH_REQUIRED);
+    }
+  } catch {
+    // Ignore JSON parse errors for non-JSON error responses
+  }
+  return new Error("unauthorized");
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { ...init, credentials: "include", headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } });
-  if (res.status === 401) throw new Error("unauthorized");
+  if (res.status === 401) throw await error401(res);
   if (!res.ok) {
     let msg = `${res.status}`;
     try {
@@ -190,7 +208,7 @@ export const api = {
   // Account data export — returns a JSON Blob for download
   exportAccount: async (): Promise<void> => {
     const res = await fetch("/api/account/export", { credentials: "include" });
-    if (res.status === 401) throw new Error("unauthorized");
+    if (res.status === 401) throw await error401(res);
     if (!res.ok) {
       let msg = `${res.status}`;
       try { const b = await res.json(); if (b && typeof b === "object" && "error" in b) msg = (b as any).error; } catch { /* ignore */ }
