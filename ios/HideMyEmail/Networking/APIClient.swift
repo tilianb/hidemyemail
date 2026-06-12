@@ -172,28 +172,28 @@ actor APIClient {
     // MARK: - Account settings (Settings tab)
 
     func preferences() async throws -> Preferences {
-        try await request("/api/preferences")
+        try await request("/api/settings/preferences")
     }
 
     /// Update inline-action preferences. Pass NSNull for "inherit".
     func updatePreferences(fields: [String: Any]) async throws {
-        try await requestVoid("/api/preferences", method: "PATCH", body: fields)
+        try await requestVoid("/api/settings/preferences", method: "PATCH", body: fields)
     }
 
     func mfaStatus() async throws -> MfaStatus {
-        try await request("/api/mfa")
+        try await request("/api/settings/mfa")
     }
 
     func passkeys() async throws -> [Passkey] {
-        try await request("/api/passkeys")
+        try await request("/api/settings/passkeys")
     }
 
     func renamePasskey(id: String, name: String) async throws {
-        try await requestVoid("/api/passkeys/\(id)", method: "PATCH", body: ["deviceName": name])
+        try await requestVoid("/api/settings/passkeys/\(id)", method: "PATCH", body: ["deviceName": name])
     }
 
     func deletePasskey(id: String) async throws {
-        try await requestVoid("/api/passkeys/\(id)", method: "DELETE")
+        try await requestVoid("/api/settings/passkeys/\(id)", method: "DELETE")
     }
 
     /// Full account export (aliases, domains, destinations, rules…) as raw

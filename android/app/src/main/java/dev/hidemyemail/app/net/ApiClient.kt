@@ -174,20 +174,20 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
 
     // MARK: Account settings (Settings tab)
 
-    suspend fun preferences(): Preferences = request("/api/preferences")
+    suspend fun preferences(): Preferences = request("/api/settings/preferences")
 
     /** Update inline-action preferences; JsonNull means "inherit". */
     suspend fun updatePreferences(fields: JsonObject) =
-        requestVoid("/api/preferences", "PATCH", fields)
+        requestVoid("/api/settings/preferences", "PATCH", fields)
 
-    suspend fun mfaStatus(): MfaStatus = request("/api/mfa")
+    suspend fun mfaStatus(): MfaStatus = request("/api/settings/mfa")
 
-    suspend fun passkeys(): List<Passkey> = request("/api/passkeys")
+    suspend fun passkeys(): List<Passkey> = request("/api/settings/passkeys")
 
     suspend fun renamePasskey(id: String, name: String) =
-        requestVoid("/api/passkeys/$id", "PATCH", buildJsonObject { put("deviceName", name) })
+        requestVoid("/api/settings/passkeys/$id", "PATCH", buildJsonObject { put("deviceName", name) })
 
-    suspend fun deletePasskey(id: String) = requestVoid("/api/passkeys/$id", "DELETE")
+    suspend fun deletePasskey(id: String) = requestVoid("/api/settings/passkeys/$id", "DELETE")
 
     /**
      * Full account export (aliases, domains, destinations, rules…) as raw
