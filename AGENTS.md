@@ -28,29 +28,28 @@ built dashboard assets.
 | `dashboard/` | React 19 + Vite SPA (TypeScript), no UI framework — hand-rolled CSS in `src/index.css` |
 | `docker/` | Self-host runtime: Node server wrapping the Worker via Miniflare |
 | `docs/` | Setup/deploy/config docs + `ROADMAP.md` (tracked backlog) |
-| `ios/` | Native SwiftUI app (XcodeGen `project.yml`) — only on its feature branch until merged |
+| `ios/` | Native SwiftUI app (XcodeGen `project.yml`) |
+| `android/` | Native Android app — Kotlin + Jetpack Compose (Gradle, package `dev.hidemyemail.app`) |
 
-## Mobile (iOS + Android direction)
+## Mobile (iOS + Android)
 
-- The SwiftUI app (`ios/`, branch `claude/mobile-app-effort-v1-Qxt1M`) is the
-  product; the owner wants its look kept. Build: `cd ios && xcodegen generate`
-  then xcodebuild. Team ID is in `project.yml`. Passkey login requires a paid
-  Apple team (Associated Domains); on a personal team, strip
-  `CODE_SIGN_ENTITLEMENTS` locally to sideload — never commit that strip.
-- **Android strategy decided by spike (2026-06-10): Skip (skip.dev), native
-  mode** — the same Swift/SwiftUI source compiles natively for Android
-  (Compose-backed). Spike result: real Models + actor/URLSession APIClient +
-  themed List/NavigationStack/TabView UI built to a working APK. Known
-  porting rules: `@State`/`@StateObject` properties must not be `private`;
-  `ContentUnavailableView` and `.contentShape` are not in SkipUI yet (use
-  portable fallbacks); guard UIKit-only code with `#if canImport(UIKit)`;
-  drop macOS from Package platforms. Spike project: `/tmp/skipspike/hme-app`
-  (disposable).
+- The SwiftUI app (`ios/`) is the product; the owner wants its look kept.
+  Build: `cd ios && xcodegen generate` then xcodebuild. Team ID is in
+  `project.yml`. Passkey login requires a paid Apple team (Associated
+  Domains); on a personal team, strip `CODE_SIGN_ENTITLEMENTS` locally to
+  sideload — never commit that strip. CI: `.github/workflows/ios.yml`
+  (build + tests on a simulator).
+- The Android app (`android/`) is a hand-written Kotlin/Jetpack Compose
+  mirror of the iOS screens and theme tokens (the 2026-06-10 Skip
+  transpilation spike was abandoned in favor of this native port). Both apps
+  talk to the Worker in bearer-token mode (`X-Auth-Mode: token`); keep
+  `ApiClient.kt` and `APIClient.swift` in feature parity. Build:
+  `cd android && ./gradlew :app:assembleDebug` (needs `JAVA_HOME` +
+  `ANDROID_HOME`). CI: `.github/workflows/android.yml` (build + lint).
 - **Toolchain quirk:** Homebrew cannot install anything on this Mac (macOS 27
-  beta → `unknown or unsupported macOS version`). Everything is hand-installed
-  under `~/dev-tools` — source `~/dev-tools/env.sh` for JDK 21, Gradle 9.4.1,
-  Android SDK 35, and PATH for `skip` (`~/bin/skip`) and `swiftly`
-  (`~/.swiftly`). Swift-Android SDK installs via `skip android sdk install`.
+  beta → `unknown or unsupported macOS version`). The Android toolchain is
+  hand-installed — source `~/dev-tools/env.sh` for JDK 21, Gradle, Android
+  SDK 35, and PATH.
 
 ## Build & test
 
@@ -91,8 +90,10 @@ plus `npm run dev` in `dashboard/` (Vite proxies to the Worker).
 - Destination emails are AES-encrypted at rest (`lib/crypto.ts`) and looked
   up by HMAC hash (`email_hash`) — never store or log plaintext addresses.
 - Sensitive account operations (MFA changes, data export, account deletion)
-  require the `__Host-fresh-auth` cookie via `hasFreshAuth`
-  (`worker/src/api/auth-helpers.ts`), not just a session.
+  require fresh auth via `hasFreshAuth` (`worker/src/api/auth-helpers.ts`),
+  not just a session: the `__Host-fresh-auth` cookie for web clients, or the
+  `X-Fresh-Auth` header (issued only in token-mode login responses) for
+  native bearer clients.
 - Reverse-alias replies are gated by SES SPF/DMARC verdicts AND a
   first-contact check (`hasPriorInbound`) — reverse addresses are guessable.
   The events table is the source of truth for that gate; do not add events

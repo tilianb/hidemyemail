@@ -3,10 +3,15 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- allowBackup=false: SharedPreferences hold the bearer session token,
+         and Auto Backup would otherwise copy it into cloud backups and
+         device-to-device transfers. Mirrors the iOS ThisDeviceOnly keychain
+         stance; everything else the app stores is refetchable from the server. -->
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
+        android:allowBackup="false"
         android:supportsRtl="true"
         android:theme="@style/Theme.HideMyEmail">
 
