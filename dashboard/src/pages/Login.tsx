@@ -219,7 +219,7 @@ export function Login() {
               <div className="login-success-card">
                 <h3 className="login-success-title">Account created!</h3>
                 <p className="login-success-copy">
-                  Please save this passphrase. You will need it to login in the future.
+                  Save this passphrase. You'll need it to sign in.
                 </p>
                 <div className="login-secret">
                   {generated}

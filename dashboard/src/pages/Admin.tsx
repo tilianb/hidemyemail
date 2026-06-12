@@ -1520,7 +1520,7 @@ Outputs:
     Value: !Ref OutboundTopic`}
               />
               <p className="text-muted">
-                After deployment, copy <code>InboundBucketName</code>, <code>SnsInboundTopicArn</code>, and <code>SnsAllowedTopicArn</code> to your Worker environment. Confirm the SNS subscriptions in AWS if they are still pending. Also ensure that the "hidemyemail-rules" SES rule set is marked as active in the AWS console.
+                After deployment, copy <code>InboundBucketName</code>, <code>SnsInboundTopicArn</code>, and <code>SnsAllowedTopicArn</code> to your Worker environment. Confirm the SNS subscriptions in AWS if they are still pending. Also mark the "hidemyemail-rules" SES rule set active in the AWS console.
               </p>
             </div>
           )}
