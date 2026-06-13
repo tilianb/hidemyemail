@@ -22,6 +22,10 @@ beforeEach(async () => {
   await resetDb(DB());
   await q.createDomain(DB(), "hidemyemail.dev", "real@me.com");
   await q.autoCreateAlias(DB(), 1, "shop", "shop@hidemyemail.dev");
+  // First-contact rule: a reply is only allowed to an external sender the alias has
+  // already heard from. Seed the prior inbound 'forward' from boss@store.com so the
+  // relay-success tests below model a genuine reply to existing correspondence.
+  await q.insertEvent(DB(), { alias_id: 1, type: "forward", external_sender: "boss@store.com", ts: Date.now() });
 });
 
 test("owner reply with SPF pass → SES send as alias, leaks stripped", async () => {
@@ -125,4 +129,114 @@ test("SECURITY: multiple <addr> tokens → last one wins (rejected when last is 
   const spoof = `From: <real@me.com> spoof <attacker@evil.com>\r\nTo: ${TO}\r\nSubject: spoof\r\n\r\nbody\r\n`;
   await handleReply(mkMessage("attacker@evil.com", TO, spoof), testEnv(sentinel), PARSED, { spf: "PASS", dmarc: "PASS" });
   expect(sentinel.sent.length).toBe(0);
+});
+
+// SECURITY (first-contact): reverse addresses are guessable. An authenticated owner
+// could craft a reverse address for a stranger and use the alias as a cold-outbound
+// spam relay. Only allow replies to external senders the alias has heard from.
+test("SECURITY: owner reply to a stranger with no prior inbound → rejected, no SES", async () => {
+  const sentinel = { sent: [] as any[] };
+  const strangerTo = "shop+cold=stranger.com@hidemyemail.dev";
+  const strangerParsed = { aliasLocal: "shop", externalSender: "cold@stranger.com" };
+  const raw = `From: Me <real@me.com>\r\nTo: ${strangerTo}\r\nSubject: cold\r\n\r\nspam\r\n`;
+  await handleReply(mkMessage("real@me.com", strangerTo, raw), testEnv(sentinel), strangerParsed, { spf: "PASS" });
+  expect(sentinel.sent.length).toBe(0);
+  const ev = await DB().prepare("SELECT detail FROM events WHERE type='reject' ORDER BY id DESC LIMIT 1").first<{ detail: string }>();
+  expect(ev?.detail).toBe("no_prior_contact");
+});
+
+// First-contact is case-insensitive: inbound stored "Boss@Store.com" still authorises
+// a reply to "boss@store.com".
+test("first-contact match is case-insensitive", async () => {
+  await DB().prepare("DELETE FROM events").run();
+  await q.insertEvent(DB(), { alias_id: 1, type: "forward", external_sender: "Boss@Store.com", ts: Date.now() });
+  const sentinel = { sent: [] as any[] };
+  await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
+  expect(sentinel.sent.length).toBe(1);
+});
+
+// Distinct-recipient cap: an authenticated owner could reply to many strangers (each
+// with exactly one prior inbound) and use the alias as a cold-outbound spam relay.
+// Cap the number of unique reply recipients per 24h window.
+
+// Helper: seed a prior inbound 'forward' so the first-contact gate passes.
+async function seedForward(sender: string) {
+  await q.insertEvent(DB(), { alias_id: 1, type: "forward", external_sender: sender, ts: Date.now() });
+}
+
+test("distinct recipient cap: under cap → reply succeeds", async () => {
+  // Lower the cap to 2 so we don't need to seed 15 prior senders.
+  await DB().prepare("INSERT INTO settings (key, value, updated_at) VALUES ('reply_distinct_recipient_cap', '2', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(Date.now()).run();
+
+  // Seed one prior distinct reply (within window) so we sit at 1/2 distinct.
+  await seedForward("other@example.com");
+  await q.insertEvent(DB(), { alias_id: 1, type: "reply", external_sender: "other@example.com", ts: Date.now() });
+
+  // Reply to the regularly-seeded boss@store.com (prior inbound already seeded in beforeEach).
+  const sentinel = { sent: [] as any[] };
+  await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
+  expect(sentinel.sent.length).toBe(1);
+});
+
+test("distinct recipient cap: at cap with new recipient → rejected + alias muted", async () => {
+  // Cap of 2; seed 2 distinct reply recipients already in the window.
+  await DB().prepare("INSERT INTO settings (key, value, updated_at) VALUES ('reply_distinct_recipient_cap', '2', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(Date.now()).run();
+
+  const now = Date.now();
+  await seedForward("alice@example.com");
+  await seedForward("bob@example.com");
+  await q.insertEvent(DB(), { alias_id: 1, type: "reply", external_sender: "alice@example.com", ts: now });
+  await q.insertEvent(DB(), { alias_id: 1, type: "reply", external_sender: "bob@example.com", ts: now });
+
+  // boss@store.com is the new (third) distinct recipient — must be blocked.
+  const sentinel = { sent: [] as any[] };
+  await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
+  expect(sentinel.sent.length).toBe(0);
+
+  const ev = await DB().prepare("SELECT detail FROM events WHERE type='reject' ORDER BY id DESC LIMIT 1").first<{ detail: string }>();
+  expect(ev?.detail).toBe("distinct_recipient_cap");
+
+  // Alias must now be muted for a future timestamp.
+  const alias = await DB().prepare("SELECT muted_until FROM aliases WHERE id = 1").first<{ muted_until: number | null }>();
+  expect(alias?.muted_until).toBeGreaterThan(Date.now());
+});
+
+test("distinct recipient cap: already-contacted recipient exempted at cap", async () => {
+  // Cap of 2; seed boss@store.com itself as one of the 2 already-replied-to recipients.
+  await DB().prepare("INSERT INTO settings (key, value, updated_at) VALUES ('reply_distinct_recipient_cap', '2', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(Date.now()).run();
+
+  const now = Date.now();
+  await seedForward("alice@example.com");
+  // boss@store.com was already seeded via beforeEach; also record a prior reply to it.
+  await q.insertEvent(DB(), { alias_id: 1, type: "reply", external_sender: "boss@store.com", ts: now });
+  await q.insertEvent(DB(), { alias_id: 1, type: "reply", external_sender: "alice@example.com", ts: now });
+  // Distinct count is now 2/2 (boss + alice). Replying again to boss must NOT be blocked.
+
+  const sentinel = { sent: [] as any[] };
+  await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
+  expect(sentinel.sent.length).toBe(1);
+});
+
+// Reply rate limit: replies consume SES quota + sender reputation, capped per alias
+// per hour (default 10). Inbound forwards do not count against this reply cap.
+test("reply rate limit: inbound forwards do not count against per-alias reply cap", async () => {
+  const now = Date.now();
+  for (let i = 0; i < 12; i++) {
+    await q.insertEvent(DB(), { alias_id: 1, type: "forward", external_sender: `sender${i}@example.com`, ts: now });
+  }
+  const sentinel = { sent: [] as any[] };
+  await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
+  expect(sentinel.sent.length).toBe(1);
+});
+
+test("reply rate limit: over per-alias cap → rejected, no SES", async () => {
+  const now = Date.now();
+  for (let i = 0; i < 12; i++) {
+    await q.insertEvent(DB(), { alias_id: 1, type: "reply", external_sender: "boss@store.com", ts: now });
+  }
+  const sentinel = { sent: [] as any[] };
+  await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
+  expect(sentinel.sent.length).toBe(0);
+  const ev = await DB().prepare("SELECT detail FROM events WHERE type='reject' ORDER BY id DESC LIMIT 1").first<{ detail: string }>();
+  expect(ev?.detail).toBe("rate");
 });

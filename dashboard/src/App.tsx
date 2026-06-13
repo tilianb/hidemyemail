@@ -9,19 +9,23 @@ import { Destinations } from "./pages/Destinations";
 import { Admin } from "./pages/Admin";
 import { Settings } from "./pages/Settings";
 import { Recover } from "./pages/Recover";
+import { AppAuth } from "./pages/AppAuth";
 import { api } from "./api";
 import { Globe, Mail, Ban, BarChart3, LogOut, Send, Shield, Settings as SettingsIcon } from "lucide-react";
 import { useToast } from "./ui";
 
 type Tab = "domains" | "aliases" | "destinations" | "blocks" | "stats" | "settings" | "admin";
 
-const BASE_NAV = [
+// `overflow` items leave the mobile bottom tab bar (max 5 tabs) and surface
+// as icon buttons in the mobile top bar instead. Desktop sidebar shows all.
+type NavItem = { id: Tab; label: string; icon: typeof Globe; title: string; overflow?: boolean };
+const BASE_NAV: NavItem[] = [
   { id: "domains" as Tab, label: "Domains", icon: Globe, title: "Managed domains" },
   { id: "aliases" as Tab, label: "Aliases", icon: Mail, title: "Email aliases" },
   { id: "destinations" as Tab, label: "Destinations", icon: Send, title: "Verified destinations" },
   { id: "blocks" as Tab, label: "Blocks", icon: Ban, title: "Blocked senders" },
   { id: "stats" as Tab, label: "Stats", icon: BarChart3, title: "Activity & stats" },
-  { id: "settings" as Tab, label: "Settings", icon: SettingsIcon, title: "Account preferences & security" },
+  { id: "settings" as Tab, label: "Settings", icon: SettingsIcon, title: "Account preferences & security", overflow: true },
 ];
 
 export function App() {
@@ -31,8 +35,9 @@ export function App() {
   const { toast } = useToast();
 
   const navItems = isAdmin
-    ? [...BASE_NAV, { id: "admin" as Tab, label: "Admin", icon: Shield, title: "System Administration" }]
+    ? [...BASE_NAV, { id: "admin" as Tab, label: "Admin", icon: Shield, title: "System Administration", overflow: true }]
     : BASE_NAV;
+  const overflowItems = navItems.filter(n => n.overflow);
 
   const logout = async () => {
     try {
@@ -83,6 +88,7 @@ export function App() {
   }
 
   if (window.location.pathname === "/recover") return <Recover />;
+  if (window.location.pathname === "/app-auth") return <AppAuth />;
 
   if (!authed) return <Login />;
 
@@ -93,9 +99,25 @@ export function App() {
         <span className="sidebar-logo">
           hide<span className="brand-redact" style={{ fontSize: "0.85em", padding: "0 4px", verticalAlign: "middle" }}>my</span>email
         </span>
-        <button className="btn-ghost mobile-signout" onClick={logout} title="Sign out" aria-label="Sign out">
-          <LogOut size={18} />
-        </button>
+        <div className="mobile-top-actions">
+          {overflowItems.map(n => {
+            const Icon = n.icon;
+            return (
+              <button
+                key={n.id}
+                className={`btn-ghost mobile-top-action${tab === n.id ? " active" : ""}`}
+                onClick={() => setTab(n.id)}
+                title={n.title}
+                aria-label={n.label}
+              >
+                <Icon size={18} />
+              </button>
+            );
+          })}
+          <button className="btn-ghost mobile-signout" onClick={logout} title="Sign out" aria-label="Sign out">
+            <LogOut size={18} />
+          </button>
+        </div>
       </header>
 
       {/* Sidebar */}
@@ -113,7 +135,7 @@ export function App() {
             return (
               <button
                 key={n.id}
-                className={`nav-item${tab === n.id ? " active" : ""}`}
+                className={`nav-item${tab === n.id ? " active" : ""}${n.overflow ? " nav-overflow" : ""}`}
                 onClick={() => setTab(n.id)}
                 title={n.title}
               >
@@ -127,6 +149,13 @@ export function App() {
         </nav>
 
         <div className="sidebar-footer">
+          <div className="user-chip" title={`Signed in as ${userName}`}>
+            <span className="user-chip-dot" />
+            <span style={{ minWidth: 0 }}>
+              <span className="user-chip-role">{isAdmin ? "Operator" : "Session"}</span>
+              <span className="user-chip-name" style={{ display: "block" }}>{userName}</span>
+            </span>
+          </div>
           <button
             className="nav-item"
             onClick={logout}
@@ -141,12 +170,7 @@ export function App() {
       </aside>
 
       {/* Main content */}
-      <main className="page-main" style={{ position: "relative" }}>
-        <div style={{ position: "absolute", top: 32, right: 32, display: "flex", alignItems: "center", gap: 12, zIndex: 10 }}>
-          <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
-            Logged in as <strong style={{ color: "var(--text-primary)", fontWeight: 600 }}>{userName}</strong>
-          </span>
-        </div>
+      <main className="page-main">
         <div className="page-content">
           {tab === "domains" && <Domains />}
           {tab === "aliases" && <Aliases />}

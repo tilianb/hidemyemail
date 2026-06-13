@@ -134,7 +134,7 @@ export function Aliases() {
             <p style={{ margin: "0", fontSize: "14px", lineHeight: "1.5" }}>
               {isAtHardLimit 
                 ? `You have reached your absolute hard limit of ${hardLimit} aliases. No new catch-all emails can be received until you delete some aliases.` 
-                : `You are over your alias limit. New catch-all aliases have a 1-hour grace period before inbound emails are blocked. Please delete old aliases.`}
+                : `You are over your alias limit. New catch-all aliases have a 1-hour grace period before inbound emails are blocked. Delete old aliases to continue.`}
             </p>
           </div>
         </div>

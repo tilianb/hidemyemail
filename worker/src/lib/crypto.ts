@@ -67,7 +67,7 @@ export async function decryptDestination(encryptedBase64: string, keyBase64: str
     return new TextDecoder().decode(plaintextBuf);
   } catch (err) {
     if (looksLikeLegacyPlaintextEmail(encryptedBase64)) {
-      console.warn("Using legacy plaintext destination row:", encryptedBase64);
+      console.warn("Using legacy plaintext destination row");
       return encryptedBase64;
     }
     throw new Error("Unable to decrypt stored value");

@@ -1,8 +1,40 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
-import * as q from "../../db/queries";
 import { encryptDestination, decryptDestination, hashDestination } from "../../lib/crypto";
 import { getMainGlobalDomain, getEnvWithOverride } from "../../lib/settings";
+
+type ResolvedDefaultDestination = {
+  encrypted: string | null;
+  hash: string | null;
+  publicValue: string | null | undefined;
+};
+
+async function resolveDefaultDestination(
+  db: D1Database,
+  userId: number,
+  defaultDestination: string | null | undefined,
+  encryptionKey: string,
+): Promise<ResolvedDefaultDestination | null> {
+  if (!defaultDestination) {
+    return { encrypted: null, hash: null, publicValue: defaultDestination };
+  }
+
+  const normalizedDestination = defaultDestination === "global" ? "global" : defaultDestination.toLowerCase();
+  const destinationHash = await hashDestination(normalizedDestination, encryptionKey);
+
+  if (normalizedDestination !== "global") {
+    const destVerified = await db.prepare(
+      "SELECT id FROM destinations WHERE user_id = ? AND email_hash = ? AND verified_at IS NOT NULL"
+    ).bind(userId, destinationHash).first();
+    if (!destVerified) return null;
+  }
+
+  return {
+    encrypted: await encryptDestination(normalizedDestination, encryptionKey),
+    hash: destinationHash,
+    publicValue: normalizedDestination,
+  };
+}
 
 export function domainRoutes() {
   const r = new Hono<AppEnv>();
@@ -90,31 +122,79 @@ export function domainRoutes() {
       }
     }
 
-    if (default_destination && default_destination !== "global") {
-      const emailHash = await hashDestination(default_destination.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY);
-      const destVerified = await c.env.DB.prepare("SELECT id FROM destinations WHERE user_id = ? AND email_hash = ? AND verified_at IS NOT NULL").bind(userId, emailHash).first();
-      if (!destVerified) return c.json({ error: "Destination email not verified" }, 400);
-    }
+    const resolvedDefaultDestination = await resolveDefaultDestination(
+      c.env.DB,
+      userId,
+      default_destination,
+      c.env.DESTINATION_ENCRYPTION_KEY,
+    );
+    if (!resolvedDefaultDestination) return c.json({ error: "Destination email not verified" }, 400);
 
     try {
-      let destEnc = null;
-      let destHash = null;
-      if (default_destination === "global") {
-        destEnc = await encryptDestination("global", c.env.DESTINATION_ENCRYPTION_KEY);
-        destHash = await hashDestination("global", c.env.DESTINATION_ENCRYPTION_KEY);
-      } else if (default_destination) {
-        destEnc = await encryptDestination(default_destination.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY);
-        destHash = await hashDestination(default_destination.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY);
-      }
-      
       const res = await c.env.DB.prepare(
         "INSERT INTO domains (user_id, is_global, domain, default_destination, default_destination_hash, created_at) VALUES (?, 0, ?, ?, ?, ?)"
-      ).bind(userId, fullDomain, destEnc, destHash, Date.now()).run();
+      ).bind(userId, fullDomain, resolvedDefaultDestination.encrypted, resolvedDefaultDestination.hash, Date.now()).run();
       
-      return c.json({ id: res.meta.last_row_id, domain: fullDomain, default_destination });
+      return c.json({ id: res.meta.last_row_id, domain: fullDomain, default_destination: resolvedDefaultDestination.publicValue });
     } catch (err: any) {
       return c.json({ error: "Domain already exists or internal error" }, 500);
     }
+  });
+
+  // Update a personal subdomain in place — default destination and/or the
+  // per-subdomain policies (catch-all, inline actions). No delete+recreate.
+  r.patch("/domains/:id", async (c) => {
+    const userId = c.get("userId");
+    const id = parseInt(c.req.param("id"), 10);
+    if (isNaN(id)) return c.json({ error: "Invalid id" }, 400);
+
+    const b = await c.req
+      .json<{ catch_all?: number | null; inline_actions_pref?: string | null; default_destination?: string | null }>()
+      .catch(() => ({} as { catch_all?: number | null; inline_actions_pref?: string | null; default_destination?: string | null }));
+
+    // Scope by user_id (no IDOR); only personal subdomains are editable here.
+    // Global domains stay managed via the admin routes.
+    const domainRow = await c.env.DB.prepare(
+      "SELECT is_global FROM domains WHERE id = ? AND user_id = ?"
+    ).bind(id, userId).first<{ is_global: number }>();
+    if (!domainRow) return c.json({ error: "Not found" }, 404);
+    if (domainRow.is_global) return c.json({ error: "Cannot edit global domain" }, 400);
+
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+
+    if (b.catch_all !== undefined) {
+      if (b.catch_all !== null && b.catch_all !== 0 && b.catch_all !== 1) {
+        return c.json({ error: "catch_all must be 0, 1, or null" }, 400);
+      }
+      sets.push("catch_all = ?"); vals.push(b.catch_all);
+    }
+
+    if (b.inline_actions_pref !== undefined) {
+      if (b.inline_actions_pref !== null && b.inline_actions_pref !== "on" && b.inline_actions_pref !== "off") {
+        return c.json({ error: "inline_actions_pref must be 'on', 'off', or null" }, 400);
+      }
+      sets.push("inline_actions_pref = ?"); vals.push(b.inline_actions_pref);
+    }
+
+    if (b.default_destination !== undefined) {
+      // Validate the destination: "global", or a verified destination owned by
+      // this user. Mirror POST /domains. Fail closed.
+      const resolvedDefaultDestination = await resolveDefaultDestination(
+        c.env.DB,
+        userId,
+        b.default_destination,
+        c.env.DESTINATION_ENCRYPTION_KEY,
+      );
+      if (!resolvedDefaultDestination) return c.json({ error: "Destination email not verified" }, 400);
+      sets.push("default_destination = ?"); vals.push(resolvedDefaultDestination.encrypted);
+      sets.push("default_destination_hash = ?"); vals.push(resolvedDefaultDestination.hash);
+    }
+
+    if (!sets.length) return c.json({ error: "No fields" }, 400);
+    vals.push(id, userId);
+    await c.env.DB.prepare(`UPDATE domains SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`).bind(...vals).run();
+    return c.json(b.default_destination !== undefined ? { ok: true, default_destination: b.default_destination } : { ok: true });
   });
 
   r.delete("/domains/:id", async (c) => {
@@ -147,9 +227,11 @@ export function domainRoutes() {
       stmts.push(c.env.DB.prepare("DELETE FROM events WHERE alias_id = ?").bind(aid));
     }
     if (userId === 1) {
+      stmts.push(c.env.DB.prepare("DELETE FROM blocks WHERE domain_id = ?").bind(id));
       stmts.push(c.env.DB.prepare("DELETE FROM aliases WHERE domain_id = ?").bind(id));
       stmts.push(c.env.DB.prepare("DELETE FROM domains WHERE id = ?").bind(id));
     } else {
+      stmts.push(c.env.DB.prepare("DELETE FROM blocks WHERE domain_id = ? AND user_id = ?").bind(id, userId));
       stmts.push(c.env.DB.prepare("DELETE FROM aliases WHERE domain_id = ? AND user_id = ?").bind(id, userId));
       stmts.push(c.env.DB.prepare("DELETE FROM domains WHERE id = ? AND user_id = ?").bind(id, userId));
     }

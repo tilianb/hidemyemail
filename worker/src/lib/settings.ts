@@ -6,15 +6,9 @@ import { decryptDestination } from "./crypto";
  * Designed to be lightweight — no caching (D1 is fast enough for per-request reads).
  */
 export async function getSetting(db: D1Database, key: string, env?: any): Promise<string> {
-  let val = "";
-  try {
-    const row = await db.prepare("SELECT value FROM settings WHERE key = ?").bind(key).first<{ value: string }>();
-    val = row?.value ?? SETTING_DEFAULTS[key] ?? "";
-  } catch {
-    // If table doesn't exist yet (pre-migration), fall back gracefully
-    val = SETTING_DEFAULTS[key] ?? "";
-  }
-  
+  const row = await db.prepare("SELECT value FROM settings WHERE key = ?").bind(key).first<{ value: string }>();
+  const val = row?.value ?? SETTING_DEFAULTS[key] ?? "";
+
   if (val && env?.DESTINATION_ENCRYPTION_KEY && key === "ses_secret_access_key") {
     return await decryptDestination(val, env.DESTINATION_ENCRYPTION_KEY);
   }

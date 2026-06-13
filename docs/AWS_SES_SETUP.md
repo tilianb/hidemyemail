@@ -186,7 +186,12 @@ For each alias domain:
 - DKIM: the 3 SES-provided CNAME records
 - DMARC TXT at `_dmarc`: `v=DMARC1; p=quarantine; rua=mailto:dmarc@YOUR-DOMAIN`
 
-Optional custom MAIL FROM:
+### Custom MAIL FROM (required for deliverability)
+
+Without a custom MAIL FROM, the envelope Return-Path of every forward is
+`amazonses.com` — SPF passes but does not *align* with your From domain, so
+DMARC rides on DKIM alone and Outlook scores the mail noticeably worse.
+Set it up for every alias domain:
 
 ```bash
 aws sesv2 put-email-identity-mail-from-attributes \
@@ -208,3 +213,29 @@ Then add:
 3. Confirm SNS posts to `/api/ses/inbound`.
 4. Confirm the forwarded message arrives at your verified destination.
 5. Reply from your inbox and confirm the external sender sees your alias.
+
+## 10. Reputation warm-up (avoid the Junk folder)
+
+A brand-new domain that suddenly forwards lots of mail looks like a spam
+operation regardless of correct SPF/DKIM/DMARC. Plan the first two weeks:
+
+1. **Start small.** Keep volume under ~50 forwards/day for the first days,
+   then ramp gradually. Sign up your own low-volume newsletters first.
+2. **Keep verdict handling strict.** Leave `spam_verdict_action` on
+   `flag` (or `drop`) and `virus_verdict_action` on `drop` in Admin →
+   Settings. Forwarded spam is re-signed with YOUR domain's DKIM — every
+   spam message you forward counts against your reputation.
+3. **Keep inline actions off** while the domain is new (Admin → Settings →
+   Inline Action Links). The three `mailto:` buttons pattern-match
+   marketing footers at Microsoft.
+4. **Enroll in feedback programs.** [Google Postmaster Tools]
+   (https://postmaster.google.com) and [Microsoft SNDS]
+   (https://sendersupport.olc.protection.outlook.com/snds/) show your
+   domain/IP reputation as the big providers see it.
+5. **Watch the suppression dashboard.** Admin → Suppressions tracks
+   bounces and complaints; keep the complaint rate under 0.1%. Hard
+   bounces and complaints auto-suppress the destination so SES never
+   retries them.
+6. **Verify alignment.** Send a forward to a Gmail address, open
+   "Show original", and confirm SPF, DKIM, and DMARC all show PASS with
+   your domain (not amazonses.com) — see the custom MAIL FROM step.

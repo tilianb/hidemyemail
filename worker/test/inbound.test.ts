@@ -149,3 +149,43 @@ test("unknown domain → dropped, no SES", async () => {
   await handleInbound(mkMessage("alice@store.com", "shop@unknown.dev", RAW), testEnv(sentinel));
   expect(sentinel.sent.length).toBe(0);
 });
+
+test("per-subdomain catch_all=0 disables auto-create even when global is on", async () => {
+  const sentinel = { sent: [] as any[] };
+  await DB().prepare("UPDATE domains SET catch_all = 0 WHERE domain = 'hidemyemail.dev'").run();
+  await handleInbound(mkMessage("alice@store.com", "fresh@hidemyemail.dev", RAW), testEnv(sentinel));
+  expect(sentinel.sent.length).toBe(0);
+  expect(await q.getAlias(DB(), "fresh@hidemyemail.dev")).toBeNull();
+});
+
+test("per-subdomain catch_all=1 enables auto-create even when global is off", async () => {
+  const sentinel = { sent: [] as any[] };
+  await DB().prepare(
+    "INSERT INTO settings (key, value, updated_at) VALUES " +
+    "('catch_all_auto_create', 'false', 0), ('max_total_aliases', '10', 0), ('alias_quota_buffer_enabled', 'true', 0) " +
+    "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+  ).run();
+  await DB().prepare("UPDATE domains SET catch_all = 1 WHERE domain = 'hidemyemail.dev'").run();
+  await handleInbound(mkMessage("alice@store.com", "fresh@hidemyemail.dev", RAW), testEnv(sentinel));
+  expect(sentinel.sent.length).toBe(1);
+  expect(await q.getAlias(DB(), "fresh@hidemyemail.dev")).not.toBeNull();
+});
+
+test("allow rule on alias rejects non-matching sender (allowlist mode)", async () => {
+  const sentinel = { sent: [] as any[] };
+  const a = await q.autoCreateAlias(DB(), 1, "shop", "shop@hidemyemail.dev");
+  await DB().prepare("INSERT INTO blocks (user_id, alias_id, kind, pattern, created_at) VALUES (1, ?, 'allow', 'bank@trusted.com', ?)")
+    .bind(a!.id, Date.now()).run();
+  await handleInbound(mkMessage("alice@store.com", "shop@hidemyemail.dev", RAW), testEnv(sentinel));
+  expect(sentinel.sent.length).toBe(0);
+  expect((await q.getAlias(DB(), "shop@hidemyemail.dev"))?.blocked_count).toBe(1);
+});
+
+test("allow rule on subdomain permits matching sender", async () => {
+  const sentinel = { sent: [] as any[] };
+  await q.autoCreateAlias(DB(), 1, "shop", "shop@hidemyemail.dev");
+  await DB().prepare("INSERT INTO blocks (user_id, domain_id, kind, pattern, created_at) VALUES (1, 1, 'allow', '*@store.com', ?)")
+    .bind(Date.now()).run();
+  await handleInbound(mkMessage("alice@store.com", "shop@hidemyemail.dev", RAW), testEnv(sentinel));
+  expect(sentinel.sent.length).toBe(1);
+});
