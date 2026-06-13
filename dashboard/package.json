@@ -13,10 +13,10 @@
   },
   "dependencies": {
     "@simplewebauthn/browser": "^13.3.0",
-    "lucide-react": "^1.17.0",
+    "lucide-react": "^1.18.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-qr-code": "^2.1.1"
+    "react-qr-code": "^2.2.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",
