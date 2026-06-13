@@ -10,9 +10,11 @@ import { blockRoutes } from "./routes/blocks";
 import { statsRoutes } from "./routes/stats";
 import { sesWebhookRoutes } from "./routes/ses-webhook";
 import { sesInboundRoutes } from "./routes/ses-inbound";
+import { unsubscribeRoutes } from "./routes/unsubscribe";
 import { destinationRoutes, verificationRoute } from "./routes/destinations";
 import { adminRoutes } from "./routes/admin";
 import { settingsRoutes } from "./routes/settings";
+import { accountRoutes } from "./routes/account";
 import { getSetting } from "../lib/settings";
 import { SETTING_DEFAULTS } from "../config";
 
@@ -55,7 +57,7 @@ export function createApp() {
       } catch (e) {}
       return "";
     },
-    allowHeaders: ["Content-Type", "Cookie"],
+    allowHeaders: ["Content-Type", "Cookie", "Authorization", "X-Auth-Mode"],
     credentials: true
   }));
 
@@ -64,6 +66,7 @@ export function createApp() {
   app.route("/api", verificationRoute());
   app.route("/api", sesWebhookRoutes());
   app.route("/api", sesInboundRoutes());
+  app.route("/api", unsubscribeRoutes());
 
   // session guard for everything else under /api
   app.use("/api/*", async (c, next) => {
@@ -71,18 +74,31 @@ export function createApp() {
     if (
       p === "/api/login" ||
       p === "/api/register" ||
+      p === "/api/restore" ||
       p === "/api/logout" ||
       p === "/api/verify" ||
       p === "/api/ses/notification" ||
-      p === "/api/ses/inbound"
+      p === "/api/ses/inbound" ||
+      p === "/api/unsubscribe" ||
+      // App-auth handoff: exchange is pre-auth by definition; code does its
+      // own session-cookie check inside the handler.
+      p === "/api/app-auth/exchange" ||
+      p === "/api/app-auth/code"
     ) return next();
-    const token = getCookie(c, "__Host-session");
+    // Web clients send the HttpOnly __Host-session cookie; native clients send
+    // the same signed session token as `Authorization: Bearer <token>`.
+    let token = getCookie(c, "__Host-session");
+    if (!token) {
+      const authHeader = c.req.header("Authorization");
+      if (authHeader?.startsWith("Bearer ")) token = authHeader.slice(7).trim();
+    }
     if (!token) return c.json({ error: "Unauthorized" }, 401);
     const userId = await verifySession(c.env.SESSION_SECRET, token);
     if (userId === null) return c.json({ error: "Unauthorized" }, 401);
-    const user = await c.env.DB.prepare("SELECT active FROM users WHERE id = ?")
-      .bind(userId).first<{ active: number }>();
+    const user = await c.env.DB.prepare("SELECT active, deleted_at FROM users WHERE id = ?")
+      .bind(userId).first<{ active: number; deleted_at: number | null }>();
     if (!user || user.active === 0) return c.json({ error: "Account is disabled" }, 403);
+    if (user.deleted_at != null) return c.json({ error: "Account has been deleted" }, 403);
     c.set("userId", userId);
     return next();
   });
@@ -95,6 +111,17 @@ export function createApp() {
   app.route("/api", destinationRoutes());
   app.route("/api/admin", adminRoutes());
   app.route("/api/settings", settingsRoutes());
+  app.route("/api/account", accountRoutes());
+
+  // Apple App Site Association — lets the iOS app claim `webcredentials` for
+  // passkeys on this domain. Served by the Worker (not a static asset) so the
+  // App ID stays configurable via the APPLE_APP_ID env var. Requires this path
+  // in the assets `run_worker_first` list (see wrangler.jsonc).
+  app.get("/.well-known/apple-app-site-association", (c) => {
+    const appID = c.env.APPLE_APP_ID;
+    if (!appID) return c.json({ error: "Not configured" }, 404);
+    return c.json({ webcredentials: { apps: [appID] } });
+  });
 
   return app;
 }

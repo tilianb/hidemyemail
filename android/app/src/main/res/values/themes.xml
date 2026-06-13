@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark-only "privacy console" chrome matching the iOS app and web
+         dashboard: near-black canvas behind everything, including during
+         cold start before Compose attaches. -->
+    <style name="Theme.HideMyEmail" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/canvas</item>
+        <item name="android:statusBarColor">@color/canvas</item>
+        <item name="android:navigationBarColor">@color/surface0</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
