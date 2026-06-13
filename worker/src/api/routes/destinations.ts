@@ -21,13 +21,13 @@ export function destinationRoutes() {
     let rows;
     try {
       rows = await c.env.DB.prepare(
-        "SELECT id, email, is_default, verified_at, created_at FROM destinations WHERE user_id = ? ORDER BY created_at DESC"
-      ).bind(userId).all<{ id: number, email: string, is_default: number, verified_at: number | null, created_at: number }>();
+        "SELECT id, email, is_default, verified_at, created_at, suppressed_at, suppression_reason, suppression_class FROM destinations WHERE user_id = ? ORDER BY created_at DESC"
+      ).bind(userId).all<{ id: number, email: string, is_default: number, verified_at: number | null, created_at: number, suppressed_at: number | null, suppression_reason: string | null, suppression_class: string | null }>();
     } catch {
       // is_default column may be missing if migration 0002 hasn't been applied yet
       rows = await c.env.DB.prepare(
-        "SELECT id, email, 0 as is_default, verified_at, created_at FROM destinations WHERE user_id = ? ORDER BY created_at DESC"
-      ).bind(userId).all<{ id: number, email: string, is_default: number, verified_at: number | null, created_at: number }>();
+        "SELECT id, email, 0 as is_default, verified_at, created_at, NULL as suppressed_at, NULL as suppression_reason, NULL as suppression_class FROM destinations WHERE user_id = ? ORDER BY created_at DESC"
+      ).bind(userId).all<{ id: number, email: string, is_default: number, verified_at: number | null, created_at: number, suppressed_at: number | null, suppression_reason: string | null, suppression_class: string | null }>();
     }
 
     const results = [];
@@ -139,6 +139,28 @@ export function destinationRoutes() {
       c.env.DB.prepare("UPDATE destinations SET is_default = 1 WHERE id = ? AND user_id = ?").bind(id, userId)
     ]);
 
+    return c.json({ ok: true });
+  });
+
+  r.post("/destinations/:id/unsuppress", async (c) => {
+    const userId = c.get("userId");
+    const id = parseInt(c.req.param("id"), 10);
+    if (isNaN(id)) return c.json({ error: "Invalid id" }, 400);
+
+    const dest = await c.env.DB.prepare(
+      "SELECT suppressed_at, suppression_class FROM destinations WHERE id = ? AND user_id = ?"
+    ).bind(id, userId).first<{ suppressed_at: number | null; suppression_class: string | null }>();
+
+    if (!dest) return c.json({ error: "Destination not found" }, 404);
+    if (!dest.suppressed_at) return c.json({ ok: true }); // Already not suppressed
+
+    // Hard suppressions (permanent bounce, complaint) cannot be self-served
+    if (dest.suppression_class === "hard") {
+      return c.json({ error: "Hard-suppressed destinations cannot be unsuppressed by the user" }, 403);
+    }
+
+    const { clearSuppression } = await import("../../db/queries");
+    await clearSuppression(c.env.DB, id);
     return c.json({ ok: true });
   });
 

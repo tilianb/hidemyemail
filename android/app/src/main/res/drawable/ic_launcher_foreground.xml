@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- README/dashboard logo (dashboard/public/favicon.svg): envelope outline with
+     the glowing amber redaction bar. The glyph is scaled into the 66dp adaptive
+     safe zone; the blur glow is approximated with layered translucent rects. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="2.2"
+        android:scaleY="2.2"
+        android:translateX="18.8"
+        android:translateY="18.8">
+
+        <!-- Envelope outline -->
+        <path
+            android:pathData="M6,10C6,8.9 6.9,8 8,8H24C25.1,8 26,8.9 26,10V22C26,23.1 25.1,24 24,24H8C6.9,24 6,23.1 6,22V10Z"
+            android:strokeColor="#e8e8ec"
+            android:strokeWidth="1.8"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+
+        <!-- Envelope flap -->
+        <path
+            android:pathData="M6,10L16,16.5L26,10"
+            android:strokeColor="#e8e8ec"
+            android:strokeWidth="1.8"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+
+        <!-- Glow halo (outer, faint) -->
+        <path
+            android:pathData="M10.3,11.8L21.7,11.8A2.8,2.8 0 0 1 24.5,14.6L24.5,17.9A2.8,2.8 0 0 1 21.7,20.7L10.3,20.7A2.8,2.8 0 0 1 7.5,17.9L7.5,14.6A2.8,2.8 0 0 1 10.3,11.8Z"
+            android:fillColor="#26FFB300" />
+
+        <!-- Glow halo (inner) -->
+        <path
+            android:pathData="M10.3,12.9L21.7,12.9A1.9,1.9 0 0 1 23.6,14.8L23.6,17.7A1.9,1.9 0 0 1 21.7,19.6L10.3,19.6A1.9,1.9 0 0 1 8.4,17.7L8.4,14.8A1.9,1.9 0 0 1 10.3,12.9Z"
+            android:fillColor="#59FFB300" />
+
+        <!-- Amber redaction bar -->
+        <path
+            android:pathData="M10.5,14L21.5,14A1,1 0 0 1 22.5,15L22.5,17.5A1,1 0 0 1 21.5,18.5L10.5,18.5A1,1 0 0 1 9.5,17.5L9.5,15A1,1 0 0 1 10.5,14Z"
+            android:fillColor="#FFB300" />
+    </group>
+</vector>

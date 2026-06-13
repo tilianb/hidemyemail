@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 import { QRCode } from "react-qr-code";
 import { api } from "../api";
+import { useAuth } from "../auth";
 import { useToast } from "../ui";
-import { ShieldCheck, ShieldOff, KeyRound, Copy, RefreshCw, Loader2, Fingerprint, Trash2, Pencil, Mail } from "lucide-react";
+import { ShieldCheck, ShieldOff, KeyRound, Copy, RefreshCw, Loader2, Fingerprint, Trash2, Pencil, Mail, Download, AlertTriangle } from "lucide-react";
 
 type SetupStep = "idle" | "qr" | "verify" | "backup";
 type PasskeyRow = { id: string; device_name: string | null; created_at: number };
 
 export function Settings() {
   const { toast } = useToast();
+  const { isAdmin, setAuthed, refreshAuth } = useAuth();
   const [enabled, setEnabled] = useState(false);
   const [backupCodesRemaining, setBackupCodesRemaining] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -41,6 +43,13 @@ export function Settings() {
   const [regenLoading, setRegenLoading] = useState(false);
   const [newBackupCodes, setNewBackupCodes] = useState<string[]>([]);
 
+  // Account export / delete state
+  const [exportLoading, setExportLoading] = useState(false);
+  const [showDeleteZone, setShowDeleteZone] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
   // Email preferences
   type Tri = "on" | "off" | null;
   type Pos = "header" | "footer" | null;
@@ -50,10 +59,19 @@ export function Settings() {
   const [defaultsPosition, setDefaultsPosition] = useState("footer");
   const [savingInlineActions, setSavingInlineActions] = useState(false);
 
+  // Profile (username) + self-service recovery codes
+  const [username, setUsername] = useState<string | null>(null);
+  const [usernameInput, setUsernameInput] = useState("");
+  const [savingUsername, setSavingUsername] = useState(false);
+  const [recoveryRemaining, setRecoveryRemaining] = useState(0);
+  const [newRecoveryCodes, setNewRecoveryCodes] = useState<string[]>([]);
+  const [showRecoveryRegen, setShowRecoveryRegen] = useState(false);
+  const [regeneratingRecovery, setRegeneratingRecovery] = useState(false);
+
   async function loadStatus() {
     setLoading(true);
     try {
-      const [mfa, pks, prefs] = await Promise.all([
+      const [mfa, pks, prefs, profile] = await Promise.all([
         api.mfaStatus(),
         api.passkeyList().catch(() => []),
         api.preferences().catch(() => ({
@@ -61,10 +79,16 @@ export function Settings() {
           inline_actions_position: null as Pos,
           defaults: { inline_actions_enabled: false, inline_actions_position: "footer" },
         })),
+        api.profile().catch(() => null),
       ]);
       setEnabled(mfa.enabled);
       setBackupCodesRemaining(mfa.backupCodesRemaining);
       setPasskeys(pks);
+      if (profile) {
+        setUsername(profile.username);
+        setUsernameInput(profile.username ?? "");
+        setRecoveryRemaining(profile.recovery_codes_remaining);
+      }
       setInlineActionsPref(prefs.inline_actions_pref);
       setInlineActionsPosition(prefs.inline_actions_position);
       setDefaultsEnabled(prefs.defaults.inline_actions_enabled);
@@ -251,6 +275,79 @@ export function Settings() {
     );
   }
 
+  async function saveUsername(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = usernameInput.trim();
+    if (trimmed === (username ?? "")) return;
+    setSavingUsername(true);
+    try {
+      const res = await api.setUsername(trimmed === "" ? null : trimmed);
+      setUsername(res.username);
+      setUsernameInput(res.username ?? "");
+      toast(res.username ? "Username saved" : "Username cleared", "success");
+      // Refresh the shell so the header/menu shows the new display name.
+      await refreshAuth();
+    } catch (err: any) {
+      toast(err?.message || "Failed to save username", "error");
+    } finally {
+      setSavingUsername(false);
+    }
+  }
+
+  async function regenerateRecovery() {
+    setRegeneratingRecovery(true);
+    try {
+      const res = await api.regenerateRecoveryCodes();
+      setNewRecoveryCodes(res.codes);
+      setRecoveryRemaining(res.codes.length);
+      setShowRecoveryRegen(false);
+      toast("New recovery codes generated", "success");
+    } catch (err: any) {
+      // Regeneration is fresh-auth gated, same as export/delete.
+      toast(err?.message === "Fresh authentication required" || err?.message === "unauthorized"
+        ? "Session is not fresh — log out and back in, then retry"
+        : err?.message || "Failed to generate recovery codes", "error");
+    } finally {
+      setRegeneratingRecovery(false);
+    }
+  }
+
+  async function handleExport() {
+    setExportLoading(true);
+    try {
+      await api.exportAccount();
+      toast("Export downloaded", "success");
+    } catch (err: any) {
+      // Export is fresh-auth gated: a long-lived session alone can't reach it
+      toast(err?.message === "Fresh authentication required" || err?.message === "unauthorized"
+        ? "Session is not fresh — log out and back in, then retry"
+        : err?.message || "Failed to export data", "error");
+    } finally {
+      setExportLoading(false);
+    }
+  }
+
+  async function handleDeleteAccount(e: React.FormEvent) {
+    e.preventDefault();
+    if (deleteConfirmText !== "DELETE") {
+      toast("Type DELETE to confirm", "error");
+      return;
+    }
+    setDeleteLoading(true);
+    try {
+      await api.deleteAccount(deletePassword, deleteConfirmText);
+      toast("Account scheduled for deletion", "success");
+      setAuthed(false);
+    } catch (err: any) {
+      toast(err?.message === "Fresh authentication required" || err?.message === "unauthorized"
+        ? "Session is not fresh — log out and back in, then retry"
+        : err?.message || "Failed to delete account", "error");
+      setDeletePassword("");
+    } finally {
+      setDeleteLoading(false);
+    }
+  }
+
   if (loading) {
     return (
       <div>
@@ -419,6 +516,44 @@ export function Settings() {
         <p className="page-subtitle">Manage your account preferences and security.</p>
       </div>
 
+      {/* Profile / username card */}
+      <div className="card stagger-1 card-spaced-bottom">
+        <div className="card-header">
+          <span className="card-title">Username</span>
+        </div>
+        <div className="card-body">
+          <p className="muted-copy card-spaced-bottom">
+            A public handle that replaces the default <strong>User&nbsp;#…</strong> label wherever your account is shown, and identifies your account when you recover it with a recovery code. It is not a password and not used to log in. Leave blank to stay anonymous.
+          </p>
+          <form onSubmit={saveUsername} className="security-inline-form">
+            <input
+              className="input flex-input"
+              value={usernameInput}
+              onChange={e => setUsernameInput(e.target.value)}
+              placeholder="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              maxLength={32}
+              disabled={savingUsername}
+            />
+            <button type="submit" className="btn btn-primary shrink-0" disabled={savingUsername || usernameInput.trim() === (username ?? "")}>
+              {savingUsername ? <Loader2 size={14} className="spin" /> : "Save"}
+            </button>
+            {username && (
+              <button
+                type="button"
+                className="btn btn-soft"
+                onClick={() => { setUsernameInput(""); }}
+                disabled={savingUsername}
+              >
+                Clear
+              </button>
+            )}
+          </form>
+        </div>
+      </div>
+
       {/* Email preferences card */}
       <div className="card stagger-1 card-spaced-bottom">
         <div className="card-header">
@@ -449,6 +584,11 @@ export function Settings() {
               </select>
             </div>
           </div>
+          {effectiveEnabled && (
+            <div className="callout" style={{ marginTop: "var(--space-3)" }}>
+              <strong>Deliverability note.</strong> The inline action bar adds three <code>mailto:</code> buttons to every forwarded message. Spam filters at Microsoft / Outlook treat that pattern as marketing-list footer, which — combined with a new sending domain — can push messages to Junk. If you see forwards landing in Spam, switch this to <em>Disabled</em> while your sending domain builds reputation; the same actions remain available via the email's standard Unsubscribe button.
+            </div>
+          )}
         </div>
       </div>
 
@@ -721,6 +861,211 @@ export function Settings() {
           )}
         </div>
       </div>
+
+      {/* Self-service recovery codes card */}
+      <div className="card stagger-3 card-spaced-top">
+        <div className="card-header">
+          <span className="card-title">Recovery Codes</span>
+          <span className="badge badge-muted">{recoveryRemaining} remaining</span>
+        </div>
+        <div className="card-body">
+          <p className="muted-copy card-spaced-bottom">
+            Recovery codes let you regain access with your username if you lose your passphrase and passkeys — no admin or email required. Each code works once. Regenerating creates 10 new codes and invalidates all existing ones. Set a username above before you'll be able to use them.
+          </p>
+
+          {newRecoveryCodes.length > 0 && (
+            <div className="security-code-block">
+              <div className="backup-code-grid">
+                {newRecoveryCodes.map((code, i) => (
+                  <div key={i} className="backup-code">{code}</div>
+                ))}
+              </div>
+              <div className="inline-actions">
+                <button
+                  type="button"
+                  className="btn btn-soft btn-compact"
+                  onClick={() => copyToClipboard(newRecoveryCodes.join("\n"), "Recovery codes")}
+                >
+                  <Copy size={12} /> Copy All
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-compact"
+                  onClick={() => setNewRecoveryCodes([])}
+                >
+                  Hide
+                </button>
+              </div>
+              <p className="muted-copy-sm">
+                These codes will not be shown again. Save them in a password manager or a safe place.
+              </p>
+            </div>
+          )}
+
+          {showRecoveryRegen ? (
+            <div className="security-form-stack">
+              <div className="muted-copy-sm">
+                Regenerating invalidates your existing recovery codes. Continue?
+              </div>
+              <div className="inline-actions">
+                <button type="button" className="btn btn-primary" onClick={regenerateRecovery} disabled={regeneratingRecovery}>
+                  {regeneratingRecovery ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
+                  Generate 10 New Codes
+                </button>
+                <button type="button" className="btn btn-soft" onClick={() => setShowRecoveryRegen(false)} disabled={regeneratingRecovery}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-soft"
+              onClick={() => { setShowRecoveryRegen(true); setNewRecoveryCodes([]); }}
+            >
+              <RefreshCw size={14} /> {recoveryRemaining > 0 ? "Regenerate Recovery Codes" : "Generate Recovery Codes"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Account data card */}
+      <div className="card stagger-3 card-spaced-top">
+        <div className="card-header">
+          <span className="card-title">Account Data</span>
+        </div>
+        <div className="card-body">
+          <div className="inline-actions-wrap inline-actions-nowrap">
+            <div className="security-status-media">
+              <Download size={20} className="icon-muted" />
+              <div>
+                <div className="status-title">Export my data</div>
+                <div className="status-caption">
+                  Download a JSON file containing your aliases, destinations, domains, blocks, and email events.
+                </div>
+              </div>
+            </div>
+            <div className="inline-actions shrink-0">
+              <button
+                type="button"
+                className="btn btn-soft"
+                onClick={handleExport}
+                disabled={exportLoading}
+              >
+                {exportLoading ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
+                {exportLoading ? "Exporting…" : "Export"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Danger zone — account deletion (not shown to admin) */}
+      {!isAdmin && (
+        <div className="card stagger-4 card-spaced-top" style={{ borderColor: "var(--color-danger, #ef4444)" }}>
+          <div className="card-header">
+            <span className="card-title" style={{ color: "var(--color-danger, #ef4444)" }}>
+              <AlertTriangle size={16} />
+              Danger Zone
+            </span>
+          </div>
+          <div className="card-body">
+            {!showDeleteZone ? (
+              <div className="inline-actions-wrap inline-actions-nowrap">
+                <div className="security-status-media">
+                  <Trash2 size={20} className="icon-muted" />
+                  <div>
+                    <div className="status-title">Delete account</div>
+                    <div className="status-caption">
+                      Permanently delete your account and all associated data after a 7-day grace period.
+                      Forwarding stops immediately.
+                    </div>
+                  </div>
+                </div>
+                <div className="inline-actions shrink-0">
+                  <button
+                    type="button"
+                    className="btn btn-danger-soft"
+                    onClick={() => setShowDeleteZone(true)}
+                  >
+                    <Trash2 size={14} /> Delete Account
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleDeleteAccount} className="security-danger-form">
+                <div className="muted-copy">
+                  Your account and all data will be permanently deleted after 7 days. Email forwarding
+                  stops immediately. This cannot be undone.
+                </div>
+                <div className="field field-tight">
+                  <label className="field-label" htmlFor="delete-confirm">
+                    Type <strong>DELETE</strong> to confirm
+                  </label>
+                  <input
+                    id="delete-confirm"
+                    className="input"
+                    type="text"
+                    value={deleteConfirmText}
+                    onChange={e => setDeleteConfirmText(e.target.value)}
+                    placeholder="DELETE"
+                    disabled={deleteLoading}
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="field field-tight">
+                  <label className="field-label" htmlFor="delete-password">Your passphrase</label>
+                  <input
+                    id="delete-password"
+                    className="input"
+                    type="password"
+                    value={deletePassword}
+                    onChange={e => setDeletePassword(e.target.value)}
+                    placeholder="Current passphrase"
+                    disabled={deleteLoading}
+                    autoComplete="current-password"
+                  />
+                </div>
+                <div className="inline-actions">
+                  <button
+                    type="button"
+                    className="btn btn-soft"
+                    onClick={() => { setShowDeleteZone(false); setDeleteConfirmText(""); setDeletePassword(""); }}
+                    disabled={deleteLoading}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-danger-soft"
+                    disabled={deleteLoading || deleteConfirmText !== "DELETE" || !deletePassword}
+                  >
+                    {deleteLoading ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
+                    {deleteLoading ? "Deleting…" : "Confirm Delete"}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {isAdmin && (
+        <div className="card stagger-4 card-spaced-top">
+          <div className="card-header">
+            <span className="card-title">
+              <AlertTriangle size={16} className="icon-muted" />
+              Danger Zone
+            </span>
+          </div>
+          <div className="card-body">
+            <p className="muted-copy">
+              The admin account cannot be self-deleted. Use the Admin panel to manage other user accounts.
+            </p>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

@@ -65,10 +65,13 @@ export function sesInboundRoutes() {
       return c.json({ error: "Missing required fields" }, 400);
     }
 
-    // SES receipt verdicts — used as the anti-spoof gate for reverse-alias replies.
+    // SES receipt verdicts — spf/dmarc gate reverse-alias replies (anti-spoof);
+    // spam/virus gate inbound forwards (sender-reputation protection).
     const auth = {
       spf: msg.receipt?.spfVerdict?.status as string | undefined,
       dmarc: msg.receipt?.dmarcVerdict?.status as string | undefined,
+      spam: msg.receipt?.spamVerdict?.status as string | undefined,
+      virus: msg.receipt?.virusVerdict?.status as string | undefined,
     };
 
     // Fetch full raw MIME from S3 (supports emails of any size, no SNS 256KB truncation risk)

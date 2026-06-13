@@ -1,10 +1,9 @@
 name: Docker
 
 # Builds the self-host container.
-# - PRs: build only (no push), uses GHA cache to keep iteration fast.
-# - Push to dev: validate linux/amd64 only (no push).
+# - PRs and pushes to dev: validate linux/amd64 only (no push), GHA cache keeps iteration fast.
 # - Push to main: build + push multi-arch :latest, :main, :sha-<short> to GHCR + Docker Hub.
-# - Tag v*.*.*: build + push multi-arch :vX.Y.Z, :vX.Y, :vX, :latest to GHCR + Docker Hub.
+# - Tag v*.*.*: retag existing GHCR :sha-<short>; copy release tags to Docker Hub.
 
 on:
   push:
@@ -17,7 +16,6 @@ on:
       - ".github/workflows/docker.yml"
       - "!**.md"
   pull_request:
-    branches: ['**']
     paths:
       - "docker/**"
       - "worker/**"
@@ -42,61 +40,13 @@ env:
   DOCKERHUB_IMAGE: docker.io/${{ github.repository_owner }}/hidemyemail
 
 jobs:
-  validate-dev:
-    name: Validate Docker Image (linux/amd64)
-    if: github.ref == 'refs/heads/dev'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v4
-        with:
-          registry: docker.io
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=sha,format=short,prefix=sha-
-          labels: |
-            org.opencontainers.image.title=hidemyemail
-            org.opencontainers.image.description=Self-host container for hidemyemail.dev (Worker via Miniflare)
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.licenses=MIT
-
-      - name: Build for validation
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: docker/Dockerfile
-          platforms: linux/amd64
-          labels: ${{ steps.meta.outputs.labels }}
-          push: false
-          cache-from: type=gha,scope=build-linux/amd64
-          cache-to: type=gha,mode=max,scope=build-linux/amd64
-          provenance: true
-          sbom: true
-
   build:
     name: Build & Push by Digest
-    if: github.ref != 'refs/heads/dev'
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     strategy:
       matrix:
-        include:
-          - os: ubuntu-latest
-            platform: linux/amd64
-          - os: ubuntu-24.04-arm
-            platform: linux/arm64
+        # Validation-only runs (PRs, dev pushes) build linux/amd64 only; main pushes build both.
+        include: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/dev') && fromJSON('[{"os":"ubuntu-latest","platform":"linux/amd64"}]') || fromJSON('[{"os":"ubuntu-latest","platform":"linux/amd64"},{"os":"ubuntu-24.04-arm","platform":"linux/arm64"}]') }}
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -115,7 +65,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/dev'
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
@@ -144,7 +94,7 @@ jobs:
             org.opencontainers.image.licenses=MIT
 
       - name: Build for validation
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/dev'
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -158,7 +108,7 @@ jobs:
           sbom: true
 
       - name: Build and push by digest
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/dev'
         id: build
         uses: docker/build-push-action@v7
         with:
@@ -178,14 +128,14 @@ jobs:
           sbom: false
 
       - name: Export digest
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/dev'
         run: |
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
 
       - name: Upload digest
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/dev'
         uses: actions/upload-artifact@v7
         with:
           name: digests-${{ strategy.job-index }}
@@ -195,7 +145,7 @@ jobs:
 
   merge:
     name: Merge Multi-Arch Manifests
-    if: github.event_name != 'pull_request' && github.ref != 'refs/heads/dev'
+    if: github.event_name != 'pull_request' && github.ref != 'refs/heads/dev' && !startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     needs: build
     environment:
@@ -260,8 +210,9 @@ jobs:
         env:
           META_JSON: ${{ steps.meta-ghcr.outputs.json }}
         run: |
-          docker buildx imagetools create $(jq -cr --arg image '${{ env.GHCR_IMAGE }}' '.tags | map(select(startswith($image + ":")) | "-t " + .) | join(" ")' <<< "$META_JSON") \
-            $(printf '${{ env.GHCR_IMAGE }}@sha256:%s ' *)
+          mapfile -t tags < <(jq -r --arg image '${{ env.GHCR_IMAGE }}' '.tags[] | select(startswith($image + ":")) | "-t", .' <<< "$META_JSON")
+          mapfile -t digests < <(printf '${{ env.GHCR_IMAGE }}@sha256:%s\n' *)
+          docker buildx imagetools create "${tags[@]}" "${digests[@]}"
 
       - name: Create Docker Hub manifest list and push
         if: startsWith(github.ref, 'refs/tags/')
@@ -269,8 +220,9 @@ jobs:
         env:
           META_JSON: ${{ steps.meta-dockerhub.outputs.json }}
         run: |
-          docker buildx imagetools create $(jq -cr --arg image '${{ env.DOCKERHUB_IMAGE }}' '.tags | map(select(startswith($image + ":")) | "-t " + .) | join(" ")' <<< "$META_JSON") \
-            $(printf '${{ env.DOCKERHUB_IMAGE }}@sha256:%s ' *)
+          mapfile -t tags < <(jq -r --arg image '${{ env.DOCKERHUB_IMAGE }}' '.tags[] | select(startswith($image + ":")) | "-t", .' <<< "$META_JSON")
+          mapfile -t digests < <(printf '${{ env.DOCKERHUB_IMAGE }}@sha256:%s\n' *)
+          docker buildx imagetools create "${tags[@]}" "${digests[@]}"
 
       - name: Inspect GHCR image
         run: |
@@ -278,5 +230,89 @@ jobs:
 
       - name: Inspect Docker Hub image
         if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          docker buildx imagetools inspect ${{ env.DOCKERHUB_IMAGE }}:${{ steps.meta-dockerhub.outputs.version }}
+
+  release-retag:
+    name: Retag Release Images
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://app.hidemyemail.dev
+    steps:
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install crane
+        uses: imjasonh/setup-crane@v0.5
+
+      - name: Extract GHCR release metadata
+        id: meta-ghcr
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.GHCR_IMAGE }}
+          flavor: latest=false
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
+
+      - name: Extract Docker Hub release metadata
+        id: meta-dockerhub
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.DOCKERHUB_IMAGE }}
+          flavor: latest=auto
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
+
+      - name: Retag existing GHCR image
+        env:
+          META_JSON: ${{ steps.meta-ghcr.outputs.json }}
+        run: |
+          source_ref="${{ env.GHCR_IMAGE }}:sha-${GITHUB_SHA::7}"
+          if ! crane digest "$source_ref" >/dev/null; then
+            source_ref="${{ env.GHCR_IMAGE }}:main"
+          fi
+          echo "Using source image: $source_ref"
+          mapfile -t tags < <(jq -r --arg image '${{ env.GHCR_IMAGE }}' '.tags[] | select(startswith($image + ":")) | "-t", .' <<< "$META_JSON")
+          docker buildx imagetools create "${tags[@]}" "$source_ref"
+
+      - name: Copy release tags to Docker Hub
+        env:
+          META_JSON: ${{ steps.meta-dockerhub.outputs.json }}
+        run: |
+          source_ref="${{ env.GHCR_IMAGE }}:sha-${GITHUB_SHA::7}"
+          if ! crane digest "$source_ref" >/dev/null; then
+            source_ref="${{ env.GHCR_IMAGE }}:main"
+          fi
+          echo "Using source image: $source_ref"
+          mapfile -t tags < <(jq -r --arg image '${{ env.DOCKERHUB_IMAGE }}' '.tags[] | select(startswith($image + ":"))' <<< "$META_JSON")
+          for tag in "${tags[@]}"; do
+            crane copy "$source_ref" "$tag"
+          done
+
+      - name: Inspect GHCR image
+        run: |
+          docker buildx imagetools inspect ${{ env.GHCR_IMAGE }}:${{ steps.meta-ghcr.outputs.version }}
+
+      - name: Inspect Docker Hub image
         run: |
           docker buildx imagetools inspect ${{ env.DOCKERHUB_IMAGE }}:${{ steps.meta-dockerhub.outputs.version }}

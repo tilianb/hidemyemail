@@ -37,9 +37,10 @@ test("rejects tampered notification signature", async () => {
   expect(res.status).toBe(401);
 });
 
-test("records a bounce notification as error event", async () => {
+test("bounce notification for unknown address returns 200 and logs feedback", async () => {
   const app = createApp();
-  const message = JSON.stringify({ notificationType: "Bounce", bounce: { bouncedRecipients: [{ emailAddress: "x@y.com" }] } });
+  // Bounce for an address not in destinations — should succeed silently (no destination to suppress)
+  const message = JSON.stringify({ notificationType: "Bounce", bounce: { bounceType: "Permanent", bouncedRecipients: [{ emailAddress: "x@y.com" }] } });
   const signed = await makeSignedSnsBody({ topicArn: ARN, message });
   const res = await app.request("/api/ses/notification", {
     method: "POST", headers: { "Content-Type": "text/plain" },

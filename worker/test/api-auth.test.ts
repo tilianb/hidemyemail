@@ -27,6 +27,75 @@ test("login sets cookie; guarded route requires it", async () => {
   expect(authed.status).toBe(200);
 });
 
+test("native bearer flow: login returns token, guarded route accepts it", async () => {
+  const app = createApp();
+  await (env.DB as D1Database).prepare("DELETE FROM rate_limits").run();
+
+  // Without X-Auth-Mode the token is never echoed (web app keeps cookie-only).
+  const webLogin = await app.request("/api/login", { method: "POST", body: JSON.stringify({ password: "hunter2" }), headers: { "Content-Type": "application/json" } }, testEnv);
+  expect(webLogin.status).toBe(200);
+  expect((await webLogin.json() as any).token).toBeUndefined();
+
+  // Native opt-in returns the session token in the body.
+  const login = await app.request("/api/login", { method: "POST", body: JSON.stringify({ password: "hunter2" }), headers: { "Content-Type": "application/json", "X-Auth-Mode": "token" } }, testEnv);
+  expect(login.status).toBe(200);
+  const token = (await login.json() as any).token as string;
+  expect(typeof token).toBe("string");
+  expect(token.split(".")[0]).toBe("v2");
+
+  // Guarded route accepts the bearer token without any cookie.
+  const authed = await app.request("/api/stats", { headers: { Authorization: `Bearer ${token}` } }, testEnv);
+  expect(authed.status).toBe(200);
+
+  // A bogus bearer token is rejected.
+  const bad = await app.request("/api/stats", { headers: { Authorization: "Bearer not.a.real.token" } }, testEnv);
+  expect(bad.status).toBe(401);
+});
+
+test("native bearer flow: fresh_auth token unlocks fresh-auth-gated routes", async () => {
+  const app = createApp();
+  await (env.DB as D1Database).prepare("DELETE FROM rate_limits").run();
+
+  // Web mode must not leak the fresh-auth token into the body (cookie only).
+  const webLogin = await app.request("/api/login", { method: "POST", body: JSON.stringify({ password: "hunter2" }), headers: { "Content-Type": "application/json" } }, testEnv);
+  expect((await webLogin.json() as any).fresh_auth).toBeUndefined();
+
+  const login = await app.request("/api/login", { method: "POST", body: JSON.stringify({ password: "hunter2" }), headers: { "Content-Type": "application/json", "X-Auth-Mode": "token" } }, testEnv);
+  const body = await login.json() as any;
+  const token = body.token as string;
+  const freshAuth = body.fresh_auth as string;
+  expect(typeof freshAuth).toBe("string");
+
+  // Bearer token alone must not reach a fresh-auth-gated route…
+  const stale = await app.request("/api/account/export", { headers: { Authorization: `Bearer ${token}` } }, testEnv);
+  expect(stale.status).toBe(401);
+  expect(((await stale.json()) as any).error).toBe("Fresh authentication required");
+
+  // …but the X-Fresh-Auth header from the login response does.
+  const fresh = await app.request("/api/account/export", { headers: { Authorization: `Bearer ${token}`, "X-Fresh-Auth": freshAuth } }, testEnv);
+  expect(fresh.status).toBe(200);
+
+  // A forged header is rejected.
+  const forged = await app.request("/api/account/export", { headers: { Authorization: `Bearer ${token}`, "X-Fresh-Auth": "not.a.real.token" } }, testEnv);
+  expect(forged.status).toBe(401);
+});
+
+test("token mode is refused when a browser Origin is present (XSS guard)", async () => {
+  const app = createApp();
+  await (env.DB as D1Database).prepare("DELETE FROM rate_limits").run();
+
+  // A browser always pins the Origin header on POST; page JS can't strip it.
+  // Even with X-Auth-Mode: token, the token must not be echoed in that case,
+  // so an XSS can't escalate a cookie session into an exfiltratable token.
+  const res = await app.request("/api/login", {
+    method: "POST",
+    body: JSON.stringify({ password: "hunter2" }),
+    headers: { "Content-Type": "application/json", "X-Auth-Mode": "token", Origin: "https://app.hidemyemail.dev" },
+  }, testEnv);
+  expect(res.status).toBe(200);
+  expect((await res.json() as any).token).toBeUndefined();
+});
+
 test("register and login with new passphrase", async () => {
   const app = createApp();
   // Clear rate limits just in case
@@ -62,4 +131,45 @@ test("seeded per-alias rate limit matches fallback default", async () => {
   ).first<{ value: string }>();
 
   expect(row?.value).toBe(SETTING_DEFAULTS.rate_limit_per_alias);
+});
+
+test("native passkey challenge echoes the challenge token; web does not", async () => {
+  const app = createApp();
+  const appEnv = { ...testEnv, APP_ORIGIN: "https://app.hidemyemail.dev" };
+
+  // Native: X-Auth-Mode token + no Origin → token in body so the cookieless
+  // client can return it on verify.
+  const native = await app.request("/api/passkey/challenge", {
+    method: "POST",
+    headers: { "X-Auth-Mode": "token" },
+  }, appEnv);
+  expect(native.status).toBe(200);
+  const nbody = await native.json() as any;
+  expect(typeof nbody.challenge).toBe("string");
+  expect(typeof nbody.passkey_token).toBe("string");
+
+  // Web: Origin present → no token leaked into the body.
+  const web = await app.request("/api/passkey/challenge", {
+    method: "POST",
+    headers: { Origin: "https://app.hidemyemail.dev" },
+  }, appEnv);
+  expect(web.status).toBe(200);
+  expect((await web.json() as any).passkey_token).toBeUndefined();
+});
+
+test("apple-app-site-association: 404 until APPLE_APP_ID is configured", async () => {
+  const app = createApp();
+
+  const missing = await app.request("/.well-known/apple-app-site-association", {}, testEnv);
+  expect(missing.status).toBe(404);
+
+  const configured = await app.request(
+    "/.well-known/apple-app-site-association",
+    {},
+    { ...testEnv, APPLE_APP_ID: "ABCDE12345.dev.hidemyemail.app" }
+  );
+  expect(configured.status).toBe(200);
+  expect(await configured.json()).toEqual({
+    webcredentials: { apps: ["ABCDE12345.dev.hidemyemail.app"] },
+  });
 });
