@@ -138,7 +138,9 @@ test("valid Received → S3 fetched, inbound forwarded, SES sends, 200", async (
 });
 
 test("reply to reverse alias routes to handleReply, not a re-wrapped inbound", async () => {
-  await q.autoCreateAlias(env.DB as D1Database, 1, "shop", "shop@test.hidemyemail.dev");
+  const alias = await q.autoCreateAlias(env.DB as D1Database, 1, "shop", "shop@test.hidemyemail.dev");
+  // First-contact rule: model the prior inbound from alice@store.com this is a reply to.
+  await q.insertEvent(env.DB as D1Database, { alias_id: alias!.id, type: "forward", external_sender: "alice@store.com", ts: Date.now() });
   const replyRaw = [
     "From: Me <real@me.com>",
     "To: shop+alice=store.com@test.hidemyemail.dev",

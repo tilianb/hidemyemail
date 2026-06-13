@@ -23,6 +23,8 @@ These are deployment-specific but not secrets. Store them in Cloudflare dashboar
 | `SES_REGION` | yes for mail | AWS SES/S3/SNS region, for example `ap-southeast-2`. |
 | `S3_INBOUND_BUCKET` | yes for inbound | Bucket where SES stores raw MIME. |
 | `SNS_INBOUND_TOPIC_ARN` | yes for inbound SNS | Exact SNS topic for SES receipt notifications. |
+| `APP_ORIGIN` | for native passkeys | Dashboard web origin, e.g. `https://app.hidemyemail.dev`. WebAuthn relying-party origin for native clients, which send no `Origin` header. Defaults to `https://app.hidemyemail.dev` if unset. |
+| `APPLE_APP_ID` | for iOS passkeys | Apple App ID `<TeamID>.<bundleId>` (e.g. `ABCDE12345.dev.hidemyemail.app`) published in `/.well-known/apple-app-site-association`. The AASA route 404s until this is set. |
 
 `worker/wrangler.jsonc` sets `keep_vars: true` so dashboard-managed variables are preserved even when Cloudflare Git deploys run plain `wrangler deploy`.
 
@@ -64,8 +66,37 @@ The app stores feature settings in D1. Important defaults:
 | `cors_allowed_domains` | `http://localhost:5173` | Add deployed dashboard origins if needed. |
 | `main_global_domain` | empty | Set after verifying a global domain. |
 | `catch_all_auto_create` | enabled | Allows first inbound mail to create aliases. |
+| `spam_verdict_action` | `flag` | What to do when SES marks inbound mail as spam: `forward`, `flag` (adds `X-Spam-Flag: YES`), or `drop`. Forwarded spam is DKIM-signed by your domain, so forwarding it untouched burns your sender reputation. |
+| `virus_verdict_action` | `drop` | Same options for SES malware detection. |
+| `unsubscribe_header_mode` | `bulk_only` | When to add our one-click List-Unsubscribe (disables the alias) to forwards: `always`, `bulk_only` (only when the original already carried List-Unsubscribe or `Precedence: bulk`), or `never`. Adding it to personal mail makes forwards look like bulk mail to spam filters. |
+| `soft_bounce_threshold` | `3` | Soft bounces within 24h before a destination is paused (0 disables). |
 
 Most settings are editable from the Admin dashboard.
+
+## Per-subdomain policies
+
+Each subdomain you own can override the global defaults, so a subdomain works
+as a self-contained mail category. Settings resolve most-specific first:
+**alias → subdomain → global**. On the Domains page:
+
+- **Catch-all** — `Inherit` / `On` / `Off`. Overrides `catch_all_auto_create`
+  for that subdomain, e.g. let `shop.example.com` auto-create any address while
+  your primary domain only accepts explicit aliases.
+- **Inline actions** — `Inherit` / `On` / `Off`. Overrides your per-user inline
+  toolbar preference for mail received on that subdomain.
+- **Default destination** — where mail without a per-alias destination is sent.
+
+## Sender rules (block / allow)
+
+The Blocks page manages sender rules scoped **globally**, to a **subdomain**, or
+to a single **alias**:
+
+- **Block** rules drop matching senders before forwarding.
+- **Allow** rules enable allowlist mode for their scope: once any allow rule
+  exists, only senders matching one are forwarded and everything else is
+  dropped. A matching block rule always wins over an allow rule.
+
+Patterns support wildcards (`*@spam.com`, `evil@badactor.org`).
 
 ## Cloudflare automatic deploys
 

@@ -9,7 +9,7 @@
   "assets": {
     "directory": "../dashboard/dist",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": ["/api/*", "/.well-known/apple-app-site-association"]
   },
   "d1_databases": [
     { 
@@ -20,6 +20,9 @@
       "migrations_dir": "migrations" 
     }
   ],
+  "triggers": {
+    "crons": ["0 3 * * *"]
+  },
   "vars": {
     "ENVIRONMENT": "production"
   },
@@ -32,7 +35,7 @@
       "assets": {
         "directory": "../dashboard/dist",
         "not_found_handling": "single-page-application",
-        "run_worker_first": ["/api/*"]
+        "run_worker_first": ["/api/*", "/.well-known/apple-app-site-association"]
       },
       "d1_databases": [
         {

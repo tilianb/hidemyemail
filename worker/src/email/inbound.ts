@@ -1,19 +1,19 @@
-import type { Env } from "../types";
+import type { Env, ReplyAuth } from "../types";
 import * as q from "../db/queries";
 import PostalMime from "postal-mime";
 import { createMimeMessage, Mailbox } from "mimetext";
-import { isBlocked } from "../lib/blocks";
+import { evaluateSenderRules } from "../lib/blocks";
 import { streamToBytes, toBase64 } from "../lib/bytes";
 import { parseMime, setHeader, removeHeaders, getHeader, serializeMime } from "../lib/mime";
 import { reverseAddress } from "../lib/reverse";
 import { sendRaw, SesTransientError } from "../lib/ses";
 import { getNumericSetting, getBoolSetting, getEnvWithOverride, getSetting, getMainGlobalDomain } from "../lib/settings";
-import { decryptDestination } from "../lib/crypto";
+import { decryptDestination, hashDestination } from "../lib/crypto";
 import { extractDisplayName, sanitizeDisplay as sanitize, buildForwardedFromDisplay } from "../lib/from-format";
 
 type SesSend = typeof sendRaw;
 
-export async function handleInbound(message: ForwardableEmailMessage, env: Env): Promise<void> {
+export async function handleInbound(message: ForwardableEmailMessage, env: Env, auth?: ReplyAuth): Promise<void> {
   const db = env.DB;
   const ses: SesSend = (env as any).__sesSend ?? sendRaw;
   const now = Date.now();
@@ -22,8 +22,11 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   const domain = await q.getDomain(db, domainName) as import("../types").DomainRow & { user_id: number };
   if (!domain || domain.active === 0) return;
 
-  // Check catch-all auto-create setting
-  const autoCreateEnabled = await getBoolSetting(db, "catch_all_auto_create");
+  // Check catch-all auto-create setting. A per-subdomain override (catch_all
+  // 0/1) wins; NULL falls back to the global setting.
+  const autoCreateEnabled = domain.catch_all != null
+    ? domain.catch_all === 1
+    : await getBoolSetting(db, "catch_all_auto_create");
   let alias = await q.getAlias(db, message.to.toLowerCase());
   
   if (!alias && autoCreateEnabled) {
@@ -75,14 +78,37 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
     }
   }
 
+  // SES receipt verdict gate. Forwarded mail is re-signed with OUR domain's
+  // DKIM, so forwarding spam/malware burns the alias domain's sender
+  // reputation at Gmail/Outlook. Admin picks the action per verdict; only a
+  // hard FAIL acts (GRAY/PROCESSING_FAILED/DISABLED pass through untouched).
+  let flagSpam = false;
+  let flagVirus = false;
+  if (auth?.virus === "FAIL") {
+    const action = await getSetting(db, "virus_verdict_action");
+    if (action !== "forward" && action !== "flag") {
+      await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "virus", ts: now });
+      return;
+    }
+    flagVirus = action === "flag";
+  }
+  if (auth?.spam === "FAIL") {
+    const action = await getSetting(db, "spam_verdict_action");
+    if (action === "drop") {
+      await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "spam", ts: now });
+      return;
+    }
+    flagSpam = action !== "forward";
+  }
+
   const userRow = await db.prepare("SELECT forwarding FROM users WHERE id = ?").bind(alias.user_id).first<{ forwarding: number }>();
   if (!userRow || userRow.forwarding === 0) {
     await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "user_forwarding_disabled", ts: now });
     return;
   }
 
-  const rules = await q.listBlocks(db, alias.id, alias.user_id);
-  if (isBlocked(rules, message.from)) {
+  const rules = await q.listBlocks(db, alias.id, alias.domain_id, alias.user_id);
+  if (evaluateSenderRules(rules, message.from) === "block") {
     await q.insertEvent(db, { alias_id: alias.id, type: "block", external_sender: message.from, ts: now });
     await q.incCounter(db, alias.id, "blocked_count");
     return;
@@ -91,8 +117,8 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   // Read rate limits from DB settings (falls back to hardcoded defaults)
   const rateLimitAlias = await getNumericSetting(db, "rate_limit_per_alias");
   const rateLimitGlobal = await getNumericSetting(db, "rate_limit_global");
-  const aliasCount = await q.countEventsSince(db, alias.id, now - 3600_000);
-  const globalCount = await q.countEventsSince(db, null, now - 3600_000);
+  const aliasCount = await q.countEventsByTypeSince(db, alias.id, now - 3600_000, ["forward", "reply"]);
+  const globalCount = await q.countEventsByTypeSince(db, null, now - 3600_000, ["forward", "reply"]);
   if ((rateLimitAlias >= 0 && aliasCount >= rateLimitAlias) || (rateLimitGlobal >= 0 && globalCount >= rateLimitGlobal)) {
     await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "rate", ts: now });
     return;
@@ -112,12 +138,25 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   let dest = await decryptDestination(encDest, env.DESTINATION_ENCRYPTION_KEY);
   
   if (dest === "global") {
-    const globalDestRow = await db.prepare("SELECT email FROM destinations WHERE user_id = ? AND is_default = 1").bind(domain.user_id).first<{email: string}>();
+    const globalDestRow = await db.prepare("SELECT * FROM destinations WHERE user_id = ? AND is_default = 1").bind(domain.user_id).first<import("../types").DestinationRow>();
     if (!globalDestRow) {
       await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "no_destination", ts: now });
       return;
     }
+    // Suppression check for global (default) destination
+    if (globalDestRow.suppressed_at) {
+      await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "suppressed", ts: now });
+      return;
+    }
     dest = await decryptDestination(globalDestRow.email, env.DESTINATION_ENCRYPTION_KEY);
+  } else {
+    // Suppression check for named destination: look up by encrypted email hash
+    const destHash = await hashDestination(dest.toLowerCase(), env.DESTINATION_ENCRYPTION_KEY);
+    const destRow = await db.prepare("SELECT suppressed_at FROM destinations WHERE email_hash = ? AND user_id = ?").bind(destHash, alias.user_id).first<{ suppressed_at: number | null }>();
+    if (destRow?.suppressed_at) {
+      await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "suppressed", ts: now });
+      return;
+    }
   }
 
   const reverseAddr = reverseAddress(localPart, message.from, domainName);
@@ -128,10 +167,12 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   if (alias.source !== "auto_over_quota") {
     const prefRow = await db.prepare("SELECT inline_actions_pref, inline_actions_position FROM users WHERE id = ?")
       .bind(alias.user_id).first<{ inline_actions_pref: string | null; inline_actions_position: string | null }>();
-    const userPref = prefRow?.inline_actions_pref;
-    if (userPref === "on") {
+    // Resolution: subdomain pref > user pref > global default. A subdomain is a
+    // mail category, so its setting is more specific than the user-wide one.
+    const effectivePref = domain.inline_actions_pref ?? prefRow?.inline_actions_pref;
+    if (effectivePref === "on") {
       inlineActionsEnabled = true;
-    } else if (userPref === "off") {
+    } else if (effectivePref === "off") {
       inlineActionsEnabled = false;
     } else {
       inlineActionsEnabled = await getBoolSetting(db, "inline_actions_default_enabled");
@@ -154,17 +195,40 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
 
     mime = setHeader(mime, "From", fromHeader);
     mime = setHeader(mime, "Reply-To", reverseAddr);
-    mime = removeHeaders(mime, ["DKIM-Signature", "ARC-Seal", "ARC-Message-Signature", "ARC-Authentication-Results", "Return-Path", "Sender"]);
-    mime = setHeader(mime, "X-Reinjected", "1");
-    mime = setHeader(mime, "X-Forwarded-For", message.from);
-    mime = setHeader(mime, "X-Forwarded-To", message.to);
-    mime = setHeader(mime, "X-Original-From", origFrom);
+    // Keep the receiving hop's auth results readable for debugging, but under
+    // our own name — recipients must never trust a foreign Authentication-Results.
+    const origAuthResults = getHeader(mime, "Authentication-Results");
+    mime = removeHeaders(mime, ["DKIM-Signature", "ARC-Seal", "ARC-Message-Signature", "ARC-Authentication-Results", "Authentication-Results", "Return-Path", "Sender"]);
+    if (origAuthResults) mime = setHeader(mime, "X-HideMyEmail-Authentication-Results", origAuthResults);
+    if (flagSpam) mime = setHeader(mime, "X-Spam-Flag", "YES");
+    if (flagVirus) mime = setHeader(mime, "X-HideMyEmail-Virus", "detected");
+    // Internal-only forwarding metadata. Prefixed with X-HideMyEmail- so
+    // recipient spam filters don't recognise these as the generic forwarder
+    // / open-relay headers (X-Reinjected, X-Forwarded-For, X-Original-From)
+    // that classifiers learn to penalise. X-Reinjected is dropped entirely:
+    // nothing in the router uses it for loop detection.
+    mime = setHeader(mime, "X-HideMyEmail-Forwarded-For", message.from);
+    mime = setHeader(mime, "X-HideMyEmail-Forwarded-To", message.to);
+    mime = setHeader(mime, "X-HideMyEmail-Original-From", origFrom);
 
-    const { signAction } = await import("./action");
-    const disableSig = await signAction("disable", String(alias.id), env);
-    const actionEmail = `action+disable=${alias.id}_${disableSig}@${domainName}`;
-    mime = setHeader(mime, "List-Unsubscribe", `<mailto:${actionEmail}>`);
-    mime = setHeader(mime, "List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
+    // List-Unsubscribe on person-to-person mail makes it look like bulk mail
+    // to spam filters, so "bulk_only" (default) only replaces an unsubscribe
+    // surface the original message already had. Admin can pick always/never.
+    if (await shouldAddUnsubscribe(db, getHeader(mime, "List-Unsubscribe"), getHeader(mime, "Precedence"))) {
+      const { signAction } = await import("./action");
+      const disableSig = await signAction("disable", String(alias.id), env);
+      const actionEmail = `action+disable=${alias.id}_${disableSig}@${domainName}`;
+      const mainGlobalDomain = await getMainGlobalDomain(db, env);
+      const unsubHttps = mainGlobalDomain
+        ? `https://${mainGlobalDomain}/api/unsubscribe?a=${alias.id}&s=${disableSig}`
+        : "";
+      // RFC 8058 one-click: HTTPS form first so MUAs that support one-click
+      // (Gmail, Outlook, Yahoo) hit a real URL instead of the mailto fallback,
+      // which spam filters distrust when it carries an opaque local-part.
+      mime = setHeader(mime, "List-Unsubscribe",
+        unsubHttps ? `<${unsubHttps}>, <mailto:${actionEmail}>` : `<mailto:${actionEmail}>`);
+      mime = setHeader(mime, "List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
+    }
 
     const rawBase64 = toBase64(serializeMime(mime));
     try {
@@ -189,16 +253,36 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   const parsedEmail = await PostalMime.parse(rawBytes);
 
   const msg = createMimeMessage();
+  const findHeader = (name: string) =>
+    parsedEmail.headers.find(h => h.key.toLowerCase() === name)?.value;
+  const origListUnsubscribe = findHeader("list-unsubscribe");
+  const origPrecedence = findHeader("precedence");
+  // See parallel block in the no-toolbar path for rationale.
+  const addOwnUnsubscribe = await shouldAddUnsubscribe(db, origListUnsubscribe, origPrecedence);
   const skipHeaders = [
     "return-path", "dkim-signature", "arc-seal", "arc-message-signature",
-    "arc-authentication-results", "sender", "content-type", "content-transfer-encoding",
-    "mime-version", "from", "reply-to", "subject", "to", "cc", "bcc", "message-id", "date"
+    "arc-authentication-results", "authentication-results", "sender", "content-type",
+    "content-transfer-encoding", "mime-version", "from", "reply-to", "subject",
+    "to", "cc", "bcc", "message-id", "date",
   ];
+  if (addOwnUnsubscribe) {
+    // Ours replaces the original; copying both through would emit duplicates.
+    skipHeaders.push("list-unsubscribe", "list-unsubscribe-post");
+  }
   for (const h of parsedEmail.headers) {
-    if (!skipHeaders.includes(h.key.toLowerCase())) {
+    const key = h.key.toLowerCase();
+    if (key === "authentication-results") {
+      // Same rationale as the no-toolbar path: keep for debugging, never
+      // re-emit a foreign Authentication-Results under its trusted name.
+      msg.setHeader("X-HideMyEmail-Authentication-Results", h.value);
+      continue;
+    }
+    if (!skipHeaders.includes(key)) {
       msg.setHeader(h.key, h.value);
     }
   }
+  if (flagSpam) msg.setHeader("X-Spam-Flag", "YES");
+  if (flagVirus) msg.setHeader("X-HideMyEmail-Virus", "detected");
 
   if (parsedEmail.to?.length) {
     const list = parsedEmail.to.map(t => t.name ? `${t.name} <${t.address}>` : t.address).filter((x): x is string => !!x);
@@ -280,16 +364,23 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env):
   
   msg.setSender({ name: sanitize(display), addr: alias.full_address });
   msg.setHeader("Reply-To", new Mailbox({ addr: reverseAddr }));
-  msg.setHeader("X-Reinjected", "1");
-  msg.setHeader("X-Forwarded-For", message.from);
-  msg.setHeader("X-Forwarded-To", message.to);
-  msg.setHeader("X-Original-From", origFrom);
+  // See parallel block above for rationale on these header names.
+  msg.setHeader("X-HideMyEmail-Forwarded-For", message.from);
+  msg.setHeader("X-HideMyEmail-Forwarded-To", message.to);
+  msg.setHeader("X-HideMyEmail-Original-From", origFrom);
 
-  const { signAction } = await import("./action");
-  const disableSig = await signAction("disable", String(alias.id), env);
-  const actionEmail = `action+disable=${alias.id}_${disableSig}@${domainName}`;
-  msg.setHeader("List-Unsubscribe", `<mailto:${actionEmail}>`);
-  msg.setHeader("List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
+  if (addOwnUnsubscribe) {
+    const { signAction } = await import("./action");
+    const disableSig = await signAction("disable", String(alias.id), env);
+    const actionEmail = `action+disable=${alias.id}_${disableSig}@${domainName}`;
+    const mainGlobalDomainForUnsub = await getMainGlobalDomain(db, env);
+    const unsubHttpsUrl = mainGlobalDomainForUnsub
+      ? `https://${mainGlobalDomainForUnsub}/api/unsubscribe?a=${alias.id}&s=${disableSig}`
+      : "";
+    msg.setHeader("List-Unsubscribe",
+      unsubHttpsUrl ? `<${unsubHttpsUrl}>, <mailto:${actionEmail}>` : `<mailto:${actionEmail}>`);
+    msg.setHeader("List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
+  }
 
   if (!finalText && !finalHtml) {
     finalText = " ";
@@ -363,4 +454,25 @@ async function sendSystemNotification(db: D1Database, env: Env, to: string, subj
 function splitAddress(addr: string): [string, string] {
   const at = addr.lastIndexOf("@");
   return [addr.slice(0, at).toLowerCase(), addr.slice(at + 1).toLowerCase()];
+}
+
+/**
+ * unsubscribe_header_mode decides whether a forward gets our List-Unsubscribe
+ * (which one-click-disables the alias):
+ *  - "always":    every forward (pre-v1 behavior).
+ *  - "bulk_only": only when the original already looked like bulk mail —
+ *                 it carried List-Unsubscribe or Precedence: bulk/list.
+ *                 Person-to-person forwards stay free of bulk-mail markers.
+ *  - "never":     never; the original List-Unsubscribe (if any) is kept.
+ */
+async function shouldAddUnsubscribe(
+  db: D1Database,
+  origListUnsubscribe: string | undefined,
+  origPrecedence: string | undefined,
+): Promise<boolean> {
+  const mode = await getSetting(db, "unsubscribe_header_mode");
+  if (mode === "always") return true;
+  if (mode === "never") return false;
+  const precedence = (origPrecedence ?? "").trim().toLowerCase();
+  return !!origListUnsubscribe || precedence === "bulk" || precedence === "list";
 }

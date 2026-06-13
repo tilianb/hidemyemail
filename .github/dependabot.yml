@@ -1,13 +1,14 @@
 version: 2
 updates:
   - package-ecosystem: "npm"
-    directory: "/worker"
+    directories:
+      - "/worker"
+      - "/dashboard"
     schedule:
       interval: "weekly"
     target-branch: "dev"
-
-  - package-ecosystem: "npm"
-    directory: "/dashboard"
-    schedule:
-      interval: "weekly"
-    target-branch: "dev"
+    open-pull-requests-limit: 1
+    groups:
+      npm-dependencies:
+        patterns:
+          - "*"

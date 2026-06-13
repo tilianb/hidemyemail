@@ -3,7 +3,7 @@ import * as q from "../db/queries";
 import { streamToBytes, toBase64 } from "../lib/bytes";
 import { parseMime, setHeader, removeHeaders, getHeader, serializeMime } from "../lib/mime";
 import { sendRaw, SesTransientError } from "../lib/ses";
-import { getEnvWithOverride } from "../lib/settings";
+import { getEnvWithOverride, getNumericSetting } from "../lib/settings";
 
 type SesSend = typeof sendRaw;
 
@@ -77,7 +77,58 @@ export async function handleReply(
     return;
   }
 
-  mime = removeHeaders(mime, ["From", "Sender", "Reply-To", "Return-Path", "DKIM-Signature", "Message-ID", "X-Reinjected", "Received"]);
+  // ABUSE: reverse addresses are guessable, so the authenticated owner gate alone does
+  // not stop the owner from crafting a reverse address for an arbitrary stranger and
+  // using the alias as a cold-outbound spam relay. Require a prior inbound forward from
+  // the same external sender — turning this into a genuine *reply*, not an *originate*.
+  // Fail closed.
+  if (!(await q.hasPriorInbound(db, alias.id, parsed.externalSender))) {
+    await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: parsed.externalSender, detail: "no_prior_contact", ts: now });
+    return;
+  }
+
+  // Reply rate limit: outbound consumes SES quota and sender reputation, so cap
+  // replies only. Busy inbound aliases must not lose outbound reply capability
+  // just because they received many forwards. -1 disables a cap.
+  const replyCap = await getNumericSetting(db, "rate_limit_reply_per_alias");
+  const globalCap = await getNumericSetting(db, "rate_limit_global");
+  const aliasCount = await q.countEventsByTypeSince(db, alias.id, now - 3600_000, ["reply"]);
+  const globalCount = await q.countEventsByTypeSince(db, null, now - 3600_000, ["reply"]);
+  if ((replyCap >= 0 && aliasCount >= replyCap) || (globalCap >= 0 && globalCount >= globalCap)) {
+    await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: parsed.externalSender, detail: "rate", ts: now });
+    return;
+  }
+
+  // ABUSE: even with first-contact + per-alias rate limiting, an authenticated owner
+  // can reply to MANY DISTINCT strangers (each of whom emailed them once) and use the
+  // alias as a cold-outbound spam relay. Cap the number of unique recipients an alias
+  // replies to per 24h. Replying to an already-contacted correspondent never increases
+  // the distinct count — only NEW recipients are gated, so ongoing threads are not
+  // affected. Tripping the cap mutes the alias for 24h (inbound also pauses) to force
+  // owner attention. -1 disables the cap. Fail closed.
+  const distinctCap = await getNumericSetting(db, "reply_distinct_recipient_cap");
+  if (distinctCap >= 0) {
+    const since = now - 24 * 3600_000;
+    const alreadyContacted = await q.hasRepliedTo(db, alias.id, parsed.externalSender, since);
+    if (!alreadyContacted) {
+      const distinct = await q.countDistinctReplyRecipientsSince(db, alias.id, since);
+      if (distinct >= distinctCap) {
+        await q.muteAlias(db, alias.id, now + 24 * 3600_000); // 24h cooldown mute
+        await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: parsed.externalSender, detail: "distinct_recipient_cap", ts: now });
+        return;
+      }
+    }
+  }
+
+  // Strip both legacy (X-Reinjected, X-Forwarded-*, X-Original-From) and the
+  // current X-HideMyEmail-* forwarding metadata so an outbound reply never
+  // re-exposes the sender's destination or the forwarder hop chain.
+  mime = removeHeaders(mime, [
+    "From", "Sender", "Reply-To", "Return-Path", "DKIM-Signature", "Message-ID", "Received",
+    "X-Reinjected", "X-Forwarded-For", "X-Forwarded-To", "X-Original-From",
+    "X-HideMyEmail-Forwarded-For", "X-HideMyEmail-Forwarded-To", "X-HideMyEmail-Original-From",
+    "List-Unsubscribe", "List-Unsubscribe-Post",
+  ]);
   mime = setHeader(mime, "From", alias.full_address);
   mime = setHeader(mime, "To", parsed.externalSender || message.to);
   mime = setHeader(mime, "Message-ID", `<${crypto.randomUUID()}@${domainName}>`);

@@ -1,14 +1,6 @@
 import { createMimeMessage } from "mimetext";
 import { toBase64 } from "./bytes";
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+import { escapeHtml } from "./html";
 
 function buildHtmlWrapper(title: string, heading: string, bodyText: string, actionHtml: string, fallbackUrl?: string, mainGlobalDomain: string = "example.com", footerText?: string): string {
   return `<!DOCTYPE html>

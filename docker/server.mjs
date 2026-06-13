@@ -114,6 +114,23 @@ await mf.ready;
 // hand-rolled tracking table that mirrors wrangler's d1_migrations table.
 await applyMigrations();
 
+// ─── Scheduled purge ────────────────────────────────────────────────────────
+// Invoke the worker's scheduled handler on an interval so the same
+// purgeDeletedAccounts logic runs in the self-hosted container.
+// Default: every 6 hours. Override with PURGE_INTERVAL_MS env var.
+const PURGE_INTERVAL_MS = Number(env.PURGE_INTERVAL_MS ?? 6 * 3600_000);
+
+async function runScheduled() {
+  try {
+    const worker = await mf.getWorker();
+    await worker.scheduled();
+  } catch (err) {
+    console.error("[hidemyemail] scheduled purge failed", err);
+  }
+}
+
+setInterval(runScheduled, PURGE_INTERVAL_MS);
+
 console.log(`[hidemyemail] Listening on http://${HOST}:${PORT}`);
 console.log(`[hidemyemail] D1 persisted to ${D1_PERSIST_DIR}`);
 console.log(`[hidemyemail] Static assets from ${ASSETS_DIR}`);

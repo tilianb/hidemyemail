@@ -1,14 +1,7 @@
 import { useEffect, useState } from "react";
-import { api, type Alias } from "../api";
+import { api, type Alias, type Block, type Domain } from "../api";
 import { useToast, CopyButton, ConfirmDialog, TableSkeleton, EmptyState } from "../ui";
 import { ShieldAlert, Trash2 } from "lucide-react";
-
-interface Block {
-  id: number;
-  alias_id: number | null;
-  pattern: string;
-  created_at: number;
-}
 
 interface DeleteTarget {
   id: number;
@@ -27,27 +20,37 @@ export function Blocks() {
   const { toast } = useToast();
   const [rows, setRows] = useState<Block[]>([]);
   const [aliases, setAliases] = useState<Alias[]>([]);
+  const [subdomains, setSubdomains] = useState<Domain[]>([]);
   const [loading, setLoading] = useState(true);
   const [pattern, setPattern] = useState("");
-  const [scope, setScope] = useState<"global" | "alias">("global");
+  const [kind, setKind] = useState<"block" | "allow">("block");
+  const [scope, setScope] = useState<"global" | "alias" | "subdomain">("global");
   const [aliasId, setAliasId] = useState<number | null>(null);
+  const [domainId, setDomainId] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
   const selectedAliasId = scope === "alias" ? aliasId ?? aliases[0]?.id ?? null : null;
+  const selectedDomainId = scope === "subdomain" ? domainId ?? subdomains[0]?.id ?? null : null;
 
   function aliasLabel(id: number | null): string {
     if (id === null) return "global";
     return aliases.find(a => a.id === id)?.full_address ?? `alias #${id}`;
   }
 
+  function domainLabel(id: number): string {
+    return subdomains.find(d => d.id === id)?.domain ?? `domain #${id}`;
+  }
+
   async function load() {
     setLoading(true);
     try {
-      const [blockRows, aliasRows] = await Promise.all([api.blocks(), api.aliases()]);
+      const [blockRows, aliasRows, domainRows] = await Promise.all([api.blocks(), api.aliases(), api.domains()]);
       setRows(blockRows);
       setAliases(aliasRows);
+      setSubdomains(domainRows.filter(d => d.is_global === 0));
       setAliasId(current => current ?? aliasRows[0]?.id ?? null);
+      setDomainId(current => current ?? domainRows.find(d => d.is_global === 0)?.id ?? null);
     } catch {
       toast("Failed to load blocks", "error");
     } finally {
@@ -63,17 +66,25 @@ export function Blocks() {
     e.preventDefault();
     if (!pattern.trim()) return;
     if (scope === "alias" && selectedAliasId === null) {
-      toast("Create an alias before adding a per-alias block", "error");
+      toast("Create an alias before adding a per-alias rule", "error");
+      return;
+    }
+    if (scope === "subdomain" && selectedDomainId === null) {
+      toast("Create a subdomain before adding a per-subdomain rule", "error");
       return;
     }
     setSubmitting(true);
     try {
-      await api.createBlock(pattern.trim(), selectedAliasId ?? undefined);
+      await api.createBlock(pattern.trim(), {
+        alias_id: scope === "alias" ? selectedAliasId ?? undefined : undefined,
+        domain_id: scope === "subdomain" ? selectedDomainId ?? undefined : undefined,
+        kind,
+      });
       setPattern("");
       await load();
-      toast("Block added", "success");
+      toast(kind === "allow" ? "Allow rule added" : "Block added", "success");
     } catch {
-      toast("Failed to add block", "error");
+      toast("Failed to add rule", "error");
     } finally {
       setSubmitting(false);
     }
@@ -106,14 +117,16 @@ export function Blocks() {
 
       {/* Explainer callout */}
       <div className="callout stagger-1 card-form-gap">
-        <strong>How blocks work —</strong>{" "}
-        <strong>Global blocks</strong> apply across all aliases — any matching sender is silently
-        dropped before forwarding. <strong>Per-alias blocks</strong> scope to a single alias and
-        appear with a labeled badge. Patterns support wildcards:{" "}
+        <strong>How rules work —</strong>{" "}
+        <strong>Block</strong> rules drop matching senders before forwarding.{" "}
+        <strong>Allow</strong> rules turn on allowlist mode for their scope: once any allow rule
+        exists, only senders matching one are forwarded (everything else is dropped). Each rule is
+        scoped <strong>globally</strong>, to a <strong>subdomain</strong> (all its aliases), or to a
+        single <strong>alias</strong>. Patterns support wildcards:{" "}
         <code>*@spam.com</code>{" "}
-        blocks an entire domain;{" "}
+        matches an entire domain;{" "}
         <code>evil@badactor.org</code>{" "}
-        blocks a specific sender.
+        matches a specific sender.
       </div>
 
       {/* Add block form */}
@@ -139,15 +152,32 @@ export function Blocks() {
               />
             </div>
             <div className="field form-field-sm">
+              <label className="field-label" htmlFor="block-kind">Type</label>
+              <select
+                id="block-kind"
+                className="input input-mono"
+                value={kind}
+                onChange={e => setKind(e.target.value === "allow" ? "allow" : "block")}
+                disabled={submitting}
+              >
+                <option value="block">Block</option>
+                <option value="allow">Allow</option>
+              </select>
+            </div>
+            <div className="field form-field-sm">
               <label className="field-label" htmlFor="block-scope">Scope</label>
               <select
                 id="block-scope"
                 className="input input-mono"
                 value={scope}
-                onChange={e => setScope(e.target.value === "alias" ? "alias" : "global")}
+                onChange={e => {
+                  const v = e.target.value;
+                  setScope(v === "alias" ? "alias" : v === "subdomain" ? "subdomain" : "global");
+                }}
                 disabled={submitting}
               >
                 <option value="global">Global</option>
+                <option value="subdomain">Per subdomain</option>
                 <option value="alias">Per alias</option>
               </select>
             </div>
@@ -169,12 +199,34 @@ export function Blocks() {
                 </select>
               </div>
             )}
+            {scope === "subdomain" && (
+              <div className="field grow">
+                <label className="field-label" htmlFor="block-subdomain">Subdomain</label>
+                <select
+                  id="block-subdomain"
+                  className="input input-mono"
+                  value={selectedDomainId ?? ""}
+                  onChange={e => setDomainId(Number(e.target.value))}
+                  disabled={submitting || subdomains.length === 0}
+                >
+                  {subdomains.length === 0 ? (
+                    <option value="">No subdomains available</option>
+                  ) : (
+                    subdomains.map(d => <option key={d.id} value={d.id}>{d.domain}</option>)
+                  )}
+                </select>
+              </div>
+            )}
             <button
               className="btn btn-primary form-submit"
               type="submit"
-              disabled={submitting || !pattern.trim() || (scope === "alias" && selectedAliasId === null)}
+              disabled={
+                submitting || !pattern.trim() ||
+                (scope === "alias" && selectedAliasId === null) ||
+                (scope === "subdomain" && selectedDomainId === null)
+              }
             >
-              {submitting ? "Blocking…" : "Block sender"}
+              {submitting ? "Saving…" : kind === "allow" ? "Add allow rule" : "Block sender"}
             </button>
           </div>
         </form>
@@ -187,13 +239,14 @@ export function Blocks() {
             <thead>
               <tr>
                 <th>Pattern</th>
+                <th>Type</th>
                 <th>Scope</th>
                 <th>Added</th>
                 <th></th>
               </tr>
             </thead>
             {loading ? (
-              <TableSkeleton cols={4} rows={4} />
+              <TableSkeleton cols={5} rows={4} />
             ) : (
               <tbody>
                 {rows.map(b => (
@@ -205,10 +258,19 @@ export function Blocks() {
                       </div>
                     </td>
                     <td>
-                      {b.alias_id === null ? (
-                        <span className="badge badge-muted">global</span>
+                      {b.kind === "allow" ? (
+                        <span className="badge badge-purple">allow</span>
                       ) : (
+                        <span className="badge badge-muted">block</span>
+                      )}
+                    </td>
+                    <td>
+                      {b.alias_id !== null ? (
                         <span className="badge badge-amber">{aliasLabel(b.alias_id)}</span>
+                      ) : b.domain_id !== null ? (
+                        <span className="badge badge-amber">{domainLabel(b.domain_id)}</span>
+                      ) : (
+                        <span className="badge badge-muted">global</span>
                       )}
                     </td>
                     <td>
