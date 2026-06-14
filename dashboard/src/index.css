@@ -762,7 +762,6 @@ table.dossier tbody td {
 .page-content {
   flex: 1;
   padding: var(--space-8) var(--space-8);
-  max-width: 1040px;
 }
 .page-header {
   margin-bottom: var(--space-8);
@@ -1874,3 +1873,64 @@ table.dossier tbody td {
     max-width: 100%;
   }
 }
+
+/* ─── Inline Editing ─────────────────────────────────────────────────────── */
+.editable-trigger {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  border-bottom: 1px dashed rgba(255, 179, 0, 0.25);
+  transition: border-color var(--t-fast), background var(--t-fast);
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
+  margin: -2px -4px;
+  max-width: 100%;
+  min-width: 0;
+}
+.editable-trigger:hover {
+  border-bottom-color: var(--accent);
+  background: var(--surface-hover);
+}
+.editable-trigger .edit-pencil {
+  opacity: 0.4;
+  color: var(--accent);
+  transition: opacity var(--t-fast);
+  flex-shrink: 0;
+}
+.editable-trigger:hover .edit-pencil {
+  opacity: 0.75;
+}
+.editable-trigger:hover .edit-pencil:hover {
+  opacity: 1;
+}
+
+/* Specific fields / inputs */
+.edit-input-field {
+  background: var(--surface-2);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.8rem;
+  padding: 2px 6px;
+  outline: none;
+  width: 100%;
+  max-width: 200px;
+  box-sizing: border-box;
+}
+
+.edit-select-field {
+  background: var(--surface-2);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  padding: 2px 6px;
+  outline: none;
+  width: 100%;
+  max-width: 240px;
+  box-sizing: border-box;
+}
+
