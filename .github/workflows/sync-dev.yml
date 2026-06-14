@@ -6,11 +6,10 @@ on:
     branches:
       - main
 
-permissions:
-  contents: write
-
 jobs:
   sync-dev:
+    permissions:
+      contents: write
     # Only run if the PR was actually merged (not just closed) AND the source branch was dev
     if: github.event.pull_request.merged == true && github.event.pull_request.head.ref == 'dev'
     runs-on: ubuntu-latest

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type Domain, type Destination } from "../api";
 import { useToast, CopyButton, Switch, ConfirmDialog, TableSkeleton, EmptyState } from "../ui";
-import { Mail, Trash2 } from "lucide-react";
+import { Mail, Trash2, Pencil, Check, X } from "lucide-react";
 
 interface Alias {
   id: number;
@@ -35,6 +35,11 @@ export function Aliases() {
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [maxTotalAliases, setMaxTotalAliases] = useState(-1);
   const [aliasQuotaBufferEnabled, setAliasQuotaBufferEnabled] = useState(true);
+
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editLabelValue, setEditLabelValue] = useState("");
+  const [editDestValue, setEditDestValue] = useState("");
+  const [savingId, setSavingId] = useState<number | null>(null);
 
   async function load() {
     setLoading(true);
@@ -108,6 +113,41 @@ export function Aliases() {
     } catch (err: any) {
       console.error("Failed to delete alias:", err);
       toast("Failed to delete alias", "error");
+    }
+  }
+
+  function startEdit(alias: Alias) {
+    setEditingId(alias.id);
+    setEditLabelValue(alias.label || "");
+    setEditDestValue(alias.destination || "");
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+  }
+
+  async function saveEdit(alias: Alias) {
+    const trimmedLabel = editLabelValue.trim();
+    const newLabel = trimmedLabel === "" ? null : trimmedLabel;
+    const newDest = editDestValue === "" ? null : editDestValue;
+    if (newLabel === alias.label && newDest === alias.destination) {
+      cancelEdit();
+      return;
+    }
+
+    setSavingId(alias.id);
+    try {
+      const patch: Record<string, unknown> = {};
+      if (newLabel !== alias.label) patch.label = newLabel;
+      if (newDest !== alias.destination) patch.destination = newDest;
+      await api.patchAlias(alias.id, patch);
+      setRows(prev => prev.map(a => a.id === alias.id ? { ...a, label: newLabel, destination: newDest } : a));
+      toast("Alias updated", "success");
+    } catch (err: any) {
+      toast(err.message || "Failed to update alias", "error");
+    } finally {
+      setSavingId(null);
+      cancelEdit();
     }
   }
 
@@ -236,8 +276,8 @@ export function Aliases() {
 
       {/* Aliases table */}
       <div className="stagger-4">
-        <div className="table-wrap">
-          <table className="dossier">
+        <div className="table-wrap table-wrap-stack">
+          <table className="dossier dossier-stack">
             <thead>
               <tr>
                 <th>Alias</th>
@@ -256,21 +296,49 @@ export function Aliases() {
               <tbody>
                 {rows.map(a => (
                   <tr key={a.id} style={a.source === "auto_over_quota" ? { backgroundColor: "rgba(255, 60, 60, 0.06)", boxShadow: "inset 0 0 0 1px rgba(255, 60, 60, 0.15)" } : {}}>
-                    <td>
+                    <td data-label="Alias">
                       <div className="addr-cell addr-stack">
-                        <div className="addr-cell">
-                          <span className="addr-mono">{a.full_address}</span>
+                        {editingId === a.id ? (
+                          <div className="addr-cell" style={{ width: "100%" }}>
+                            <input
+                              type="text"
+                              className="input"
+                              value={editLabelValue}
+                              onChange={e => setEditLabelValue(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === "Enter") saveEdit(a);
+                                else if (e.key === "Escape") cancelEdit();
+                              }}
+                              placeholder="Label"
+                              disabled={savingId === a.id}
+                              autoFocus
+                            />
+                          </div>
+                        ) : (
+                          <div className="addr-cell">
+                            <span style={{ fontWeight: 500, color: "var(--text-primary)" }}>{a.label || a.local_part}</span>
+                          </div>
+                        )}
+                        <div className="addr-cell" style={editingId === a.id ? { marginTop: "4px" } : {}}>
+                          <span className="addr-mono row-note" style={{ margin: 0 }}>{a.full_address}</span>
                           <CopyButton text={a.full_address} />
                         </div>
-                        {a.label && (
-                          <span className="row-note">
-                            {a.label}
-                          </span>
-                        )}
                       </div>
                     </td>
-                    <td>
-                      {a.destination ? (
+                    <td data-label="Destination">
+                      {editingId === a.id ? (
+                        <select
+                          className="input"
+                          value={editDestValue}
+                          onChange={e => setEditDestValue(e.target.value)}
+                          disabled={savingId === a.id}
+                        >
+                          <option value="">{domains.find(d => d.id === a.domain_id)?.is_global === 1 ? "-- Global Default --" : "-- Domain Default --"}</option>
+                          {destinations.map(d => (
+                            <option key={d.id} value={d.email}>{d.email}</option>
+                          ))}
+                        </select>
+                      ) : a.destination ? (
                         <div className="addr-cell">
                           <span
                             className="addr-mono redact redacted-token redacted-token-sm"
@@ -282,18 +350,18 @@ export function Aliases() {
                         </div>
                       ) : (
                         <span className="row-note muted-italic">
-                          domain default
+                          {domains.find(d => d.id === a.domain_id)?.is_global === 1 ? "global default" : "domain default"}
                         </span>
                       )}
                     </td>
-                    <td><span className="badge-count">{a.fwd_count}</span></td>
-                    <td><span className="badge-count">{a.reply_count}</span></td>
-                    <td>
+                    <td data-label="Fwd"><span className="badge-count">{a.fwd_count}</span></td>
+                    <td data-label="Reply"><span className="badge-count">{a.reply_count}</span></td>
+                    <td data-label="Blocked">
                       <span className="badge-count" style={a.blocked_count > 0 ? { color: "var(--red)", background: "var(--red-dim)" } : {}}>
                         {a.blocked_count}
                       </span>
                     </td>
-                    <td>
+                    <td data-label="Source">
                       {a.source === "auto_over_quota" ? (
                         <span className="badge" style={{ backgroundColor: "rgba(255, 60, 60, 0.15)", color: "#ff8b8b", border: "1px solid rgba(255, 60, 60, 0.3)" }}>
                           {Date.now() - a.created_at > 3600000 ? "Blocked (Grace Expired)" : "Over Quota (1hr Grace)"}
@@ -308,7 +376,7 @@ export function Aliases() {
                         </span>
                       )}
                     </td>
-                    <td>
+                    <td data-label="Active">
                       <Switch
                         checked={!!a.active}
                         onChange={v => toggleActive(a, v)}
@@ -317,14 +385,32 @@ export function Aliases() {
                       />
                     </td>
                     <td>
-                      <button
-                        className="btn-icon danger"
-                        type="button"
-                        onClick={() => setDeleteTarget({ id: a.id, full_address: a.full_address })}
-                        title="Delete alias"
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                      <div className="addr-cell">
+                        {editingId === a.id ? (
+                          <>
+                            <button className="btn-icon" onClick={() => saveEdit(a)} disabled={savingId === a.id} title="Save changes">
+                              <Check size={16} />
+                            </button>
+                            <button className="btn-icon" onClick={cancelEdit} disabled={savingId === a.id} title="Cancel">
+                              <X size={16} />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button className="btn-icon" onClick={() => startEdit(a)} title="Edit alias">
+                              <Pencil size={16} />
+                            </button>
+                            <button
+                              className="btn-icon danger"
+                              type="button"
+                              onClick={() => setDeleteTarget({ id: a.id, full_address: a.full_address })}
+                              title="Delete alias"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

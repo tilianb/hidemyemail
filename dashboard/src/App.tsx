@@ -23,7 +23,7 @@ const BASE_NAV: NavItem[] = [
   { id: "domains" as Tab, label: "Domains", icon: Globe, title: "Managed domains" },
   { id: "aliases" as Tab, label: "Aliases", icon: Mail, title: "Email aliases" },
   { id: "destinations" as Tab, label: "Destinations", icon: Send, title: "Verified destinations" },
-  { id: "blocks" as Tab, label: "Blocks", icon: Ban, title: "Blocked senders" },
+  { id: "blocks" as Tab, label: "Rules", icon: Ban, title: "Sender rules" },
   { id: "stats" as Tab, label: "Stats", icon: BarChart3, title: "Activity & stats" },
   { id: "settings" as Tab, label: "Settings", icon: SettingsIcon, title: "Account preferences & security", overflow: true },
 ];
