@@ -12,6 +12,8 @@
 
 name: HideMyEmail
 options:
+  xcodeVersion: "15.4"
+  projectFormat: xcode15_0
   bundleIdPrefix: dev.hidemyemail
   deploymentTarget:
     iOS: "17.0"
