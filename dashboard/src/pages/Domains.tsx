@@ -197,7 +197,6 @@ export function Domains() {
             <thead>
               <tr>
                 <th>Domain</th>
-                <th>Type</th>
                 <th>Default destination</th>
                 <th>Catch-all</th>
                 <th>Inline actions</th>
@@ -206,7 +205,7 @@ export function Domains() {
               </tr>
             </thead>
             {loading ? (
-              <TableSkeleton cols={7} rows={3} />
+              <TableSkeleton cols={6} rows={3} />
             ) : (
               <tbody>
                 {rows.filter(d => !d.is_global).map(d => (
@@ -216,13 +215,6 @@ export function Domains() {
                         <span className="addr-mono">{d.domain}</span>
                         <CopyButton text={d.domain} />
                       </div>
-                    </td>
-                    <td data-label="Type">
-                      {d.is_global ? (
-                        <span className="badge badge-purple">Global</span>
-                      ) : (
-                        <span className="badge badge-muted">Personal</span>
-                      )}
                     </td>
                     <td data-label="Default destination">
                       {editingId === d.id ? (

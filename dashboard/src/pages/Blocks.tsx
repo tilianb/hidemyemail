@@ -234,8 +234,8 @@ export function Blocks() {
 
       {/* Blocks table */}
       <div className="stagger-3">
-        <div className="table-wrap">
-          <table className="dossier">
+        <div className="table-wrap table-wrap-stack">
+          <table className="dossier dossier-stack">
             <thead>
               <tr>
                 <th>Pattern</th>
@@ -251,20 +251,20 @@ export function Blocks() {
               <tbody>
                 {rows.map(b => (
                   <tr key={b.id}>
-                    <td>
+                    <td data-label="Pattern">
                       <div className="addr-cell">
                         <span className="addr-mono">{b.pattern}</span>
                         <CopyButton text={b.pattern} />
                       </div>
                     </td>
-                    <td>
+                    <td data-label="Type">
                       {b.kind === "allow" ? (
                         <span className="badge badge-purple">allow</span>
                       ) : (
                         <span className="badge badge-muted">block</span>
                       )}
                     </td>
-                    <td>
+                    <td data-label="Scope">
                       {b.alias_id !== null ? (
                         <span className="badge badge-amber">{aliasLabel(b.alias_id)}</span>
                       ) : b.domain_id !== null ? (
@@ -273,7 +273,7 @@ export function Blocks() {
                         <span className="badge badge-muted">global</span>
                       )}
                     </td>
-                    <td>
+                    <td data-label="Added">
                       <span className="font-mono text-muted">{formatDate(b.created_at)}</span>
                     </td>
                     <td>

@@ -726,8 +726,8 @@ export function Admin() {
                 body="No destinations are currently suppressed."
               />
             ) : (
-              <div className="table-wrap">
-                <table className="dossier">
+              <div className="table-wrap table-wrap-stack">
+                <table className="dossier dossier-stack">
                   <thead>
                     <tr>
                       <th>Destination ID</th>
@@ -743,23 +743,23 @@ export function Admin() {
                   <tbody>
                     {suppressions.map(s => (
                       <tr key={s.id}>
-                        <td><span className="font-mono text-muted">#{s.id}</span></td>
-                        <td><span className="font-mono text-muted">#{s.user_id}</span></td>
-                        <td>
+                        <td data-label="Destination ID"><span className="font-mono text-muted">#{s.id}</span></td>
+                        <td data-label="User"><span className="font-mono text-muted">#{s.user_id}</span></td>
+                        <td data-label="Class">
                           {s.suppression_class === "hard" ? (
                             <span className="badge badge-red">Hard</span>
                           ) : (
                             <span className="badge badge-yellow">Soft</span>
                           )}
                         </td>
-                        <td><span className="text-muted">{s.suppression_reason?.replace(/_/g, " ") ?? "—"}</span></td>
-                        <td>
+                        <td data-label="Reason"><span className="text-muted">{s.suppression_reason?.replace(/_/g, " ") ?? "—"}</span></td>
+                        <td data-label="Suppressed At">
                           <span className="font-mono text-muted">
                             {new Date(s.suppressed_at > 1e11 ? s.suppressed_at : s.suppressed_at * 1000).toLocaleDateString()}
                           </span>
                         </td>
-                        <td><span className="font-mono">{s.bounce_24h} / {s.bounce_7d}</span></td>
-                        <td><span className="font-mono">{s.complaint_24h} / {s.complaint_7d}</span></td>
+                        <td data-label="Bounces (24h / 7d)"><span className="font-mono">{s.bounce_24h} / {s.bounce_7d}</span></td>
+                        <td data-label="Complaints (24h / 7d)"><span className="font-mono">{s.complaint_24h} / {s.complaint_7d}</span></td>
                         <td>
                           <div className="table-actions">
                             <button

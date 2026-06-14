@@ -298,27 +298,31 @@ export function Aliases() {
                   <tr key={a.id} style={a.source === "auto_over_quota" ? { backgroundColor: "rgba(255, 60, 60, 0.06)", boxShadow: "inset 0 0 0 1px rgba(255, 60, 60, 0.15)" } : {}}>
                     <td data-label="Alias">
                       <div className="addr-cell addr-stack">
-                        <div className="addr-cell">
-                          <span className="addr-mono">{a.full_address}</span>
+                        {editingId === a.id ? (
+                          <div className="addr-cell" style={{ width: "100%" }}>
+                            <input
+                              type="text"
+                              className="input"
+                              value={editLabelValue}
+                              onChange={e => setEditLabelValue(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === "Enter") saveEdit(a);
+                                else if (e.key === "Escape") cancelEdit();
+                              }}
+                              placeholder="Label"
+                              disabled={savingId === a.id}
+                              autoFocus
+                            />
+                          </div>
+                        ) : (
+                          <div className="addr-cell">
+                            <span style={{ fontWeight: 500, color: "var(--text-primary)" }}>{a.label || a.local_part}</span>
+                          </div>
+                        )}
+                        <div className="addr-cell" style={editingId === a.id ? { marginTop: "4px" } : {}}>
+                          <span className="addr-mono row-note" style={{ margin: 0 }}>{a.full_address}</span>
                           <CopyButton text={a.full_address} />
                         </div>
-                        {editingId === a.id ? (
-                          <input
-                            type="text"
-                            className="input"
-                            value={editLabelValue}
-                            onChange={e => setEditLabelValue(e.target.value)}
-                            onKeyDown={e => {
-                              if (e.key === "Enter") saveEdit(a);
-                              else if (e.key === "Escape") cancelEdit();
-                            }}
-                            placeholder="Label"
-                            disabled={savingId === a.id}
-                            autoFocus
-                          />
-                        ) : (
-                          a.label && <span className="row-note">{a.label}</span>
-                        )}
                       </div>
                     </td>
                     <td data-label="Destination">
