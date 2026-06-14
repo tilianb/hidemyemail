@@ -15,7 +15,7 @@ Do not commit real secrets or `.dev.vars`.
 
 ## Plain environment variables
 
-These are deployment-specific but not secrets. Store them in Cloudflare dashboard, or pass them during deploy with `--var` and `--keep-vars`.
+These are deployment-specific, not secrets. Store them in the Cloudflare dashboard, or pass them during deploy with `--var` and `--keep-vars`.
 
 | Name | Required | Purpose |
 |------|----------|---------|
@@ -66,9 +66,9 @@ The app stores feature settings in D1. Important defaults:
 | `cors_allowed_domains` | `http://localhost:5173` | Add deployed dashboard origins if needed. |
 | `main_global_domain` | empty | Set after verifying a global domain. |
 | `catch_all_auto_create` | enabled | Allows first inbound mail to create aliases. |
-| `spam_verdict_action` | `flag` | What to do when SES marks inbound mail as spam: `forward`, `flag` (adds `X-Spam-Flag: YES`), or `drop`. Forwarded spam is DKIM-signed by your domain, so forwarding it untouched burns your sender reputation. |
+| `spam_verdict_action` | `flag` | Action when SES marks inbound mail as spam: `forward`, `flag` (adds `X-Spam-Flag: YES`), or `drop`. Your domain DKIM-signs forwarded spam. Forwarding it untouched damages your sender reputation. |
 | `virus_verdict_action` | `drop` | Same options for SES malware detection. |
-| `unsubscribe_header_mode` | `bulk_only` | When to add our one-click List-Unsubscribe (disables the alias) to forwards: `always`, `bulk_only` (only when the original already carried List-Unsubscribe or `Precedence: bulk`), or `never`. Adding it to personal mail makes forwards look like bulk mail to spam filters. |
+| `unsubscribe_header_mode` | `bulk_only` | When to add the one-click List-Unsubscribe to forwards: `always`, `bulk_only` (when the original carried List-Unsubscribe or `Precedence: bulk`), or `never`. Adding it to personal mail makes forwards look like bulk mail to spam filters. |
 | `soft_bounce_threshold` | `3` | Soft bounces within 24h before a destination is paused (0 disables). |
 
 Most settings are editable from the Admin dashboard.
@@ -80,21 +80,21 @@ as a self-contained mail category. Settings resolve most-specific first:
 **alias → subdomain → global**. On the Domains page:
 
 - **Catch-all** — `Inherit` / `On` / `Off`. Overrides `catch_all_auto_create`
-  for that subdomain, e.g. let `shop.example.com` auto-create any address while
-  your primary domain only accepts explicit aliases.
-- **Inline actions** — `Inherit` / `On` / `Off`. Overrides your per-user inline
+  for that subdomain. For example, `shop.example.com` auto-creates any address.
+  Your primary domain accepts explicit aliases.
+- **Inline actions** — `Inherit` / `On` / `Off`. Overrides the per-user inline
   toolbar preference for mail received on that subdomain.
-- **Default destination** — where mail without a per-alias destination is sent.
+- **Default destination** — The destination for mail without a per-alias destination.
 
 ## Sender rules (block / allow)
 
-The Blocks page manages sender rules scoped **globally**, to a **subdomain**, or
+The Rules page manages sender rules scoped **globally**, to a **subdomain**, or
 to a single **alias**:
 
 - **Block** rules drop matching senders before forwarding.
-- **Allow** rules enable allowlist mode for their scope: once any allow rule
-  exists, only senders matching one are forwarded and everything else is
-  dropped. A matching block rule always wins over an allow rule.
+- **Allow** rules enable allowlist mode for their scope. Once any allow rule
+  exists, the system forwards only senders matching one and drops everything else.
+  A matching block rule wins over an allow rule.
 
 Patterns support wildcards (`*@spam.com`, `evil@badactor.org`).
 

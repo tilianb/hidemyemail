@@ -143,7 +143,7 @@ The Worker serves both API and dashboard through Wrangler Assets. You do not nee
 
 ## 8. Cloudflare automatic deploys
 
-If using Cloudflare Workers Builds (Git-connected), the included `worker/scripts/cf-build.sh` builds the dashboard, installs Worker deps, and applies D1 migrations to the right database before Cloudflare runs `wrangler deploy`. The script is cwd-agnostic — it self-locates to `worker/`, so root directory can be either `worker` or the repo root.
+When using Cloudflare Workers Builds (Git-connected), the included `worker/scripts/cf-build.sh` builds the dashboard, installs Worker deps, and applies D1 migrations to the right database before Cloudflare runs `wrangler deploy`. The script is cwd-agnostic. It self-locates to `worker/`. The root directory can be `worker` or the repo root.
 
 Migrations are branch-aware:
 
@@ -165,7 +165,7 @@ This repo uses **two separate Workers Builds projects**:
 - Build command: `bash worker/scripts/cf-build.sh`
 - Deploy command: `cd worker && npx wrangler deploy --env preview`
 
-CF Builds injects an internal `CLOUDFLARE_API_TOKEN` for wrangler, so no extra secrets are needed for migrations or deploys.
+CF Builds injects an internal `CLOUDFLARE_API_TOKEN` for wrangler. Migrations and deploys need no extra secrets.
 
 Store all Worker secrets in Cloudflare (`wrangler secret put …` or dashboard). Do not commit `.dev.vars`.
 
@@ -181,7 +181,7 @@ Store all Worker secrets in Cloudflare (`wrangler secret put …` or dashboard).
 8. Add and verify your destination inbox in Destinations.
 9. Create a test alias.
 
-Public registration starts disabled. Enable it in Admin only if other users should register themselves.
+Public registration starts disabled. Enable it in Admin if other users should register themselves.
 
 ## 10. Smoke tests
 
@@ -197,6 +197,6 @@ Public registration starts disabled. Enable it in Admin only if other users shou
 - **SNS 401:** `SNS_*_TOPIC_ARN` does not match the posting topic or the SNS signature/cert region is wrong.
 - **S3 403/404:** Worker AWS credentials lack `s3:GetObject`, bucket name is wrong, or receipt rule stores under a prefix not matching message ID lookup.
 - **SES rejects outbound:** domain identity not verified, SES sandbox active, or MAIL FROM/DKIM not configured.
-- **Dashboard loads but API 401:** cookies require HTTPS because they use `__Host-` and `Secure`.
+- **Dashboard loads but API 401:** cookies require HTTPS. They use `__Host-` and `Secure`.
 - **New aliases do not auto-create:** check `catch_all_auto_create` and whether the domain is active/verified.
 - **Cannot set main global domain:** domain must be global, active, and verified.

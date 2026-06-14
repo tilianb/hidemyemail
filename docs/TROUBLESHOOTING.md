@@ -26,7 +26,7 @@ Update both:
 - `SNS_INBOUND_TOPIC_ARN` must exactly match the inbound SNS topic ARN.
 - The SNS message signature must be valid.
 - The SNS certificate URL must be an AWS SNS certificate URL.
-- Make sure you did not subscribe the wrong topic to `/api/ses/inbound`.
+- Ensure you subscribed the correct topic to `/api/ses/inbound`.
 
 ## SNS outbound notification returns 401 or 403
 
