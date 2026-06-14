@@ -352,7 +352,9 @@ export function Settings() {
     return (
       <div>
         <div className="page-header">
-          <h1 className="page-title">Settings</h1>
+          <div className="page-title-row">
+            <h1 className="page-title">Settings</h1>
+          </div>
           <p className="page-subtitle">Manage your account preferences and security.</p>
         </div>
         <div className="loading-center">
@@ -368,7 +370,9 @@ export function Settings() {
     return (
       <div>
         <div className="page-header">
-          <h1 className="page-title">Set Up Two-Factor Authentication</h1>
+          <div className="page-title-row">
+            <h1 className="page-title">Set Up Two-Factor Authentication</h1>
+          </div>
           <p className="page-subtitle">Step 1 of 2 — scan the QR code with your authenticator app.</p>
         </div>
         <div className="card stagger-1 card-constrained">
@@ -421,7 +425,9 @@ export function Settings() {
     return (
       <div>
         <div className="page-header">
-          <h1 className="page-title">Set Up Two-Factor Authentication</h1>
+          <div className="page-title-row">
+            <h1 className="page-title">Set Up Two-Factor Authentication</h1>
+          </div>
           <p className="page-subtitle">Step 2 of 2 — verify the code from your authenticator app.</p>
         </div>
         <div className="card stagger-1 card-constrained">
@@ -470,7 +476,9 @@ export function Settings() {
     return (
       <div>
         <div className="page-header">
-          <h1 className="page-title">2FA Enabled — Save Your Backup Codes</h1>
+          <div className="page-title-row">
+            <h1 className="page-title">2FA Enabled — Save Your Backup Codes</h1>
+          </div>
           <p className="page-subtitle">Store these codes safely. Each can only be used once if you lose access to your authenticator.</p>
         </div>
         <div className="card stagger-1 card-constrained">
@@ -512,7 +520,9 @@ export function Settings() {
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">Settings</h1>
+        <div className="page-title-row">
+          <h1 className="page-title">Settings</h1>
+        </div>
         <p className="page-subtitle">Manage your account preferences and security.</p>
       </div>
 

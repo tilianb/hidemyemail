@@ -3,16 +3,6 @@
 Tracked backlog of recommendations from the pre-v1 review (2026-06-10).
 Items are removed when shipped; see CHANGELOG.md for what already landed.
 
-## Blocking v1 — needs an owner decision
-
-- [ ] **Rename the project.** "Hide My Email" is Apple's product name. An
-  iOS app under this name is near-certain App Store rejection, and search
-  is dominated by Apple. Renaming after launch costs all early links and
-  stars — decide before tagging v1.0.0 and before any Show HN post.
-  Affects: repo name, dashboard branding, `X-HideMyEmail-*` headers
-  (keep parsing the old ones), Docker image names, `app.hidemyemail.dev`.
-  merges (changelog is ready in CHANGELOG.md). Tagging runs the
-  release-retag Docker workflow.
 
 ## Correctness / robustness (from review, not yet fixed)
 
@@ -49,8 +39,7 @@ Items are removed when shipped; see CHANGELOG.md for what already landed.
   confirmation (the first-contact gate correctly blocks SMTP-level
   originate; a UI path keeps the anti-spam posture).
 - [ ] Import from SimpleLogin / addy.io CSV — migration path for switchers.
-- [ ] UI refresh for the dashboard (admin + user) — easy to use, visually
-  polished. Planned on a dedicated branch off dev.
+
 
 ## Deliverability (beyond what shipped)
 
@@ -61,7 +50,6 @@ Items are removed when shipped; see CHANGELOG.md for what already landed.
 
 ## Traction
 
-- [x] README: comparison table, Deploy-to-Workers button (shipped).
 - [ ] Screenshots / GIF of the dashboard in the README.
 - [ ] Submit to awesome-selfhosted, selfh.st, AlternativeTo.
 - [ ] Technical blog post: "Email aliases without a mail server." Include SES and

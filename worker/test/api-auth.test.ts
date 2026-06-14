@@ -160,7 +160,10 @@ test("native passkey challenge echoes the challenge token; web does not", async 
 test("apple-app-site-association: 404 until APPLE_APP_ID is configured", async () => {
   const app = createApp();
 
-  const missing = await app.request("/.well-known/apple-app-site-association", {}, testEnv);
+  const envWithoutApple = { ...testEnv };
+  delete envWithoutApple.APPLE_APP_ID;
+
+  const missing = await app.request("/.well-known/apple-app-site-association", {}, envWithoutApple);
   expect(missing.status).toBe(404);
 
   const configured = await app.request(

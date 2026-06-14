@@ -80,7 +80,13 @@ export function Destinations() {
         </p>
       </div>
 
-      <div className="card stagger-1 card-form-gap">
+      <div className="callout stagger-1 card-form-gap">
+        <strong>How destinations work —</strong> Aliases can forward mail to any verified destination.
+        Add your real email addresses below. Your oldest verified address is your default destination
+        and will be used for system notifications and account recovery.
+      </div>
+
+      <div className="card stagger-2 card-form-gap">
         <div className="card-header">
           <span className="card-title">Add Destination</span>
         </div>
@@ -106,9 +112,9 @@ export function Destinations() {
         </form>
       </div>
 
-      <div className="stagger-2">
-        <div className="table-wrap">
-          <table className="dossier">
+      <div className="stagger-3">
+        <div className="table-wrap table-wrap-stack">
+          <table className="dossier dossier-stack">
             <thead>
               <tr>
                 <th>Email Address</th>
@@ -123,10 +129,10 @@ export function Destinations() {
               <tbody>
                 {rows.map(d => (
                   <tr key={d.id}>
-                    <td>
+                    <td data-label="Email Address">
                       <span className="addr-mono">{d.email}</span>
                     </td>
-                    <td>
+                    <td data-label="Status">
                       <div className="destination-status">
                         {d.suppressed_at ? (
                           <span className="badge badge-red">
@@ -148,7 +154,7 @@ export function Destinations() {
                         )}
                       </div>
                     </td>
-                    <td>
+                    <td data-label="Added">
                       <span className="font-mono text-muted">
                         {new Date(d.created_at > 1e11 ? d.created_at : d.created_at * 1000).toLocaleDateString()}
                       </span>
