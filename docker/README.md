@@ -41,12 +41,11 @@ You need:
 
 1. **Docker** with the `compose` plugin (Docker Desktop, Colima, OrbStack, or
    server-side Docker Engine).
-2. **AWS account** with SES enabled in a region near you. The container only
-   replaces the Workers runtime — mail still flows through SES.
+2. **AWS account** with SES enabled in a region near you. The container
+   replaces the Workers runtime; mail flows through SES.
 3. **A domain** you control, with DNS access.
 
-If you'd rather drop AWS entirely (run your own SMTP), this image isn't the
-right path — that's a bigger project (Haraka/Postfix + IP reputation + DNS).
+If you prefer to drop AWS entirely and run your own SMTP, this image is not the right path. That requires a larger project with Haraka or Postfix, IP reputation, and DNS.
 
 ---
 
@@ -63,9 +62,7 @@ right path — that's a bigger project (Haraka/Postfix + IP reputation + DNS).
 | 7 | Create IAM user with `ses:SendRawEmail` + `s3:GetObject` on the bucket | Worker credentials |
 | 8 | (Optional) Request SES production access | Removes sandbox sending limits |
 
-Put the IAM key + region + bucket + topic ARN into `.env`. The worker
-auto-confirms the SNS subscription on first call — watch
-`docker compose logs -f app`.
+Put the IAM key, region, bucket, and topic ARN into `.env`. The worker auto-confirms the SNS subscription on the first call. Watch `docker compose logs -f app`.
 
 ---
 
@@ -118,8 +115,7 @@ docker compose restart app
 
 ## TLS / reverse proxy
 
-The container speaks plain HTTP on `:8787`. Don't expose that directly to the
-internet — put a reverse proxy in front for TLS.
+The container speaks plain HTTP on `:8787`. Do not expose it directly to the internet. Put a reverse proxy in front for TLS.
 
 **Caddy** (one-liner, auto-renews Let's Encrypt):
 
@@ -213,9 +209,9 @@ the bundle, and the runtime stay in sync.
 
 ## What's not (yet) supported here
 
-- **Cron triggers** — production worker doesn't use any. If you add
-  `[triggers].crons` to `wrangler.jsonc`, also wire an external cron service
-  hitting `/__scheduled`, or extend `server.mjs` with `mf.dispatchScheduled()`.
+- **Cron triggers** — The production worker does not use them. If you add
+  `[triggers].crons` to `wrangler.jsonc`, wire an external cron service
+  to hit `/__scheduled`, or extend `server.mjs` with `mf.dispatchScheduled()`.
 - **Multi-region** — single container, single SQLite file. Run one region or
   replicate at the storage layer (Litestream, etc.).
 - **Cloudflare-style analytics** — Miniflare writes to stdout. Pipe to your
@@ -225,7 +221,4 @@ the bundle, and the runtime stay in sync.
 
 ## Why Miniflare?
 
-Same `workerd` runtime as production, with D1 and Assets bindings already
-wired. Raw `workerd` would force a hand-rolled D1 shim. A Node port would
-mean rewriting every request handler against a different runtime. Code
-changes in `worker/`: **zero**.
+Same `workerd` runtime as production, with D1 and Assets bindings wired. Raw `workerd` forces a hand-rolled D1 shim. A Node port requires rewriting every request handler against a different runtime. Code changes in `worker/`: **zero**.

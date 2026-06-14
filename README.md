@@ -8,11 +8,11 @@
 
 # HideMyEmail
 
-Self-hosted, **serverless** email aliases for your own domains — no VPS, no
-Postfix, no mail stack to babysit. Runs as a Cloudflare Worker with a React
+Self-hosted, **serverless** email aliases for your domains. No VPS, no
+Postfix, no mail stack. It runs as a Cloudflare Worker with a React
 dashboard, Cloudflare D1 for state, and AWS SES/S3/SNS for receiving and
-sending mail. Typical running cost: **~$0/month** on the Cloudflare free tier
-plus SES cents.
+sending mail. The running cost is **~$0/month** on the Cloudflare free tier
+plus AWS SES usage.
 
 <p align="center">
   <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/tilianb/hidemyemail">
@@ -22,10 +22,10 @@ plus SES cents.
 
 ## Why
 
-Use your own domain without running Postfix, a VPS, or a full mail stack. SES
+Use your domain without running Postfix, a VPS, or a full mail stack. SES
 receives mail, S3 stores the raw MIME, SNS calls the Worker, and the Worker
-rewrites and forwards mail through SES. Replies work from your normal inbox
-while recipients only see the alias.
+rewrites and forwards mail through SES. Replies work from your normal inbox.
+Recipients see the alias.
 
 ## How it compares
 
@@ -54,16 +54,16 @@ while recipients only see the alias.
 ## Features
 
 - Aliases on your own domain, including catch-all auto-create.
-- Forwarding to verified destination inboxes, with spam/virus verdict handling
-  so forwarded junk never burns your domain's sender reputation.
-- Reply-from-alias without exposing your real inbox — gated by SPF/DMARC
-  checks, first-contact verification, and outbound rate caps.
-- RFC 8058 one-click unsubscribe that can disable aliases (only added to mail
-  that already looks like bulk, so personal forwards stay clean).
+- Forwarding to verified destination inboxes. Spam and virus verdict handling
+  protects your domain's sender reputation from forwarded junk.
+- Reply-from-alias without exposing your inbox. SPF/DMARC
+  checks, first-contact verification, and outbound rate caps gate this feature.
+- RFC 8058 one-click unsubscribe to disable aliases. It applies to mail
+  resembling bulk mail. Personal forwards stay clean.
 - Bounce/complaint feedback loop with automatic destination suppression.
 - Per-subdomain policies and scoped block/allow sender rules.
-- Dashboard for aliases, domains, destinations, block lists, users, MFA,
-  passkeys, and admin settings; data export and account deletion built in.
+- Dashboard for aliases, domains, destinations, rules, users, MFA,
+  passkeys, and admin settings. It includes data export and account deletion.
 - SNS signature checks, encrypted destination addresses, and rate limits.
 
 ## Quick start
@@ -116,7 +116,7 @@ npm ci
 npm run build
 ```
 
-For local Worker development, copy `worker/.dev.vars.example` to `worker/.dev.vars` and fill in local values.
+For local Worker development, copy `worker/.dev.vars.example` to `worker/.dev.vars` and supply local values.
 
 ## License
 
