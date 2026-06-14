@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type Domain, type Destination } from "../api";
 import { useToast, CopyButton, Switch, ConfirmDialog, TableSkeleton, EmptyState } from "../ui";
-import { Mail, Trash2, Pencil } from "lucide-react";
+import { Mail, Trash2, Pencil, Check, X } from "lucide-react";
 
 interface Alias {
   id: number;
@@ -37,9 +37,9 @@ export function Aliases() {
   const [aliasQuotaBufferEnabled, setAliasQuotaBufferEnabled] = useState(true);
 
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editingField, setEditingField] = useState<"label" | "destination" | null>(null);
   const [editLabelValue, setEditLabelValue] = useState("");
   const [editDestValue, setEditDestValue] = useState("");
+  const [savingId, setSavingId] = useState<number | null>(null);
 
   async function load() {
     setLoading(true);
@@ -116,56 +116,37 @@ export function Aliases() {
     }
   }
 
-  function startEditLabel(alias: Alias) {
+  function startEdit(alias: Alias) {
     setEditingId(alias.id);
-    setEditingField("label");
     setEditLabelValue(alias.label || "");
-  }
-
-  function startEditDest(alias: Alias) {
-    setEditingId(alias.id);
-    setEditingField("destination");
     setEditDestValue(alias.destination || "");
   }
 
   function cancelEdit() {
     setEditingId(null);
-    setEditingField(null);
   }
 
-  async function saveLabel(alias: Alias) {
-    const trimmed = editLabelValue.trim();
-    const targetVal = trimmed === "" ? null : trimmed;
-    if (targetVal === alias.label) {
+  async function saveEdit(alias: Alias) {
+    const trimmedLabel = editLabelValue.trim();
+    const newLabel = trimmedLabel === "" ? null : trimmedLabel;
+    const newDest = editDestValue === "" ? null : editDestValue;
+    if (newLabel === alias.label && newDest === alias.destination) {
       cancelEdit();
       return;
     }
 
+    setSavingId(alias.id);
     try {
-      await api.patchAlias(alias.id, { label: targetVal });
-      setRows(prev => prev.map(a => a.id === alias.id ? { ...a, label: targetVal } : a));
-      toast("Alias label updated", "success");
+      const patch: Record<string, unknown> = {};
+      if (newLabel !== alias.label) patch.label = newLabel;
+      if (newDest !== alias.destination) patch.destination = newDest;
+      await api.patchAlias(alias.id, patch);
+      setRows(prev => prev.map(a => a.id === alias.id ? { ...a, label: newLabel, destination: newDest } : a));
+      toast("Alias updated", "success");
     } catch (err: any) {
-      toast(err.message || "Failed to update label", "error");
+      toast(err.message || "Failed to update alias", "error");
     } finally {
-      cancelEdit();
-    }
-  }
-
-  async function saveDestination(alias: Alias, newValue: string) {
-    const targetVal = newValue === "" ? null : newValue;
-    if (targetVal === alias.destination) {
-      cancelEdit();
-      return;
-    }
-
-    try {
-      await api.patchAlias(alias.id, { destination: targetVal });
-      setRows(prev => prev.map(a => a.id === alias.id ? { ...a, destination: targetVal } : a));
-      toast("Alias destination updated", "success");
-    } catch (err: any) {
-      toast(err.message || "Failed to update destination", "error");
-    } finally {
+      setSavingId(null);
       cancelEdit();
     }
   }
@@ -321,83 +302,52 @@ export function Aliases() {
                           <span className="addr-mono">{a.full_address}</span>
                           <CopyButton text={a.full_address} />
                         </div>
-                        {editingId === a.id && editingField === "label" ? (
+                        {editingId === a.id ? (
                           <input
                             type="text"
-                            className="edit-input-field"
+                            className="input"
                             value={editLabelValue}
                             onChange={e => setEditLabelValue(e.target.value)}
-                            onBlur={() => cancelEdit()}
                             onKeyDown={e => {
-                              if (e.key === "Enter") saveLabel(a);
+                              if (e.key === "Enter") saveEdit(a);
                               else if (e.key === "Escape") cancelEdit();
                             }}
+                            placeholder="Label"
+                            disabled={savingId === a.id}
                             autoFocus
-                            onClick={e => e.stopPropagation()}
                           />
                         ) : (
-                          <div
-                            className="editable-trigger"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              startEditLabel(a);
-                            }}
-                            title="Click to edit label"
-                          >
-                            <span className={a.label ? "row-note" : "row-note muted-italic"}>
-                              {a.label || "add label"}
-                            </span>
-                            <Pencil size={12} className="edit-pencil" />
-                          </div>
+                          a.label && <span className="row-note">{a.label}</span>
                         )}
                       </div>
                     </td>
                     <td data-label="Destination">
-                      {editingId === a.id && editingField === "destination" ? (
+                      {editingId === a.id ? (
                         <select
-                          className="edit-select-field"
+                          className="input"
                           value={editDestValue}
-                          onChange={e => saveDestination(a, e.target.value)}
-                          onBlur={() => cancelEdit()}
-                          onKeyDown={e => {
-                            if (e.key === "Escape") cancelEdit();
-                          }}
-                          autoFocus
-                          onClick={e => e.stopPropagation()}
+                          onChange={e => setEditDestValue(e.target.value)}
+                          disabled={savingId === a.id}
                         >
                           <option value="">{domains.find(d => d.id === a.domain_id)?.is_global === 1 ? "-- Global Default --" : "-- Domain Default --"}</option>
                           {destinations.map(d => (
                             <option key={d.id} value={d.email}>{d.email}</option>
                           ))}
                         </select>
-                      ) : (
-                        <div
-                          className="editable-trigger"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            startEditDest(a);
-                          }}
-                          title="Click to edit destination"
-                          style={{ display: "inline-flex", width: "100%" }}
-                        >
-                          {a.destination ? (
-                            <div className="addr-cell" style={{ flexGrow: 1, minWidth: 0 }}>
-                              <span
-                                className="addr-mono redact redacted-token redacted-token-sm"
-                                title={a.destination}
-                                style={{ borderBottom: "none" }}
-                              >
-                                {a.destination}
-                              </span>
-                              <CopyButton text={a.destination} />
-                            </div>
-                          ) : (
-                            <span className="row-note muted-italic" style={{ flexGrow: 1 }}>
-                              {domains.find(d => d.id === a.domain_id)?.is_global === 1 ? "global default" : "domain default"}
-                            </span>
-                          )}
-                          <Pencil size={12} className="edit-pencil" />
+                      ) : a.destination ? (
+                        <div className="addr-cell">
+                          <span
+                            className="addr-mono redact redacted-token redacted-token-sm"
+                            title={a.destination}
+                          >
+                            {a.destination}
+                          </span>
+                          <CopyButton text={a.destination} />
                         </div>
+                      ) : (
+                        <span className="row-note muted-italic">
+                          {domains.find(d => d.id === a.domain_id)?.is_global === 1 ? "global default" : "domain default"}
+                        </span>
                       )}
                     </td>
                     <td data-label="Fwd"><span className="badge-count">{a.fwd_count}</span></td>
@@ -431,14 +381,32 @@ export function Aliases() {
                       />
                     </td>
                     <td>
-                      <button
-                        className="btn-icon danger"
-                        type="button"
-                        onClick={() => setDeleteTarget({ id: a.id, full_address: a.full_address })}
-                        title="Delete alias"
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                      <div className="addr-cell">
+                        {editingId === a.id ? (
+                          <>
+                            <button className="btn-icon" onClick={() => saveEdit(a)} disabled={savingId === a.id} title="Save changes">
+                              <Check size={16} />
+                            </button>
+                            <button className="btn-icon" onClick={cancelEdit} disabled={savingId === a.id} title="Cancel">
+                              <X size={16} />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button className="btn-icon" onClick={() => startEdit(a)} title="Edit alias">
+                              <Pencil size={16} />
+                            </button>
+                            <button
+                              className="btn-icon danger"
+                              type="button"
+                              onClick={() => setDeleteTarget({ id: a.id, full_address: a.full_address })}
+                              title="Delete alias"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
