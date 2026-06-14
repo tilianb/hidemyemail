@@ -10,6 +10,8 @@ jobs:
   testflight:
     name: Upload to TestFlight
     runs-on: macos-15
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -50,7 +52,8 @@ jobs:
             -archivePath $PWD/build/HideMyEmail.xcarchive \
             CODE_SIGN_STYLE=Manual \
             PROVISIONING_PROFILE_SPECIFIER=Github \
-            CODE_SIGN_IDENTITY="Apple Distribution"
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }}
 
       - name: Export IPA
         run: |
