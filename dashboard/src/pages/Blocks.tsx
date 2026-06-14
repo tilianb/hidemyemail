@@ -52,7 +52,7 @@ export function Blocks() {
       setAliasId(current => current ?? aliasRows[0]?.id ?? null);
       setDomainId(current => current ?? domainRows.find(d => d.is_global === 0)?.id ?? null);
     } catch {
-      toast("Failed to load blocks", "error");
+      toast("Failed to load rules", "error");
     } finally {
       setLoading(false);
     }
@@ -82,9 +82,9 @@ export function Blocks() {
       });
       setPattern("");
       await load();
-      toast(kind === "allow" ? "Allow rule added" : "Block added", "success");
+      toast(kind === "allow" ? "Allow rule created" : "Rule created", "success");
     } catch {
-      toast("Failed to add rule", "error");
+      toast("Failed to create rule", "error");
     } finally {
       setSubmitting(false);
     }
@@ -97,9 +97,9 @@ export function Blocks() {
     try {
       await api.deleteBlock(target.id);
       setRows(prev => prev.filter(b => b.id !== target.id));
-      toast(`Block removed`, "success");
+      toast(`Rule removed`, "success");
     } catch {
-      toast("Failed to remove block", "error");
+      toast("Failed to remove rule", "error");
     }
   }
 
@@ -108,10 +108,10 @@ export function Blocks() {
       {/* Page header */}
       <div className="page-header">
         <div className="page-title-row">
-          <h1 className="page-title">Blocks</h1>
+          <h1 className="page-title">Sender Rules</h1>
         </div>
         <p className="page-subtitle">
-          Sender blocks — patterns matched against incoming mail before forwarding.
+          Allow and block rules — patterns matched against incoming senders before forwarding.
         </p>
       </div>
 
@@ -132,7 +132,7 @@ export function Blocks() {
       {/* Add block form */}
       <div className="card stagger-2 card-form-gap">
         <div className="card-header">
-          <span className="card-title">Add Block</span>
+          <span className="card-title">Add Rule</span>
         </div>
         <form onSubmit={handleSubmit}>
           <div className="form-strip">
@@ -281,7 +281,7 @@ export function Blocks() {
                         className="btn-icon danger"
                         type="button"
                         onClick={() => setDeleteTarget({ id: b.id, pattern: b.pattern })}
-                        title="Delete block"
+                        title="Delete rule"
                       >
                         <Trash2 size={16} />
                       </button>
@@ -294,7 +294,7 @@ export function Blocks() {
           {!loading && rows.length === 0 && (
             <EmptyState
               icon={<ShieldAlert size={40} />}
-              title="No blocks yet"
+              title="No rules yet"
               body="Add a sender pattern above to block unwanted mail globally or per-alias."
             />
           )}
@@ -304,9 +304,9 @@ export function Blocks() {
       {/* Confirm delete dialog */}
       {deleteTarget && (
         <ConfirmDialog
-          title="Remove block"
-          body={`Remove the block for "${deleteTarget.pattern}"? Mail matching this pattern will no longer be filtered.`}
-          confirmLabel="Remove block"
+          title="Remove rule"
+          body={`Remove the rule for "${deleteTarget.pattern}"? Mail matching this pattern will no longer be filtered.`}
+          confirmLabel="Remove rule"
           onConfirm={confirmDelete}
           onCancel={() => setDeleteTarget(null)}
         />
