@@ -189,8 +189,8 @@ For each alias domain:
 ### Custom MAIL FROM (required for deliverability)
 
 Without a custom MAIL FROM, the envelope Return-Path of every forward is
-`amazonses.com` — SPF passes but does not *align* with your From domain, so
-DMARC rides on DKIM alone and Outlook scores the mail noticeably worse.
+`amazonses.com`. SPF passes but does not *align* with your From domain.
+DMARC rides on DKIM alone. Outlook scores the mail worse.
 Set it up for every alias domain:
 
 ```bash
@@ -216,8 +216,8 @@ Then add:
 
 ## 10. Reputation warm-up (avoid the Junk folder)
 
-A brand-new domain that suddenly forwards lots of mail looks like a spam
-operation regardless of correct SPF/DKIM/DMARC. Plan the first two weeks:
+A new domain forwarding high mail volume resembles a spam
+operation, regardless of correct SPF/DKIM/DMARC. Plan the first two weeks:
 
 1. **Start small.** Keep volume under ~50 forwards/day for the first days,
    then ramp gradually. Sign up your own low-volume newsletters first.
@@ -237,5 +237,5 @@ operation regardless of correct SPF/DKIM/DMARC. Plan the first two weeks:
    bounces and complaints auto-suppress the destination so SES never
    retries them.
 6. **Verify alignment.** Send a forward to a Gmail address, open
-   "Show original", and confirm SPF, DKIM, and DMARC all show PASS with
-   your domain (not amazonses.com) — see the custom MAIL FROM step.
+   "Show original", and confirm SPF, DKIM, and DMARC show PASS with
+   your domain (not amazonses.com). See the custom MAIL FROM step.

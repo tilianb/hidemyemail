@@ -6,7 +6,7 @@ This guide gets a new HideMyEmail instance running with your own domain.
 
 ### Cloudflare Worker, recommended
 
-Use this if you want the intended serverless setup:
+Use this for the intended serverless setup:
 
 - Cloudflare Worker + Worker Assets for API and dashboard.
 - Cloudflare D1 for state.
@@ -16,7 +16,7 @@ Follow this page, then continue with [AWS SES setup](AWS_SES_SETUP.md).
 
 ### Docker self-host
 
-Use this if you want to run the Worker locally in a container with Miniflare:
+Use this to run the Worker locally in a container with Miniflare:
 
 - Docker hosts the API and dashboard.
 - Local SQLite stores D1 data.
@@ -109,7 +109,7 @@ These are not secrets, but they are deployment-specific:
 - `S3_INBOUND_BUCKET`
 - `SNS_INBOUND_TOPIC_ARN`
 
-Set them in Cloudflare dashboard or via Wrangler deploy flags. The Wrangler config sets `keep_vars: true` so Cloudflare-managed vars are preserved.
+Set them in the Cloudflare dashboard or via Wrangler deploy flags. The Wrangler config sets `keep_vars: true` to preserve Cloudflare-managed vars.
 
 ## 6. Configure AWS and DNS
 
@@ -143,7 +143,7 @@ This repo deploys via **two separate Workers Builds projects** so prod and previ
 | `hidemyemail` | `main` | `worker` | `bash scripts/cf-build.sh` | `npx wrangler deploy` |
 | `hidemyemail-preview` | `dev` | repo root | `bash worker/scripts/cf-build.sh` | `cd worker && npx wrangler deploy --env preview` |
 
-`worker/scripts/cf-build.sh` is cwd-agnostic. It builds the dashboard and runs `wrangler d1 migrations apply --remote` against the correct D1 (`hidemyemail` for main, `hidemyemail-env` for dev) before Cloudflare runs the deploy command, so the schema is always in sync with the code being deployed. No GitHub secrets required — CF Builds provides wrangler auth implicitly.
+`worker/scripts/cf-build.sh` is cwd-agnostic. It builds the dashboard and runs `wrangler d1 migrations apply --remote` against the correct D1 (`hidemyemail` for main, `hidemyemail-env` for dev) before Cloudflare runs the deploy command. The schema stays in sync with the code being deployed. CF Builds provides wrangler auth implicitly. You do not need GitHub secrets.
 
 ## 8. First dashboard setup
 

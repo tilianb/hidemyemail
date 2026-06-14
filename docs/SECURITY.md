@@ -52,7 +52,7 @@ Keep these private:
 - `SES_SECRET_ACCESS_KEY`
 - password hash and salt values
 
-`SES_REGION`, `S3_INBOUND_BUCKET`, and SNS topic ARNs are not secret by themselves, but they are deployment-specific. Store them in Cloudflare environment variables rather than hard-coding public repo defaults.
+`SES_REGION`, `S3_INBOUND_BUCKET`, and SNS topic ARNs are not secret, but they are deployment-specific. Store them in Cloudflare environment variables. Do not hard-code public repo defaults.
 
 ## Destination encryption
 
@@ -67,7 +67,7 @@ Do not rotate this key unless you plan a data migration. Existing encrypted dest
 
 ## Public registration
 
-Registration is disabled by default. Enable it only if you intentionally run a multi-user instance.
+Registration is disabled by default. Enable it if you intentionally run a multi-user instance.
 
 If enabled:
 
