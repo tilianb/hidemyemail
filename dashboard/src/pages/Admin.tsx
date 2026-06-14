@@ -160,7 +160,7 @@ export function Admin() {
     if (id === 1) return toast("Cannot delete admin user", "error");
     setConfirmState({
       title: "Delete User",
-      body: "Are you sure? This will delete the user and all their aliases, domains, blocks, and events permanently.",
+      body: "Are you sure? This will delete the user and all their aliases, domains, rules, and events permanently.",
       confirmLabel: "Delete User",
       onConfirm: async () => {
         try {
