@@ -24,7 +24,8 @@
     "crons": ["0 3 * * *"]
   },
   "vars": {
-    "ENVIRONMENT": "production"
+    "ENVIRONMENT": "production",
+    "APPLE_APP_ID": "3L2C79636P.dev.hidemyemail.app"
   },
   // Secrets (wrangler secret put): SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY,
   // SESSION_SECRET, ACTION_SECRET, AUTH_PASSWORD_HASH, AUTH_PASSWORD_SALT,
@@ -46,7 +47,8 @@
         }
       ],
       "vars": {
-        "ENVIRONMENT": "preview"
+        "ENVIRONMENT": "preview",
+        "APPLE_APP_ID": "3L2C79636P.dev.hidemyemail.app"
       }
     },
   },
