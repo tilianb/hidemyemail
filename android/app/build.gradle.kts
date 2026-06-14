@@ -24,7 +24,8 @@ android {
                 storeFile = keystoreFile
                 storePassword = System.getenv("ANDROID_KEYSTORE_PASS")
                 keyAlias = System.getenv("ANDROID_KEY_ALIAS")
-                keyPassword = System.getenv("ANDROID_KEY_PASS")
+                // PKCS12 keystores use the same password for the store and the key
+                keyPassword = System.getenv("ANDROID_KEYSTORE_PASS")
             }
         }
     }
