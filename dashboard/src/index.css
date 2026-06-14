@@ -1880,7 +1880,7 @@ table.dossier tbody td {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1-5);
-  border-bottom: 1px dashed transparent;
+  border-bottom: 1px dashed rgba(255, 179, 0, 0.25);
   transition: border-color var(--t-fast), background var(--t-fast);
   border-radius: var(--radius-sm);
   padding: 2px 4px;
@@ -1893,13 +1893,13 @@ table.dossier tbody td {
   background: var(--surface-hover);
 }
 .editable-trigger .edit-pencil {
-  opacity: 0;
+  opacity: 0.4;
   color: var(--accent);
   transition: opacity var(--t-fast);
   flex-shrink: 0;
 }
 .editable-trigger:hover .edit-pencil {
-  opacity: 0.6;
+  opacity: 0.75;
 }
 .editable-trigger:hover .edit-pencil:hover {
   opacity: 1;
