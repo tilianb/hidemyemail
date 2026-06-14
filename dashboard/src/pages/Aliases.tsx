@@ -295,8 +295,8 @@ export function Aliases() {
 
       {/* Aliases table */}
       <div className="stagger-4">
-        <div className="table-wrap">
-          <table className="dossier">
+        <div className="table-wrap table-wrap-stack">
+          <table className="dossier dossier-stack">
             <thead>
               <tr>
                 <th>Alias</th>
@@ -315,7 +315,7 @@ export function Aliases() {
               <tbody>
                 {rows.map(a => (
                   <tr key={a.id} style={a.source === "auto_over_quota" ? { backgroundColor: "rgba(255, 60, 60, 0.06)", boxShadow: "inset 0 0 0 1px rgba(255, 60, 60, 0.15)" } : {}}>
-                    <td>
+                    <td data-label="Alias">
                       <div className="addr-cell addr-stack">
                         <div className="addr-cell">
                           <span className="addr-mono">{a.full_address}</span>
@@ -327,7 +327,7 @@ export function Aliases() {
                             className="edit-input-field"
                             value={editLabelValue}
                             onChange={e => setEditLabelValue(e.target.value)}
-                            onBlur={() => saveLabel(a)}
+                            onBlur={() => cancelEdit()}
                             onKeyDown={e => {
                               if (e.key === "Enter") saveLabel(a);
                               else if (e.key === "Escape") cancelEdit();
@@ -352,7 +352,7 @@ export function Aliases() {
                         )}
                       </div>
                     </td>
-                    <td>
+                    <td data-label="Destination">
                       {editingId === a.id && editingField === "destination" ? (
                         <select
                           className="edit-select-field"
@@ -400,14 +400,14 @@ export function Aliases() {
                         </div>
                       )}
                     </td>
-                    <td><span className="badge-count">{a.fwd_count}</span></td>
-                    <td><span className="badge-count">{a.reply_count}</span></td>
-                    <td>
+                    <td data-label="Fwd"><span className="badge-count">{a.fwd_count}</span></td>
+                    <td data-label="Reply"><span className="badge-count">{a.reply_count}</span></td>
+                    <td data-label="Blocked">
                       <span className="badge-count" style={a.blocked_count > 0 ? { color: "var(--red)", background: "var(--red-dim)" } : {}}>
                         {a.blocked_count}
                       </span>
                     </td>
-                    <td>
+                    <td data-label="Source">
                       {a.source === "auto_over_quota" ? (
                         <span className="badge" style={{ backgroundColor: "rgba(255, 60, 60, 0.15)", color: "#ff8b8b", border: "1px solid rgba(255, 60, 60, 0.3)" }}>
                           {Date.now() - a.created_at > 3600000 ? "Blocked (Grace Expired)" : "Over Quota (1hr Grace)"}
@@ -422,7 +422,7 @@ export function Aliases() {
                         </span>
                       )}
                     </td>
-                    <td>
+                    <td data-label="Active">
                       <Switch
                         checked={!!a.active}
                         onChange={v => toggleActive(a, v)}

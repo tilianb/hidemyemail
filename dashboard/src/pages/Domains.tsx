@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type Domain, type Destination } from "../api";
-import { useToast, CopyButton, TableSkeleton, EmptyState } from "../ui";
+import { useToast, CopyButton, ConfirmDialog, TableSkeleton, EmptyState } from "../ui";
 import { Globe, Trash2, Pencil, Check, X } from "lucide-react";
 
 export function Domains() {
@@ -14,6 +14,7 @@ export function Domains() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editDest, setEditDest] = useState("global");
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: number; domain: string } | null>(null);
 
   async function load() {
     setLoading(true);
@@ -85,10 +86,12 @@ export function Domains() {
     }
   }
 
-  async function remove(id: number) {
-    if (!confirm("Delete this domain and ALL its aliases?")) return;
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    const target = deleteTarget;
+    setDeleteTarget(null);
     try {
-      await api.deleteDomain(id);
+      await api.deleteDomain(target.id);
       await load();
       toast("Domain removed", "success");
     } catch (err: any) {
@@ -119,7 +122,11 @@ export function Domains() {
         </p>
       </div>
 
-      <div className="card stagger-1 card-form-gap">
+      <div className="callout stagger-1 card-form-gap">
+        <strong>How subdomains work —</strong> Each subdomain inherits DNS from its parent global domain. Catch-all auto-creates aliases for unrecognized addresses. Each subdomain can override the default destination, or fall back to the global default.
+      </div>
+
+      <div className="card stagger-2 card-form-gap">
         <div className="card-header">
           <span className="card-title">Add Subdomain {maxSubdomains >= 0 ? `(${myDomainsCount} / ${maxSubdomains} used)` : `(${myDomainsCount} used)`}</span>
         </div>
@@ -184,7 +191,7 @@ export function Domains() {
         </form>
       </div>
 
-      <div className="stagger-2">
+      <div className="stagger-3">
         <div className="table-wrap table-wrap-stack">
           <table className="dossier dossier-stack">
             <thead>
@@ -301,7 +308,7 @@ export function Domains() {
                               <button className="btn-icon" onClick={() => startEdit(d)} disabled={destinations.length === 0} title="Edit default destination">
                                 <Pencil size={16} />
                               </button>
-                              <button className="btn-icon danger" onClick={() => remove(d.id)} title="Delete domain">
+                              <button className="btn-icon danger" onClick={() => setDeleteTarget({ id: d.id, domain: d.domain })} title="Delete domain">
                                 <Trash2 size={16} />
                               </button>
                             </>
@@ -323,6 +330,16 @@ export function Domains() {
           )}
         </div>
       </div>
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete subdomain"
+          body={`Permanently delete ${deleteTarget.domain} and ALL its aliases? Forwarding to addresses at this subdomain will stop immediately.`}
+          confirmLabel="Delete subdomain"
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   );
 }
