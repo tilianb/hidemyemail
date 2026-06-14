@@ -22,7 +22,10 @@
   "vars": {
     "ENVIRONMENT": "production",
     "SES_REGION": "paste-your-ses-region",
-    "S3_INBOUND_BUCKET": "paste-your-inbound-bucket"
+    "S3_INBOUND_BUCKET": "paste-your-inbound-bucket",
+    // Passkeys: "<AppleTeamID>.<bundleID>" — served in the AASA file so iOS can
+    // verify the webcredentials association. Omit if not shipping the iOS app.
+    "APPLE_APP_ID": "paste-your-team-id.your.bundle.id"
   },
   "env": {
     "preview": {

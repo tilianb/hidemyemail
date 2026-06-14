@@ -41,7 +41,9 @@ export function Stats() {
     return (
       <div>
         <div className="page-header">
-          <h1 className="page-title">Stats</h1>
+          <div className="page-title-row">
+            <h1 className="page-title">Stats</h1>
+          </div>
           <p className="page-subtitle">Activity telemetry — last sync on page load.</p>
         </div>
         <EmptyState
@@ -58,7 +60,9 @@ export function Stats() {
     return (
       <div>
         <div className="page-header">
-          <h1 className="page-title">Stats</h1>
+          <div className="page-title-row">
+            <h1 className="page-title">Stats</h1>
+          </div>
           <p className="page-subtitle">Activity telemetry — last sync on page load.</p>
         </div>
         <div className="stat-grid-2">
@@ -98,12 +102,22 @@ export function Stats() {
     <div>
       {/* Page header */}
       <div className="page-header">
-        <h1 className="page-title">Stats</h1>
+        <div className="page-title-row">
+          <h1 className="page-title">Stats</h1>
+        </div>
         <p className="page-subtitle">Activity telemetry — last sync on page load.</p>
       </div>
 
+      {/* ── Reply hint callout ── */}
+      <div className="callout stagger-1 card-form-gap">
+        <strong>How reverse-reply works —</strong>{" "}
+        Reverse-reply addresses are generated per alias+sender pair. Your outbound reply appears
+        to originate from the alias — your real inbox address is never exposed to the original
+        sender.
+      </div>
+
       {/* ── Totals row ── */}
-      <div className="stagger-1 stat-grid-2">
+      <div className="stagger-2 stat-grid-2">
         <div className="stat-card">
           <div className="stat-label">Total Aliases</div>
           <div className="stat-value">{data.totals.aliases}</div>
@@ -117,7 +131,7 @@ export function Stats() {
       </div>
 
       {/* ── Last 24h activity ── */}
-      <div className="card stagger-2 card-spaced-bottom">
+      <div className="card stagger-3 card-spaced-bottom">
         <div className="card-header">
           <span className="card-title">Last 24 Hours</span>
           <span className="badge badge-muted type-data">
@@ -150,7 +164,7 @@ export function Stats() {
       </div>
 
       {/* ── Top Aliases ── */}
-      <div className="card stagger-3 card-spaced-bottom">
+      <div className="card stagger-4 card-spaced-bottom">
         <div className="card-header">
           <span className="card-title">Top Aliases</span>
           <span className="badge badge-muted">by forwards</span>
@@ -201,13 +215,7 @@ export function Stats() {
         )}
       </div>
 
-      {/* ── Reply hint callout ── */}
-      <div className="callout stagger-4">
-        <strong>How reverse-reply works —</strong>{" "}
-        Reverse-reply addresses are generated per alias+sender pair. Your outbound reply appears
-        to originate from the alias — your real inbox address is never exposed to the original
-        sender.
-      </div>
+
     </div>
   );
 }
