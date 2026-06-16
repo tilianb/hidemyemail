@@ -33,7 +33,7 @@ Items are removed when shipped; see CHANGELOG.md for what already landed.
 - [ ] **Browser extension** (or interim bookmarklet): generate an alias in
   signup forms without opening the dashboard. The daily-driver feature of
   SimpleLogin/addy.
-- [ ] iOS app (exists on `claude/mobile-app-effort-v1-Qxt1M`): add a Share
+- [ ] iOS app: add a Share
   extension and AutoFill credential provider so aliases can be generated
   inside Safari.
 - [ ] **Compose-as-alias** from the dashboard with explicit per-send
