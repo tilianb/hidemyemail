@@ -84,6 +84,28 @@ test("pushToUser sends to opted-in tokens and prunes dead ones", async () => {
   expect(remaining).toEqual(["good-token"]);
 });
 
+test("isValidApnsToken accepts hex tokens and rejects junk", () => {
+  expect(q.isValidApnsToken("a".repeat(64))).toBe(true);
+  expect(q.isValidApnsToken("A".repeat(64))).toBe(false); // caller lowercases first
+  expect(q.isValidApnsToken("not-a-token")).toBe(false);
+  expect(q.isValidApnsToken("ab".repeat(20))).toBe(false); // too short
+});
+
+test("enforceDeviceCap keeps only the newest MAX_DEVICES_PER_USER", async () => {
+  const tok = (i: number) => i.toString(16).padStart(64, "0");
+  for (let i = 0; i < q.MAX_DEVICES_PER_USER + 2; i++) {
+    await q.upsertPushDevice(DB(), 1, tok(i), "ios", undefined, 1_000 + i);
+  }
+  await q.enforceDeviceCap(DB(), 1);
+
+  const tokens = (await q.listPushDevices(DB(), 1)).map((d) => d.token);
+  expect(tokens.length).toBe(q.MAX_DEVICES_PER_USER);
+  // The two oldest were evicted; the newest survive.
+  expect(tokens).not.toContain(tok(0));
+  expect(tokens).not.toContain(tok(1));
+  expect(tokens).toContain(tok(q.MAX_DEVICES_PER_USER + 1));
+});
+
 test("tokensForCategory excludes tombstoned / disabled accounts", async () => {
   const u = await DB().prepare("INSERT INTO users (passphrase_hash, created_at) VALUES (?, ?)")
     .bind(`hash-${Date.now()}-tomb`, Date.now()).run();

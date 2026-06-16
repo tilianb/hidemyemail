@@ -40,10 +40,14 @@ export function pushRoutes() {
   r.post("/devices", async (c) => {
     const userId = c.get("userId");
     const body = await c.req.json<{ token?: string; platform?: string; prefs?: any }>().catch(() => ({} as { token?: string; platform?: string; prefs?: any }));
-    const token = (body.token ?? "").trim();
+    const token = (body.token ?? "").trim().toLowerCase();
     if (!token) return c.json({ error: "Missing token" }, 400);
+    // Reject malformed tokens so a buggy/abusive client can't seed the table
+    // with junk that fans out (and is kept) on every dispatch.
+    if (!q.isValidApnsToken(token)) return c.json({ error: "Invalid token" }, 400);
     const platform = (body.platform ?? "ios").trim() || "ios";
     await q.upsertPushDevice(c.env.DB, userId, token, platform, parsePrefs(body.prefs), Date.now());
+    await q.enforceDeviceCap(c.env.DB, userId);
     return c.json({ ok: true });
   });
 
@@ -51,7 +55,7 @@ export function pushRoutes() {
   r.patch("/devices", async (c) => {
     const userId = c.get("userId");
     const body = await c.req.json<{ token?: string; prefs?: any }>().catch(() => ({} as { token?: string; prefs?: any }));
-    const token = (body.token ?? "").trim();
+    const token = (body.token ?? "").trim().toLowerCase();
     const prefs = parsePrefs(body.prefs);
     if (!token || !prefs) return c.json({ error: "Missing token or prefs" }, 400);
     const changed = await q.updatePushPrefs(c.env.DB, userId, token, prefs);
@@ -63,7 +67,7 @@ export function pushRoutes() {
   r.delete("/devices", async (c) => {
     const userId = c.get("userId");
     const body = await c.req.json<{ token?: string }>().catch(() => ({} as { token?: string }));
-    const token = (body.token ?? "").trim();
+    const token = (body.token ?? "").trim().toLowerCase();
     if (!token) return c.json({ error: "Missing token" }, 400);
     await q.deletePushDevice(c.env.DB, userId, token);
     return c.json({ ok: true });

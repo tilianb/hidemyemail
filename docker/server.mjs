@@ -93,6 +93,14 @@ const mf = new Miniflare({
     S3_INBOUND_BUCKET: env.S3_INBOUND_BUCKET ?? "hidemyemail-inbound-raw",
     SNS_INBOUND_TOPIC_ARN: env.SNS_INBOUND_TOPIC_ARN ?? "",
     SNS_ALLOWED_TOPIC_ARN: env.SNS_ALLOWED_TOPIC_ARN ?? "",
+    // iOS push (optional) — APNs token auth. Empty values leave push disabled
+    // (apnsConfig() returns null), so registration still works but nothing is
+    // sent. APPLE_APP_ID supplies team/bundle when the dedicated vars are unset.
+    APPLE_APP_ID: env.APPLE_APP_ID ?? "",
+    APNS_KEY_ID: env.APNS_KEY_ID ?? "",
+    APNS_TEAM_ID: env.APNS_TEAM_ID ?? "",
+    APNS_BUNDLE_ID: env.APNS_BUNDLE_ID ?? "",
+    APNS_HOST: env.APNS_HOST ?? "",
     // Secrets — Miniflare treats `bindings` and secrets the same way; the
     // worker reads them off `env`. Keep them in this map so the Env interface
     // sees the full surface.
@@ -103,6 +111,7 @@ const mf = new Miniflare({
     AUTH_PASSWORD_SALT: env.AUTH_PASSWORD_SALT,
     DESTINATION_ENCRYPTION_KEY: env.DESTINATION_ENCRYPTION_KEY,
     SNS_SECRET: env.SNS_SECRET ?? "",
+    APNS_AUTH_KEY: env.APNS_AUTH_KEY ?? "",
   },
 });
 
