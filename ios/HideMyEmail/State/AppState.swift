@@ -49,6 +49,10 @@ final class AppState {
         do {
             try await refreshIdentity()
             phase = .loggedIn
+            // Restored sessions skip finishLogin(), so re-register for push here:
+            // it refreshes the in-memory APNs token (kept only in memory) so a
+            // later sign-out can detach this device from the account.
+            await PushManager.shared.onLogin()
         } catch {
             await signOut()
         }
