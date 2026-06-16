@@ -84,6 +84,19 @@ test("pushToUser sends to opted-in tokens and prunes dead ones", async () => {
   expect(remaining).toEqual(["good-token"]);
 });
 
+test("tokensForCategory excludes tombstoned / disabled accounts", async () => {
+  const u = await DB().prepare("INSERT INTO users (passphrase_hash, created_at) VALUES (?, ?)")
+    .bind(`hash-${Date.now()}-tomb`, Date.now()).run();
+  const userId = u.meta.last_row_id as number;
+  await q.upsertPushDevice(DB(), userId, "tok-tomb", "ios", undefined, Date.now());
+  expect(await q.tokensForCategory(DB(), userId, "blocked")).toEqual(["tok-tomb"]);
+
+  // Self-delete tombstones the account (active=0, deleted_at set) before the
+  // 7-day hard purge — dispatch must stop immediately.
+  await DB().prepare("UPDATE users SET active = 0, deleted_at = ? WHERE id = ?").bind(Date.now(), userId).run();
+  expect(await q.tokensForCategory(DB(), userId, "blocked")).toEqual([]);
+});
+
 test("hardDeleteUser removes the user's push devices", async () => {
   const u = await DB().prepare("INSERT INTO users (passphrase_hash, created_at) VALUES (?, ?)")
     .bind(`hash-${Date.now()}`, Date.now()).run();
