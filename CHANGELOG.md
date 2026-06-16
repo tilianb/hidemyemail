@@ -8,6 +8,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **iOS push notifications (APNs).** Token-based APNs delivery for the events
+  your inbox can't show you: **blocked** mail and destinations **paused** after
+  bounces/complaints (on by default), plus opt-in **forward** and
+  **reply-receipt** alerts. New `push_devices` table (per-device opt-ins),
+  guarded `GET/POST/PATCH/DELETE /api/push/devices` endpoints, and a Settings ▸
+  Notifications panel in the iOS app. Configured via `APNS_KEY_ID` /
+  `APNS_AUTH_KEY` (+ team/bundle, derived from `APPLE_APP_ID`); a no-op when
+  unset, so registration works even before push is configured.
 - **Spam/virus verdict handling.** SES receipt verdicts now gate inbound
   forwards. Admin-configurable: `spam_verdict_action` (forward / flag /
   drop, default flag → `X-Spam-Flag: YES`) and `virus_verdict_action`

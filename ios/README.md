@@ -5,9 +5,10 @@ Cloudflare Worker API as the web dashboard, using **bearer-token auth** (the
 `X-Auth-Mode: token` opt-in added in `worker/src/api/`).
 
 Sign in (passphrase + TOTP MFA, or **passkey**), manage aliases and personal
-subdomains, manage destination inboxes, and view stats. Android and the
-remaining native integrations (push, share sheet) are tracked as follow-ups —
-see the roadmap below.
+subdomains, manage destination inboxes, view stats, and receive **push
+notifications** for blocked mail and paused destinations. Android and the
+remaining native integrations (share sheet, App Intents) are tracked as
+follow-ups — see the roadmap below.
 
 ## Requirements
 
@@ -82,9 +83,31 @@ Setup required for it to actually work (it cannot run on the unsigned simulator)
 3. **Register first** — the app only *signs in* with an existing passkey; create
    one in the web dashboard (Settings → Passkeys), then test on a physical device.
 
+## Push notifications
+
+APNs alerts for the events your inbox can't show you — mail that was **blocked**
+and destinations **paused** after a bounce or spam complaint (both on by
+default), plus opt-in **forward** and **reply-receipt** alerts. Settings ▸
+Notifications drives a master toggle (requests OS permission and registers the
+device token via `POST /api/push/devices`) and per-category opt-ins; prefs are
+stored per device in the Worker's `push_devices` table.
+
+Setup required for delivery (the Worker no-ops without it — registration still
+works, nothing is sent):
+
+1. **Capability** — the `aps-environment` entitlement is declared in
+   `HideMyEmail.entitlements`. Enable the **Push Notifications** capability on
+   the App ID and use a provisioning profile that includes it (device only;
+   the simulator can register but won't deliver remote pushes).
+2. **Worker** — set the APNs token-auth credentials from
+   [`docs/CONFIGURATION.md`](../docs/CONFIGURATION.md): `APNS_KEY_ID`,
+   `APNS_AUTH_KEY` (the `.p8` secret), and team/bundle (derived from
+   `APPLE_APP_ID` when omitted). Use `APNS_HOST=api.sandbox.push.apple.com` for
+   development-signed builds.
+
 ## Roadmap (post-Core)
 
-- **Push notifications** for forwarded / blocked mail alerts.
 - **Share sheet extension** to mint an alias from any app.
+- **App Intents** (Shortcuts / Action button / Siri) to mint an alias hands-free.
 - **Android** (Kotlin/Compose) — same API, same bearer-token flow.
 ```

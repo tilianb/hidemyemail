@@ -25,6 +25,10 @@ These are deployment-specific, not secrets. Store them in the Cloudflare dashboa
 | `SNS_INBOUND_TOPIC_ARN` | yes for inbound SNS | Exact SNS topic for SES receipt notifications. |
 | `APP_ORIGIN` | for native passkeys | Dashboard web origin, e.g. `https://app.hidemyemail.dev`. WebAuthn relying-party origin for native clients, which send no `Origin` header. Defaults to `https://app.hidemyemail.dev` if unset. |
 | `APPLE_APP_ID` | for iOS passkeys | Apple App ID `<TeamID>.<bundleId>` (e.g. `ABCDE12345.dev.hidemyemail.app`) published in `/.well-known/apple-app-site-association`. The AASA route 404s until this is set. |
+| `APNS_KEY_ID` | for iOS push | 10-char Key ID of the APNs `.p8` signing key. |
+| `APNS_TEAM_ID` | for iOS push | Apple Developer Team ID. Falls back to the `<TeamID>` prefix of `APPLE_APP_ID` if unset. |
+| `APNS_BUNDLE_ID` | for iOS push | APNs topic (the app bundle id, e.g. `dev.hidemyemail.app`). Falls back to the `<bundleId>` suffix of `APPLE_APP_ID`. |
+| `APNS_HOST` | optional | Override the APNs host. Defaults to `api.push.apple.com`; use `api.sandbox.push.apple.com` for development-signed builds. |
 
 `worker/wrangler.jsonc` sets `keep_vars: true` so dashboard-managed variables are preserved even when Cloudflare Git deploys run plain `wrangler deploy`.
 
@@ -42,6 +46,7 @@ Set with `wrangler secret put`.
 | `AUTH_PASSWORD_HASH` | first user bootstrap | PBKDF2 hash from `hash-password.mjs`. |
 | `DESTINATION_ENCRYPTION_KEY` | yes | 32-byte hex key for encrypted destination emails. |
 | `SNS_ALLOWED_TOPIC_ARN` | yes for outbound SNS | Exact SNS topic for bounces/complaints. |
+| `APNS_AUTH_KEY` | for iOS push | Contents of the APNs `AuthKey_XXXXXXXXXX.p8` (the full PEM, including the `BEGIN/END PRIVATE KEY` lines). With `APNS_KEY_ID` + team/bundle, enables push; omit and push is a no-op (device registration still works, nothing is sent). |
 
 ## Generate secret values
 

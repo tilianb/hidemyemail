@@ -19,6 +19,13 @@ export interface Env {
   // Apple App ID ("<TeamID>.<bundleId>", e.g. ABCDE12345.dev.hidemyemail.app)
   // published in the apple-app-site-association file for passkey association.
   APPLE_APP_ID?: string;
+  // APNs push credentials (token-based auth). When any is missing, push is a
+  // no-op: registration still works, but no notifications are sent.
+  APNS_KEY_ID?: string;        // 10-char Key ID for the .p8 signing key
+  APNS_TEAM_ID?: string;       // Apple Developer Team ID (falls back to APPLE_APP_ID prefix)
+  APNS_AUTH_KEY?: string;      // contents of the AuthKey_XXXX.p8 (PEM) — a secret
+  APNS_BUNDLE_ID?: string;     // apns-topic (falls back to APPLE_APP_ID suffix)
+  APNS_HOST?: string;          // override host; default api.push.apple.com (use api.sandbox.push.apple.com for dev builds)
 }
 
 export interface DomainRow { id: number; domain: string; default_destination: string; active: number; created_at: number; verified_at: number | null; verification_token: string | null; catch_all: number | null; inline_actions_pref: string | null; }

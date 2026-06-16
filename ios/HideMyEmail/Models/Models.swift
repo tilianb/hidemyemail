@@ -270,6 +270,26 @@ struct Profile: Decodable {
     }
 }
 
+// Per-device push-notification preferences (GET/POST/PATCH /api/push/devices).
+// Mirrors the Worker's `push_devices` opt-in columns. Defaults match the
+// product decision: the "silent" events (blocked mail, dead destinations) are
+// on; events that already land in your inbox (forwards, reply receipts) are off.
+struct PushPrefs: Codable, Equatable {
+    var blocked: Bool
+    var bounce: Bool
+    var forward: Bool
+    var reply: Bool
+
+    static let `default` = PushPrefs(blocked: true, bounce: true, forward: false, reply: false)
+}
+
+// One registered device returned by GET /api/push/devices.
+struct PushDevice: Decodable {
+    let token: String
+    let platform: String
+    let prefs: PushPrefs
+}
+
 // PATCH /api/account/username
 struct UsernameResponse: Decodable {
     let ok: Bool?

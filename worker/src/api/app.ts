@@ -15,6 +15,7 @@ import { destinationRoutes, verificationRoute } from "./routes/destinations";
 import { adminRoutes } from "./routes/admin";
 import { settingsRoutes } from "./routes/settings";
 import { accountRoutes } from "./routes/account";
+import { pushRoutes } from "./routes/push";
 import { getSetting } from "../lib/settings";
 import { SETTING_DEFAULTS } from "../config";
 
@@ -112,6 +113,7 @@ export function createApp() {
   app.route("/api/admin", adminRoutes());
   app.route("/api/settings", settingsRoutes());
   app.route("/api/account", accountRoutes());
+  app.route("/api/push", pushRoutes());
 
   // Apple App Site Association — lets the iOS app claim `webcredentials` for
   // passkeys on this domain. Served by the Worker (not a static asset) so the
