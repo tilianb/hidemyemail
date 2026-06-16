@@ -33,13 +33,28 @@ Items are removed when shipped; see CHANGELOG.md for what already landed.
 - [ ] **Browser extension** (or interim bookmarklet): generate an alias in
   signup forms without opening the dashboard. The daily-driver feature of
   SimpleLogin/addy.
-- [ ] iOS app: add a Share
-  extension and AutoFill credential provider so aliases can be generated
-  inside Safari.
 - [ ] **Compose-as-alias** from the dashboard with explicit per-send
   confirmation (the first-contact gate correctly blocks SMTP-level
   originate; a UI path keeps the anti-spam posture).
 - [ ] Import from SimpleLogin / addy.io CSV — migration path for switchers.
+
+
+## Native apps (iOS & Android)
+
+Both clients share the Worker API and the bearer-token / web-session auth flow.
+Keep these follow-ups at parity — ship each on both platforms before calling it
+done.
+
+- [ ] **Push notifications** for forwarded / blocked mail alerts.
+  - iOS: APNs.
+  - Android: FCM.
+- [ ] **Share-to-mint-alias** so an alias can be generated from any app.
+  - iOS: Share extension.
+  - Android: share-target activity.
+- [ ] **AutoFill integration** so aliases can be generated inside the browser /
+  signup forms without opening the app.
+  - iOS: AutoFill credential provider (works in Safari).
+  - Android: Autofill service + Credential Manager provider.
 
 
 ## Deliverability (beyond what shipped)

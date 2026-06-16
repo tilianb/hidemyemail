@@ -5,9 +5,10 @@ Cloudflare Worker API as the web dashboard, using **bearer-token auth** (the
 `X-Auth-Mode: token` opt-in added in `worker/src/api/`).
 
 Sign in (passphrase + TOTP MFA, or **passkey**), manage aliases and personal
-subdomains, manage destination inboxes, and view stats. Android and the
-remaining native integrations (push, share sheet) are tracked as follow-ups —
-see the roadmap below.
+subdomains, manage destination inboxes, and view stats. The remaining native
+integrations (push, share sheet) are tracked as follow-ups — see
+[the roadmap](../docs/ROADMAP.md). A companion [Android client](../android/README.md)
+ships the same API and bearer-token flow.
 
 ## Requirements
 
@@ -82,9 +83,7 @@ Setup required for it to actually work (it cannot run on the unsigned simulator)
 3. **Register first** — the app only *signs in* with an existing passkey; create
    one in the web dashboard (Settings → Passkeys), then test on a physical device.
 
-## Roadmap (post-Core)
+## Roadmap
 
-- **Push notifications** for forwarded / blocked mail alerts.
-- **Share sheet extension** to mint an alias from any app.
-- **Android** (Kotlin/Compose) — same API, same bearer-token flow.
-```
+Native-app follow-ups (push notifications, share extension, AutoFill) are tracked
+in the shared [roadmap](../docs/ROADMAP.md) with parity across iOS and Android.
