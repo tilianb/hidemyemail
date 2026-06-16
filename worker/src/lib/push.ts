@@ -31,7 +31,13 @@ export async function pushToUser(
     for (const token of tokens) {
       try {
         const res = await sendApns(cfg, jwt, token, alert, doFetch);
-        if (res.dead) await q.prunePushToken(env.DB, token);
+        if (res.dead) {
+          await q.prunePushToken(env.DB, token);
+        } else if (!res.ok) {
+          // Likely an environment/topic mismatch (wrong APNS_HOST/BUNDLE_ID).
+          // Keep the token; surface the reason so misconfig is debuggable.
+          console.warn(`APNs ${res.status} ${res.reason ?? ""} — keeping token`);
+        }
       } catch (err) {
         console.error("APNs send failed", err);
       }
