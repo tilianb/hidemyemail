@@ -62,9 +62,10 @@ async function importSigningKey(authKey: string): Promise<CryptoKey> {
   );
 }
 
-// Mint a provider JWT. APNs accepts these for up to an hour; we mint one per
-// dispatch (reused across that dispatch's tokens) which keeps signing cheap
-// without risking the "too many provider token updates" 429.
+// Mint a provider JWT. APNs accepts these for up to an hour but rejects clients
+// that refresh more than once every 20 minutes with 429
+// TooManyProviderTokenUpdates — so callers should go through `getProviderToken`,
+// which caches; this is the raw minter.
 export async function buildProviderToken(cfg: ApnsConfig, nowSeconds: number): Promise<string> {
   const header = base64url(utf8(JSON.stringify({ alg: "ES256", kid: cfg.keyId })));
   const claims = base64url(utf8(JSON.stringify({ iss: cfg.teamId, iat: nowSeconds })));
@@ -73,6 +74,31 @@ export async function buildProviderToken(cfg: ApnsConfig, nowSeconds: number): P
   // WebCrypto ECDSA returns the raw r||s concatenation — already JOSE format.
   const sig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, utf8(signingInput));
   return `${signingInput}.${base64url(new Uint8Array(sig))}`;
+}
+
+// Provider-token cache. APNs allows a token to live up to an hour and forbids
+// refreshing more than once per 20 minutes; we reuse a signed token for 30
+// minutes. The cache is a module global (per isolate) — best-effort but enough
+// to collapse the per-dispatch signing that would otherwise risk a 429.
+const PROVIDER_TOKEN_TTL_SECONDS = 30 * 60;
+let cachedProviderToken: { key: string; jwt: string; iat: number } | null = null;
+
+// Get a provider JWT, reusing a recent one for the same signing key.
+export async function getProviderToken(cfg: ApnsConfig, nowSeconds: number): Promise<string> {
+  const key = `${cfg.keyId}:${cfg.teamId}`;
+  if (cachedProviderToken
+      && cachedProviderToken.key === key
+      && nowSeconds - cachedProviderToken.iat < PROVIDER_TOKEN_TTL_SECONDS) {
+    return cachedProviderToken.jwt;
+  }
+  const jwt = await buildProviderToken(cfg, nowSeconds);
+  cachedProviderToken = { key, jwt, iat: nowSeconds };
+  return jwt;
+}
+
+// Test hook: drop the cached provider token so a test starts cold.
+export function __clearProviderTokenCache(): void {
+  cachedProviderToken = null;
 }
 
 export async function sendApns(
