@@ -113,11 +113,19 @@ final class PushManager {
         UIApplication.shared.registerForRemoteNotifications()
     }
 
-    /// Before signing out, detach this device from the account so the previous
-    /// user stops receiving its pushes. Must run while the token is still valid.
+    /// On sign-out, detach this device from the account. The server `DELETE`
+    /// needs a still-valid session, so it can fail (expired token, offline) or be
+    /// skipped (token not yet refreshed after launch) — therefore we ALWAYS stop
+    /// OS-level delivery and drop the local token regardless. A lingering server
+    /// row self-heals: the next dispatch hits an unregistered token, APNs returns
+    /// 410, and the Worker prunes it. This guarantees a signed-out/shared device
+    /// can't keep showing the previous account's notifications.
     func onLogout() async {
-        guard let token = deviceToken, let client = app?.api() else { return }
-        try? await client.unregisterPushDevice(token: token)
+        if let token = deviceToken, let client = app?.api() {
+            try? await client.unregisterPushDevice(token: token)
+        }
+        UIApplication.shared.unregisterForRemoteNotifications()
+        deviceToken = nil
     }
 
     // MARK: - AppDelegate callbacks
