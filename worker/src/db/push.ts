@@ -34,6 +34,16 @@ export interface PushDeviceRow {
 
 const DEFAULT_PREFS: PushPrefs = { blocked: true, bounce: true, forward: false, reply: false };
 
+// Cap registrations per account so a buggy/abusive client can't flood the
+// table with junk tokens that then fan out on every dispatch.
+export const MAX_DEVICES_PER_USER = 10;
+
+// APNs device tokens are lowercase hex. Real tokens are 32 bytes (64 chars);
+// allow headroom for Apple growing them, but reject anything non-hex or absurd.
+export function isValidApnsToken(token: string): boolean {
+  return /^[0-9a-f]{64,200}$/.test(token);
+}
+
 // Register (or refresh) a device for a user. Idempotent on token: an existing
 // token is reassigned to this user and its prefs/last_seen updated.
 export async function upsertPushDevice(
@@ -84,6 +94,20 @@ export async function updatePushPrefs(
     `UPDATE push_devices SET ${sets.join(", ")} WHERE token = ? AND user_id = ?`
   ).bind(...binds).run();
   return (res.meta?.changes ?? 0) > 0;
+}
+
+// Evict a user's least-recently-seen devices beyond `keep`, so the row count
+// stays bounded. Run after registering a new token.
+export async function enforceDeviceCap(db: D1Database, userId: number, keep = MAX_DEVICES_PER_USER): Promise<void> {
+  await db.prepare(
+    `DELETE FROM push_devices
+      WHERE user_id = ?1
+        AND id NOT IN (
+          SELECT id FROM push_devices WHERE user_id = ?1
+           ORDER BY COALESCE(last_seen_at, created_at) DESC, id DESC
+           LIMIT ?2
+        )`
+  ).bind(userId, keep).run();
 }
 
 export async function deletePushDevice(db: D1Database, userId: number, token: string): Promise<void> {
