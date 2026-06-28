@@ -105,10 +105,15 @@ export async function listPushDevices(db: D1Database, userId: number): Promise<P
 
 // Tokens for a user that have opted in to a given category. This is the only
 // query the dispatch path needs: it returns just the device tokens to push to.
+// Gated on an active, non-tombstoned account so late bounce/complaint hooks
+// can't push to a signed-out/self-deleted user during the purge grace window
+// (mirrors the session guard in api/app.ts).
 export async function tokensForCategory(db: D1Database, userId: number, category: PushCategory): Promise<string[]> {
   const col = CATEGORY_COLUMN[category];
   const res = await db.prepare(
-    `SELECT token FROM push_devices WHERE user_id = ? AND ${col} = 1`
+    `SELECT d.token FROM push_devices d
+       JOIN users u ON u.id = d.user_id
+      WHERE d.user_id = ? AND d.${col} = 1 AND u.active = 1 AND u.deleted_at IS NULL`
   ).bind(userId).all<{ token: string }>();
   return (res.results ?? []).map((r) => r.token);
 }
