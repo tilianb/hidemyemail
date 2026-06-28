@@ -6,16 +6,6 @@ Items are removed when shipped; see CHANGELOG.md for what already landed.
 
 ## Correctness / robustness (from review, not yet fixed)
 
-- [ ] `docker/server.mjs`: purge `setInterval` never fires an initial run —
-  a container restarted more often than `PURGE_INTERVAL_MS` (6h) never
-  purges tombstoned accounts. Run once at startup too.
-- [ ] `.github/workflows/docker.yml` release-retag: falls back to the
-  `:main` image when the `sha-<short>` tag is missing, which can release
-  an image built from a different commit than the tag. Fail instead, or
-  build from the tag.
-- [ ] Account export completeness: include MFA status, passkey credential
-  metadata, reverse_map (correspondents per alias), and user email
-  preferences — it is presented as a full data export.
 - [ ] Global rate-limit semantics: inbound counts forward+reply against
   `rate_limit_global`, the reply path counts replies only against the
   same key. Unify or split into two knobs.
@@ -46,8 +36,11 @@ Keep these follow-ups at parity — ship each on both platforms before calling i
 done.
 
 - [ ] **Push notifications** for forwarded / blocked mail alerts.
-  - iOS: APNs.
-  - Android: FCM.
+  - [x] iOS: APNs — shipped (blocked / paused-destination on by default,
+    forward / reply opt-in).
+  - [ ] Android: FCM — pending. Worker dispatch is APNs-only today; needs an
+    FCM HTTP v1 sender (the `push_devices.platform` column already exists to
+    branch on) plus a Firebase project + service-account secret.
 - [ ] **Share-to-mint-alias** so an alias can be generated from any app.
   - iOS: Share extension.
   - Android: share-target activity.
