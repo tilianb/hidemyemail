@@ -138,6 +138,9 @@ async function runScheduled() {
   }
 }
 
+// Run once at startup so a container restarted more often than the interval
+// still purges tombstoned accounts, then keep to the schedule.
+void runScheduled();
 setInterval(runScheduled, PURGE_INTERVAL_MS);
 
 console.log(`[hidemyemail] Listening on http://${HOST}:${PORT}`);
