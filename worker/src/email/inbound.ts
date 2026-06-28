@@ -10,6 +10,7 @@ import { sendRaw, SesTransientError } from "../lib/ses";
 import { getNumericSetting, getBoolSetting, getEnvWithOverride, getSetting, getMainGlobalDomain } from "../lib/settings";
 import { decryptDestination, hashDestination } from "../lib/crypto";
 import { extractDisplayName, sanitizeDisplay as sanitize, buildForwardedFromDisplay } from "../lib/from-format";
+import { pushBlocked, pushForward } from "../lib/push";
 
 type SesSend = typeof sendRaw;
 
@@ -111,6 +112,7 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env, 
   if (evaluateSenderRules(rules, message.from) === "block") {
     await q.insertEvent(db, { alias_id: alias.id, type: "block", external_sender: message.from, ts: now });
     await q.incCounter(db, alias.id, "blocked_count");
+    await pushBlocked(env, alias.user_id, alias.full_address, message.from);
     return;
   }
 
@@ -247,6 +249,7 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env, 
 
     await q.insertEvent(db, { alias_id: alias.id, type: "forward", external_sender: message.from, subject: getHeader(mime, "Subject"), bytes: message.rawSize, ts: now });
     await q.incCounter(db, alias.id, "fwd_count");
+    await pushForward(env, alias.user_id, alias.full_address, message.from, getHeader(mime, "Subject"));
     return;
   }
 
@@ -419,6 +422,7 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env, 
 
   await q.insertEvent(db, { alias_id: alias.id, type: "forward", external_sender: message.from, subject: parsedEmail.subject, bytes: message.rawSize, ts: now });
   await q.incCounter(db, alias.id, "fwd_count");
+  await pushForward(env, alias.user_id, alias.full_address, message.from, parsedEmail.subject);
 }
 
 async function checkCooldown(db: D1Database, key: string, cooldownHours: number): Promise<boolean> {

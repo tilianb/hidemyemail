@@ -4,6 +4,7 @@ import { streamToBytes, toBase64 } from "../lib/bytes";
 import { parseMime, setHeader, removeHeaders, getHeader, serializeMime } from "../lib/mime";
 import { sendRaw, SesTransientError } from "../lib/ses";
 import { getEnvWithOverride, getNumericSetting } from "../lib/settings";
+import { pushReply } from "../lib/push";
 
 type SesSend = typeof sendRaw;
 
@@ -150,4 +151,5 @@ export async function handleReply(
 
   await q.insertEvent(db, { alias_id: alias.id, type: "reply", external_sender: parsed.externalSender, subject, ts: now });
   await q.incCounter(db, alias.id, "reply_count");
+  await pushReply(env, alias.user_id, alias.full_address, parsed.externalSender, subject);
 }

@@ -25,6 +25,7 @@ struct SettingsView: View {
                     }
                 }
                 UsernameSection()
+                NotificationsSection()
                 InlineActionsSection()
                 SecuritySection()
                 RecoveryCodesSection()
@@ -34,8 +35,6 @@ struct SettingsView: View {
                 }
                 Section {
                     LabeledContent("Version", value: appVersion)
-                } footer: {
-                    Text("Push notifications are planned for a future release.")
                 }
             }
             .themedScrollBackground()
