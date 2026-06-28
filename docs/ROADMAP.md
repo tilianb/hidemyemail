@@ -20,15 +20,6 @@ Items are removed when shipped; see CHANGELOG.md for what already landed.
   - Android: Autofill service + Credential Manager provider.
 
 
-## Correctness / robustness (from review, not yet fixed)
-
-- [ ] Global rate-limit semantics: inbound counts forward+reply against
-  `rate_limit_global`, the reply path counts replies only against the
-  same key. Unify or split into two knobs.
-- [ ] Events retention is absent. The first-contact reply
-  gate depends on old `forward` rows. If retention is added, the
-  reply gate needs a durable store first.
-
 ## Product — make it a daily driver
 
 - [ ] **addy.io-compatible API surface** for alias generation. Bitwarden

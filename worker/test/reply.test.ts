@@ -243,3 +243,22 @@ test("reply rate limit: over per-alias cap → rejected, no SES", async () => {
   const ev = await DB().prepare("SELECT detail FROM events WHERE type='reject' ORDER BY id DESC LIMIT 1").first<{ detail: string }>();
   expect(ev?.detail).toBe("rate");
 });
+
+// Unified global rate limit: rate_limit_global means total relay volume
+// (forward + reply) on BOTH paths, so inbound forwards count toward it here too.
+test("reply rate limit: forwards count toward the global cap (unified)", async () => {
+  await DB().prepare("DELETE FROM events").run(); // contact for boss@store.com persists
+  const now = Date.now();
+  await q.insertEvent(DB(), { alias_id: 1, type: "forward", external_sender: "boss@store.com", ts: now });
+  await q.insertEvent(DB(), { alias_id: 1, type: "forward", external_sender: "other@store.com", ts: now });
+  await DB().prepare(
+    "INSERT INTO settings (key, value, updated_at) VALUES ('rate_limit_global', '2', ?) " +
+    "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+  ).bind(now).run();
+
+  const sentinel = { sent: [] as any[] };
+  await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
+  expect(sentinel.sent.length).toBe(0);
+  const ev = await DB().prepare("SELECT detail FROM events WHERE type='reject' ORDER BY id DESC LIMIT 1").first<{ detail: string }>();
+  expect(ev?.detail).toBe("rate");
+});
