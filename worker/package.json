@@ -19,14 +19,14 @@
   "dependencies": {
     "@simplewebauthn/server": "^13.3.1",
     "aws4fetch": "^1.0.20",
-    "hono": "^4.12.25",
+    "hono": "^4.12.27",
     "mimetext": "^3.0.28",
     "postal-mime": "^2.7.4"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.16.15",
+    "@cloudflare/vitest-pool-workers": "^0.16.18",
     "@cloudflare/workers-types": "^4.20260616.1",
-    "@types/node": "^25.9.3",
+    "@types/node": "^26.0.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9",
     "wrangler": "^4.98.0"
