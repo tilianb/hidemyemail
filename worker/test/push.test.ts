@@ -96,6 +96,20 @@ test("hardDeleteUser removes the user's push devices", async () => {
   expect(await q.listPushDevices(DB(), userId)).toEqual([]);
 });
 
+test("pushToUser keeps tokens on config-mismatch errors (only 410 prunes)", async () => {
+  await q.upsertPushDevice(DB(), 1, "valid-token", "ios", undefined, Date.now());
+  const e = await pushEnv({
+    // Wrong host/bundle during rollout → APNs returns 400 BadDeviceToken for a
+    // token that is actually fine. It must NOT be pruned.
+    __apnsFetch: async () =>
+      new Response(JSON.stringify({ reason: "BadDeviceToken" }), { status: 400 }),
+  });
+
+  await pushToUser(e, 1, "blocked", "Mail blocked", "body");
+
+  expect((await q.listPushDevices(DB(), 1)).map((d) => d.token)).toEqual(["valid-token"]);
+});
+
 test("provider token is reused within the refresh window and re-minted after", async () => {
   __clearProviderTokenCache();
   const cfg: ApnsConfig = {

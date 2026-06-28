@@ -22,8 +22,11 @@ export interface ApnsAlert {
 export interface ApnsResult {
   ok: boolean;
   status: number;
-  // True when APNs says the token is dead and should be pruned (410, or a
-  // 400/403 with an Unregistered/BadDeviceToken reason).
+  // True only when APNs definitively reports the token as gone (HTTP 410
+  // Unregistered — the app was uninstalled). Deliberately NOT set for
+  // BadDeviceToken / DeviceTokenNotForTopic: those usually mean an
+  // environment/topic mismatch (wrong APNS_HOST or APNS_BUNDLE_ID) during a
+  // sandbox↔production rollout, and pruning on them would wipe valid tokens.
   dead: boolean;
   reason?: string;
 }
@@ -128,9 +131,9 @@ export async function sendApns(
 
   let reason: string | undefined;
   try { reason = (await res.json<{ reason?: string }>())?.reason; } catch { /* no body */ }
-  const dead = res.status === 410
-    || reason === "Unregistered"
-    || reason === "BadDeviceToken"
-    || reason === "DeviceTokenNotForTopic";
+  // Only HTTP 410 (Unregistered) means the device is permanently gone. Every
+  // other failure — including BadDeviceToken / DeviceTokenNotForTopic — is
+  // treated as transient/config and the token is kept.
+  const dead = res.status === 410;
   return { ok: false, status: res.status, dead, reason };
 }
