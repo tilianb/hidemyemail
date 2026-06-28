@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeEach, expect, test } from "vitest";
 import * as q from "../src/db/queries";
-import { pushToUser } from "../src/lib/push";
+import { pushToUser, sendTestPush } from "../src/lib/push";
 import { getProviderToken, __clearProviderTokenCache, type ApnsConfig } from "../src/lib/apns";
 import { resetDb } from "./helpers";
 
@@ -164,4 +164,53 @@ test("pushToUser skips categories the device opted out of", async () => {
   const e = await pushEnv({ __apnsFetch: async () => { calls++; return new Response("", { status: 200 }); } });
   await pushToUser(e, 1, "forward", "t", "b");
   expect(calls).toBe(0);
+});
+
+test("sendTestPush returns 503 when APNs is unconfigured", async () => {
+  await q.upsertPushDevice(DB(), 1, "tok-a", "ios", undefined, Date.now());
+  // .dev.vars may define APNS_* locally; clear them so this exercises the
+  // unconfigured branch deterministically.
+  const e = { ...env, APNS_AUTH_KEY: "", APNS_KEY_ID: "", APNS_TEAM_ID: "", APNS_BUNDLE_ID: "", APPLE_APP_ID: "" } as any;
+  const res = await sendTestPush(e, 1, Date.now());
+  expect(res.status).toBe(503);
+  expect(res.body.ok).toBe(false);
+});
+
+test("sendTestPush reports no devices without setting a cooldown", async () => {
+  const e = await pushEnv({ __apnsFetch: async () => new Response("", { status: 200 }) });
+  const res = await sendTestPush(e, 1, Date.now());
+  expect(res.status).toBe(200);
+  expect(res.body).toMatchObject({ ok: false, sent: 0 });
+  // No cooldown row written when there was nothing to send.
+  const row = await DB().prepare("SELECT reset_at FROM rate_limits WHERE ip = ?").bind("pushtest:1").first();
+  expect(row).toBeNull();
+});
+
+test("sendTestPush sends to every device and prunes a 410", async () => {
+  await q.upsertPushDevice(DB(), 1, "good-token", "ios", undefined, Date.now());
+  await q.upsertPushDevice(DB(), 1, "dead-token", "ios", undefined, Date.now());
+  const e = await pushEnv({
+    __apnsFetch: async (url: string) =>
+      url.endsWith("/dead-token")
+        ? new Response(JSON.stringify({ reason: "Unregistered" }), { status: 410 })
+        : new Response("", { status: 200 }),
+  });
+
+  const res = await sendTestPush(e, 1, Date.now());
+  expect(res.body.ok).toBe(true);
+  expect(res.body.sent).toBe(1);
+  expect(res.body.failures).toHaveLength(1);
+  // The 410 token is pruned like the real dispatch path.
+  expect((await q.listPushDevices(DB(), 1)).map((d) => d.token)).toEqual(["good-token"]);
+});
+
+test("sendTestPush enforces a per-account cooldown", async () => {
+  await q.upsertPushDevice(DB(), 1, "good-token", "ios", undefined, Date.now());
+  const e = await pushEnv({ __apnsFetch: async () => new Response("", { status: 200 }) });
+  const now = Date.now();
+  const first = await sendTestPush(e, 1, now);
+  expect(first.status).toBe(200);
+  const second = await sendTestPush(e, 1, now + 5_000); // within cooldown window
+  expect(second.status).toBe(429);
+  expect(second.body.ok).toBe(false);
 });

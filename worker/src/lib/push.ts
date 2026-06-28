@@ -47,6 +47,65 @@ export async function pushToUser(
   }
 }
 
+// Minimum gap between test pushes per account, so the self-service "send test"
+// button can't be held down to spam APNs (and the user's own devices).
+const TEST_PUSH_COOLDOWN_MS = 60_000;
+
+export interface TestPushResponse {
+  status: number;
+  body: {
+    ok: boolean;
+    // `error` on non-2xx responses (the dashboard surfaces it via its request
+    // helper); `reason` on a 200 that simply had nothing to send.
+    error?: string;
+    reason?: string;
+    sent?: number;
+    failures?: { token: string; status: number; reason?: string }[];
+  };
+}
+
+// Send a one-off test alert to every device registered to `userId`. Bypasses
+// per-category opt-in so a user can confirm the full APNs pipeline. Self-scoped
+// (own devices only), rate-limited per account, and prunes 410/Unregistered
+// tokens just like the real dispatch path so a dead device doesn't linger.
+export async function sendTestPush(env: Env, userId: number, now: number): Promise<TestPushResponse> {
+  const cfg = apnsConfig(env);
+  if (!cfg) return { status: 503, body: { ok: false, error: "APNs not configured" } };
+
+  // Per-account cooldown (reuses the rate_limits table, keyed off a synthetic id).
+  const key = `pushtest:${userId}`;
+  const prior = await env.DB.prepare("SELECT reset_at FROM rate_limits WHERE ip = ?").bind(key).first<{ reset_at: number }>();
+  if (prior && prior.reset_at > now) {
+    return { status: 429, body: { ok: false, error: "Please wait before sending another test push" } };
+  }
+
+  const devices = await q.listPushDevices(env.DB, userId);
+  if (devices.length === 0) return { status: 200, body: { ok: false, reason: "No devices registered", sent: 0 } };
+
+  // Commit the cooldown only once we're actually sending a batch.
+  await env.DB.prepare(
+    "INSERT INTO rate_limits (ip, attempts, reset_at) VALUES (?, 1, ?) " +
+    "ON CONFLICT(ip) DO UPDATE SET reset_at = excluded.reset_at"
+  ).bind(key, now + TEST_PUSH_COOLDOWN_MS).run();
+
+  const doFetch: typeof fetch = (env as any).__apnsFetch ?? fetch;
+  const jwt = await getProviderToken(cfg, Math.floor(now / 1000));
+  const alert = { title: "HideMyEmail", body: "Test push notification" };
+  let sent = 0;
+  const failures: { token: string; status: number; reason?: string }[] = [];
+  for (const dev of devices) {
+    try {
+      const res = await sendApns(cfg, jwt, dev.token, alert, doFetch);
+      if (res.ok) { sent++; continue; }
+      failures.push({ token: dev.token, status: res.status, reason: res.reason });
+      if (res.dead) await q.prunePushToken(env.DB, dev.token); // 410/Unregistered → prune
+    } catch {
+      /* transient network error mid-send; leave the token for the next dispatch */
+    }
+  }
+  return { status: 200, body: { ok: true, sent, failures } };
+}
+
 // Shorten a possibly-empty subject for a notification body.
 function subjectTail(subject?: string | null): string {
   const s = (subject ?? "").trim();
