@@ -248,6 +248,7 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env, 
     }
 
     await q.insertEvent(db, { alias_id: alias.id, type: "forward", external_sender: message.from, subject: getHeader(mime, "Subject"), bytes: message.rawSize, ts: now });
+    await q.recordContact(db, alias.id, message.from, now);
     await q.incCounter(db, alias.id, "fwd_count");
     await pushForward(env, alias.user_id, alias.full_address, message.from, getHeader(mime, "Subject"));
     return;
@@ -421,6 +422,7 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env, 
   }
 
   await q.insertEvent(db, { alias_id: alias.id, type: "forward", external_sender: message.from, subject: parsedEmail.subject, bytes: message.rawSize, ts: now });
+  await q.recordContact(db, alias.id, message.from, now);
   await q.incCounter(db, alias.id, "fwd_count");
   await pushForward(env, alias.user_id, alias.full_address, message.from, parsedEmail.subject);
 }

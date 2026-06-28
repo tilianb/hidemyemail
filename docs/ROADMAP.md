@@ -4,6 +4,22 @@ Tracked backlog of recommendations from the pre-v1 review (2026-06-10).
 Items are removed when shipped; see CHANGELOG.md for what already landed.
 
 
+## Push notifications (top priority)
+
+- [x] **iOS APNs** — shipped (blocked / paused-destination on by default,
+  forward / reply opt-in).
+- [ ] **Android FCM** — pending. Worker dispatch is APNs-only today; needs an
+  FCM HTTP v1 sender (the `push_devices.platform` column already exists to
+  branch on) plus a Firebase project + service-account secret.
+- [ ] **Share-to-mint-alias** so an alias can be generated from any app.
+  - iOS: Share extension.
+  - Android: share-target activity.
+- [ ] **AutoFill integration** so aliases can be generated inside the browser /
+  signup forms without opening the app.
+  - iOS: AutoFill credential provider (works in Safari).
+  - Android: Autofill service + Credential Manager provider.
+
+
 ## Correctness / robustness (from review, not yet fixed)
 
 - [ ] Global rate-limit semantics: inbound counts forward+reply against
@@ -28,25 +44,6 @@ Items are removed when shipped; see CHANGELOG.md for what already landed.
   originate; a UI path keeps the anti-spam posture).
 - [ ] Import from SimpleLogin / addy.io CSV — migration path for switchers.
 
-
-## Native apps (iOS & Android)
-
-Both clients share the Worker API and the bearer-token / web-session auth flow.
-Keep these follow-ups at parity — ship each on both platforms before calling it
-done.
-
-- [ ] **Push notifications** for forwarded / blocked mail alerts.
-  - [x] iOS: APNs — shipped (blocked / paused-destination on by default,
-    forward / reply opt-in).
-  - [ ] Android: FCM — pending. Worker dispatch is APNs-only today; needs an
-    FCM HTTP v1 sender (the `push_devices.platform` column already exists to
-    branch on) plus a Firebase project + service-account secret.
-- [ ] **Share-to-mint-alias** so an alias can be generated from any app.
-  - iOS: Share extension.
-  - Android: share-target activity.
-- [ ] **AutoFill integration** so aliases can be generated inside the browser /
-  signup forms without opening the app.
-  - iOS: AutoFill credential provider (works in Safari).
   - Android: Autofill service + Credential Manager provider.
 
 

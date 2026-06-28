@@ -23,9 +23,10 @@ beforeEach(async () => {
   await q.createDomain(DB(), "hidemyemail.dev", "real@me.com");
   await q.autoCreateAlias(DB(), 1, "shop", "shop@hidemyemail.dev");
   // First-contact rule: a reply is only allowed to an external sender the alias has
-  // already heard from. Seed the prior inbound 'forward' from boss@store.com so the
-  // relay-success tests below model a genuine reply to existing correspondence.
+  // already heard from. The durable record lives in `contacts` (the reply gate reads
+  // it, not `events`); a real forward writes both, so seed both here.
   await q.insertEvent(DB(), { alias_id: 1, type: "forward", external_sender: "boss@store.com", ts: Date.now() });
+  await q.recordContact(DB(), 1, "boss@store.com", Date.now());
 });
 
 test("owner reply with SPF pass → SES send as alias, leaks stripped", async () => {
@@ -149,7 +150,8 @@ test("SECURITY: owner reply to a stranger with no prior inbound → rejected, no
 // a reply to "boss@store.com".
 test("first-contact match is case-insensitive", async () => {
   await DB().prepare("DELETE FROM events").run();
-  await q.insertEvent(DB(), { alias_id: 1, type: "forward", external_sender: "Boss@Store.com", ts: Date.now() });
+  await DB().prepare("DELETE FROM contacts").run();
+  await q.recordContact(DB(), 1, "Boss@Store.com", Date.now());
   const sentinel = { sent: [] as any[] };
   await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
   expect(sentinel.sent.length).toBe(1);
@@ -162,6 +164,7 @@ test("first-contact match is case-insensitive", async () => {
 // Helper: seed a prior inbound 'forward' so the first-contact gate passes.
 async function seedForward(sender: string) {
   await q.insertEvent(DB(), { alias_id: 1, type: "forward", external_sender: sender, ts: Date.now() });
+  await q.recordContact(DB(), 1, sender, Date.now());
 }
 
 test("distinct recipient cap: under cap → reply succeeds", async () => {

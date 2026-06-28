@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import * as q from "../../db/queries";
 import type { PushPrefs } from "../../db/push";
+import { apnsConfig, getProviderToken, sendApns } from "../../lib/apns";
+import { listPushDevices } from "../../db/push";
 
 // Device registration + per-device notification preferences for native push.
 // All routes inherit the session guard in app.ts, so `userId` is always set.
@@ -71,6 +73,30 @@ export function pushRoutes() {
     if (!token) return c.json({ error: "Missing token" }, 400);
     await q.deletePushDevice(c.env.DB, userId, token);
     return c.json({ ok: true });
+  });
+
+  // Send a test push alert to every registered device for this account.
+  // Bypasses per-category opt-in so a user can confirm the full APNs pipeline
+  // works without waiting for a real mailbox event.
+  r.post("/test", async (c) => {
+    const userId = c.get("userId");
+    const cfg = apnsConfig(c.env);
+    if (!cfg) return c.json({ ok: false, reason: "APNs not configured" }, 503);
+    const devices = await listPushDevices(c.env.DB, userId);
+    if (devices.length === 0) return c.json({ ok: false, reason: "No devices registered", sent: 0 });
+    const doFetch: typeof fetch = (c.env as any).__apnsFetch ?? fetch;
+    const jwt = await getProviderToken(cfg, Math.floor(Date.now() / 1000));
+    const alert = { title: "HideMyEmail", body: "Test push notification" };
+    let sent = 0;
+    const failures: { token: string; status: number; reason?: string }[] = [];
+    for (const dev of devices) {
+      try {
+        const res = await sendApns(cfg, jwt, dev.token, alert, doFetch);
+        if (res.ok) sent++;
+        else failures.push({ token: dev.token, status: res.status, reason: res.reason });
+      } catch { /* token already soft-deleted; skip */ }
+    }
+    return c.json({ ok: true, sent, failures });
   });
 
   return r;

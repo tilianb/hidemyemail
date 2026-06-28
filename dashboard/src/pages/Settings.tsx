@@ -3,7 +3,7 @@ import { QRCode } from "react-qr-code";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { useToast } from "../ui";
-import { ShieldCheck, ShieldOff, KeyRound, Copy, RefreshCw, Loader2, Fingerprint, Trash2, Pencil, Mail, Download, AlertTriangle } from "lucide-react";
+import { ShieldCheck, ShieldOff, KeyRound, Copy, RefreshCw, Loader2, Fingerprint, Trash2, Pencil, Mail, Download, AlertTriangle, Bell } from "lucide-react";
 
 type SetupStep = "idle" | "qr" | "verify" | "backup";
 type PasskeyRow = { id: string; device_name: string | null; created_at: number };
@@ -23,6 +23,10 @@ export function Settings() {
   const [showAddPasskey, setShowAddPasskey] = useState(false);
   const [editingPasskeyId, setEditingPasskeyId] = useState<string | null>(null);
   const [editingPasskeyName, setEditingPasskeyName] = useState("");
+
+  // Push notifications
+  const [pushTesting, setPushTesting] = useState(false);
+  const [pushResult, setPushResult] = useState<{ sent: number; failures: { token: string; status: number; reason?: string }[] } | null>(null);
 
   // Setup wizard state
   const [setupStep, setSetupStep] = useState<SetupStep>("idle");
@@ -179,6 +183,24 @@ export function Settings() {
       toast("Passkey renamed", "success");
     } catch (err: any) {
       toast(err?.message || "Failed to rename passkey", "error");
+    }
+  }
+
+  async function testPushNotification() {
+    setPushTesting(true);
+    setPushResult(null);
+    try {
+      const res = await api.pushTest();
+      if (res.ok) {
+        toast(`Test push sent to ${res.sent} device${res.sent === 1 ? "" : "s"}`, "success");
+      } else {
+        toast(res.reason || "Push not configured", "error");
+      }
+      setPushResult({ sent: res.sent ?? 0, failures: res.failures ?? [] });
+    } catch (err: any) {
+      toast(err?.message || "Failed to send test push", "error");
+    } finally {
+      setPushTesting(false);
     }
   }
 
@@ -869,6 +891,38 @@ export function Settings() {
               Passkeys are not supported in this browser.
             </p>
           )}
+        </div>
+      </div>
+
+      {/* Push notifications card */}
+      <div className="card stagger-3 card-spaced-top">
+        <div className="card-header">
+          <span className="card-title">Push Notifications</span>
+        </div>
+        <div className="card-body">
+          <p className="muted-copy card-spaced-bottom">
+            Test that push notifications are delivered to your devices. Sends a generic alert to every registered device, bypassing per-category opt-in. APNs only — Android/FCM is not yet supported.
+          </p>
+          {pushResult && !pushResult.failures.length && pushResult.sent > 0 && (
+            <div className="callout callout-success" style={{ marginBottom: "var(--space-3)" }}>
+              Sent to {pushResult.sent} device{pushResult.sent === 1 ? "" : "s"}.
+            </div>
+          )}
+          {pushResult && pushResult.failures.length > 0 && (
+            <div className="callout callout-warning" style={{ marginBottom: "var(--space-3)" }}>
+              {pushResult.sent > 0 ? `${pushResult.sent} sent, ` : ""}{pushResult.failures.length} failed:{" "}
+              {pushResult.failures.map((f) => `${f.status}${f.reason ? ` (${f.reason})` : ""}`).join(", ")}
+            </div>
+          )}
+          <button
+            type="button"
+            className="btn btn-soft"
+            onClick={testPushNotification}
+            disabled={pushTesting}
+          >
+            {pushTesting ? <Loader2 size={14} className="spin" /> : <Bell size={14} />}
+            {pushTesting ? "Sending…" : "Send test push notification"}
+          </button>
         </div>
       </div>
 

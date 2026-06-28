@@ -159,6 +159,7 @@ export function aliasRoutes() {
       if (!exists) return c.json({ error: "Alias not found" }, 404);
       await c.env.DB.batch([
         c.env.DB.prepare("DELETE FROM reverse_map WHERE alias_id=?").bind(id),
+        c.env.DB.prepare("DELETE FROM contacts WHERE alias_id=?").bind(id),
         c.env.DB.prepare("DELETE FROM blocks WHERE alias_id=?").bind(id),
         c.env.DB.prepare("DELETE FROM events WHERE alias_id=?").bind(id),
         c.env.DB.prepare("DELETE FROM aliases WHERE id=? AND user_id=?").bind(id, userId),
