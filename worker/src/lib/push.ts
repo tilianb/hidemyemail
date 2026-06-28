@@ -1,7 +1,7 @@
 import type { Env } from "../types";
 import * as q from "../db/queries";
 import type { PushCategory } from "../db/push";
-import { apnsConfig, buildProviderToken, sendApns } from "./apns";
+import { apnsConfig, getProviderToken, sendApns } from "./apns";
 
 // High-level push dispatch. Resolves a user's opted-in device tokens for the
 // given category, sends the alert to each, and prunes any tokens APNs reports
@@ -25,7 +25,7 @@ export async function pushToUser(
     if (tokens.length === 0) return;
 
     const doFetch: typeof fetch = (env as any).__apnsFetch ?? fetch;
-    const jwt = await buildProviderToken(cfg, Math.floor(Date.now() / 1000));
+    const jwt = await getProviderToken(cfg, Math.floor(Date.now() / 1000));
     const alert = { title, body, data: { category, ...(data ?? {}) } };
 
     for (const token of tokens) {

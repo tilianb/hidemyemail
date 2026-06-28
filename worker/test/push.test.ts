@@ -2,6 +2,7 @@ import { env } from "cloudflare:test";
 import { beforeEach, expect, test } from "vitest";
 import * as q from "../src/db/queries";
 import { pushToUser } from "../src/lib/push";
+import { getProviderToken, __clearProviderTokenCache, type ApnsConfig } from "../src/lib/apns";
 import { resetDb } from "./helpers";
 
 const DB = () => env.DB as D1Database;
@@ -93,6 +94,19 @@ test("hardDeleteUser removes the user's push devices", async () => {
   await hardDeleteUser(DB(), userId);
 
   expect(await q.listPushDevices(DB(), userId)).toEqual([]);
+});
+
+test("provider token is reused within the refresh window and re-minted after", async () => {
+  __clearProviderTokenCache();
+  const cfg: ApnsConfig = {
+    keyId: "ABC1234567", teamId: "TEAM123456",
+    authKey: await makeAuthKey(), bundleId: "dev.hidemyemail.app", host: "api.push.apple.com",
+  };
+  const t1 = await getProviderToken(cfg, 1_000);
+  const t2 = await getProviderToken(cfg, 1_000 + 10 * 60); // 10 min later → cached
+  expect(t2).toBe(t1);
+  const t3 = await getProviderToken(cfg, 1_000 + 31 * 60); // past 30 min → re-minted
+  expect(t3).not.toBe(t1);
 });
 
 test("pushToUser skips categories the device opted out of", async () => {
