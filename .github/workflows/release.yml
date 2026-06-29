@@ -73,6 +73,20 @@ jobs:
           cd android
           openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 -in release.keystore.enc -out release.keystore -k "$ANDROID_KEYSTORE_DECRYPT_PASS"
 
+      # Firebase config enables FCM push in the shipped APK. Written from a
+      # secret so release builds include it; absent on forks/PRs, where the
+      # app still builds (push reported unavailable) — see android/README.md.
+      - name: Write google-services.json
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+            echo "Wrote android/app/google-services.json — FCM push enabled."
+          else
+            echo "GOOGLE_SERVICES_JSON secret not set — building without Firebase (push disabled)."
+          fi
+
       - name: Build Android Release APK
         env:
           ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}

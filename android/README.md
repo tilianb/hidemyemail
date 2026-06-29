@@ -98,9 +98,11 @@ push is simply reported as unavailable in Settings until it's configured:
    service-account JSON) so the Worker can send via the FCM HTTP v1 API. See
    [`docs/CONFIGURATION.md`](../docs/CONFIGURATION.md).
 
-`google-services.json` is git-ignored (it's per-project). The Worker routes each
-device to its platform's transport (APNs for iOS, FCM for Android) off the
-`push_devices.platform` column.
+`google-services.json` is git-ignored (it's per-project). For **release builds**,
+CI writes it from a `GOOGLE_SERVICES_JSON` repository secret (the file's full
+contents) before `assembleRelease`; without the secret the release APK still
+builds, just with push disabled. The Worker routes each device to its platform's
+transport (APNs for iOS, FCM for Android) off the `push_devices.platform` column.
 
 ## Roadmap
 
