@@ -85,7 +85,10 @@ async function main() {
     const { body, heading } = stripFirstH1(raw);
     const rewritten = rewriteLinks(page.src, body).trimStart();
     const title = page.title || heading || page.slug;
-    const frontmatter = `---\ntitle: ${yamlString(title)}\n---\n\n`;
+    // "Edit page" must point at the real source in the repo, not the generated
+    // (git-ignored) file under src/content/docs/. Edits flow through `dev`.
+    const editUrl = `https://github.com/tilianb/hidemyemail/edit/dev/${page.src}`;
+    const frontmatter = `---\ntitle: ${yamlString(title)}\neditUrl: ${yamlString(editUrl)}\n---\n\n`;
     await writeFile(join(OUT_DIR, `${page.slug}.md`), frontmatter + rewritten + "\n");
     console.log(`synced ${page.src} -> ${page.slug}.md`);
   }
