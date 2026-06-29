@@ -53,6 +53,36 @@ Items are removed when shipped; see CHANGELOG.md for what already landed.
   - Android: Autofill service + Credential Manager provider.
 
 
+## Self-hosting simplicity & onboarding
+
+Standing up an instance today touches a lot of surface — AWS (SES receive +
+send, S3, SNS, IAM), DNS (MX/SPF/DKIM/DMARC + AASA), a Cloudflare Worker + D1,
+~9 Worker secrets, and a manual first-user bootstrap. Reduce it, roughly in
+order of leverage:
+
+- [ ] **One-shot setup script** (`npm run setup`) that generates the random
+  secrets (`SESSION_SECRET`, `ACTION_SECRET`, `DESTINATION_ENCRYPTION_KEY`),
+  runs the first-user `hash-password` bootstrap, and `wrangler secret put`s
+  everything in a single interactive pass. Collapses ~6 manual secret steps
+  into one. Highest usefulness-per-effort.
+- [ ] **AWS infrastructure-as-code** (CloudFormation/Terraform template or a
+  scripted `aws` flow) for the SES receipt rule set, S3 inbound bucket +
+  policy, SNS topic + subscription, and the scoped IAM user — the largest
+  manual surface today. Pair with the existing `ses-check.mjs` verifier.
+- [ ] **In-dashboard "setup doctor"** in the admin panel: a health check that
+  reports which secrets, DNS records, and AWS resources are missing or
+  misconfigured, so onboarding is guided rather than doc-driven.
+- [ ] **Fewer required variables**: derive more values from fewer (extend the
+  pattern where `APNS_TEAM_ID`/`APNS_BUNDLE_ID` already fall back to
+  `APPLE_APP_ID`) and give every non-essential var a sane default, so a minimal
+  deploy needs the shortest possible secret list.
+- [ ] **Make the Docker path the documented "easy mode"** — it already reduces
+  the Cloudflare/D1 setup to a single container, leaving AWS as the only
+  external dependency to wire up.
+- [ ] The **hosted push relay** (see Push notifications) and **custom-domains
+  BYOD** (see below) both cut setup steps too: the relay removes per-operator
+  APNs/FCM credentials, and BYOD moves SES identity creation into the dashboard.
+
 ## Deliverability (beyond what shipped)
 
 - [ ] Consider ARC sealing of forwards instead of header stripping once an
