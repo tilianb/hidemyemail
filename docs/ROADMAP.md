@@ -57,11 +57,12 @@ order (the abstraction is the enabler; later items get cheaper once it lands):
   interfaces and move the SES/S3/SNS specifics behind them, selected by a
   `MAIL_PROVIDER` setting. Foundational — unblocks every option below and is the
   single biggest lever for cutting the AWS-only setup barrier.
-- [ ] **(P1–P2) Inbound via Cloudflare Email Routing (Email Workers).** Receive
-  mail directly in the Worker — no SES receipt rules, no S3, no SNS. The biggest
-  setup reduction for Cloudflare-hosted domains and squarely on the "no mail
-  stack" thesis. Note the constraints (message-size cap; the domain must be on
-  Cloudflare; reply-from path still needs an outbound sender).
+- [ ] **(P1–P2) Inbound via Cloudflare Email Routing (Email Workers)** — the
+  **recommended first alternative to document**. Receive mail directly in the
+  Worker — no SES receipt rules, no S3, no SNS. The biggest setup reduction for
+  Cloudflare-hosted domains and squarely on the "no mail stack" thesis. Note the
+  constraints (message-size cap; the domain must be on Cloudflare; reply-from
+  path still needs an outbound sender).
 - [ ] **(P2) Outbound via Resend** — recommended HTTP send provider: simple API,
   generous free tier, strong DX. A drop-in `MailOutbound` implementation behind
   the abstraction. Support other HTTP providers the same way — **Postmark**
