@@ -101,6 +101,10 @@ const mf = new Miniflare({
     APNS_TEAM_ID: env.APNS_TEAM_ID ?? "",
     APNS_BUNDLE_ID: env.APNS_BUNDLE_ID ?? "",
     APNS_HOST: env.APNS_HOST ?? "",
+    // Android push (optional) — FCM HTTP v1. Empty leaves Android push disabled
+    // (fcmConfig() returns null). FCM_PROJECT_ID defaults to the service
+    // account's project_id when unset.
+    FCM_PROJECT_ID: env.FCM_PROJECT_ID ?? "",
     // Secrets — Miniflare treats `bindings` and secrets the same way; the
     // worker reads them off `env`. Keep them in this map so the Env interface
     // sees the full surface.
@@ -112,6 +116,7 @@ const mf = new Miniflare({
     DESTINATION_ENCRYPTION_KEY: env.DESTINATION_ENCRYPTION_KEY,
     SNS_SECRET: env.SNS_SECRET ?? "",
     APNS_AUTH_KEY: env.APNS_AUTH_KEY ?? "",
+    FCM_SERVICE_ACCOUNT: env.FCM_SERVICE_ACCOUNT ?? "",
   },
 });
 

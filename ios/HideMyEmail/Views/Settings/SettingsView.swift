@@ -39,8 +39,11 @@ struct SettingsView: View {
             }
             .themedScrollBackground()
             .navigationTitle("Settings")
-            .confirmationDialog("Sign out?", isPresented: $showSignOut, titleVisibility: .visible) {
+            .alert("Sign out?", isPresented: $showSignOut) {
+                Button("Cancel", role: .cancel) { }
                 Button("Sign Out", role: .destructive) { Task { await app.signOut() } }
+            } message: {
+                Text("You'll need to sign in again to manage your aliases.")
             }
         }
     }

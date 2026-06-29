@@ -44,6 +44,14 @@ export function isValidApnsToken(token: string): boolean {
   return /^[0-9a-f]{64,200}$/.test(token);
 }
 
+// FCM registration tokens are long, case-sensitive, URL-safe strings (often
+// shaped `<instance-id>:<APA91b…>`). They are not hex, so they get their own
+// validator and the route must NOT lowercase them. Length/charset bounds
+// reject junk without being so tight they break when Google tweaks the format.
+export function isValidFcmToken(token: string): boolean {
+  return /^[A-Za-z0-9_:.-]{64,400}$/.test(token);
+}
+
 // Register (or refresh) a device for a user. Idempotent on token: an existing
 // token is reassigned to this user and its prefs/last_seen updated.
 export async function upsertPushDevice(
@@ -127,17 +135,27 @@ export async function listPushDevices(db: D1Database, userId: number): Promise<P
   return res.results ?? [];
 }
 
-// Tokens for a user that have opted in to a given category. This is the only
-// query the dispatch path needs: it returns just the device tokens to push to.
+// A device (token + platform) the dispatch path should push to. Platform tells
+// the dispatcher which transport to use (APNs for iOS, FCM for Android).
+export interface CategoryDevice { token: string; platform: string; }
+
+// Devices for a user that have opted in to a given category. This is the query
+// the dispatch path needs: token + platform so it can pick APNs vs FCM.
 // Gated on an active, non-tombstoned account so late bounce/complaint hooks
 // can't push to a signed-out/self-deleted user during the purge grace window
 // (mirrors the session guard in api/app.ts).
-export async function tokensForCategory(db: D1Database, userId: number, category: PushCategory): Promise<string[]> {
+export async function devicesForCategory(db: D1Database, userId: number, category: PushCategory): Promise<CategoryDevice[]> {
   const col = CATEGORY_COLUMN[category];
   const res = await db.prepare(
-    `SELECT d.token FROM push_devices d
+    `SELECT d.token, d.platform FROM push_devices d
        JOIN users u ON u.id = d.user_id
       WHERE d.user_id = ? AND d.${col} = 1 AND u.active = 1 AND u.deleted_at IS NULL`
-  ).bind(userId).all<{ token: string }>();
-  return (res.results ?? []).map((r) => r.token);
+  ).bind(userId).all<CategoryDevice>();
+  return res.results ?? [];
+}
+
+// Token-only view of `devicesForCategory`, kept for callers/tests that only
+// need the tokens.
+export async function tokensForCategory(db: D1Database, userId: number, category: PushCategory): Promise<string[]> {
+  return (await devicesForCategory(db, userId, category)).map((d) => d.token);
 }

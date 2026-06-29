@@ -7,9 +7,10 @@ opt-in in `worker/src/api/`).
 
 Sign in (passphrase + TOTP MFA, or **passkey** via the web handoff), manage
 aliases and personal subdomains, manage destination inboxes, configure
-block/allow rules, and view stats. The remaining native integrations (push,
-share target) are tracked as follow-ups — see [the roadmap](../docs/ROADMAP.md),
-kept at parity with iOS.
+block/allow rules, view stats, and receive **push notifications** (FCM) for
+blocked mail and paused destinations. The remaining native integrations (share
+target, Autofill) are tracked as follow-ups — see
+[the roadmap](../docs/ROADMAP.md), kept at parity with iOS.
 
 ## Requirements
 
@@ -83,7 +84,27 @@ native credential API:
 This mirrors the iOS `WebSessionAuthenticator`, and works against any server,
 self-hosted included, with no per-app association setup.
 
+### Push notifications (FCM)
+
+Push uses Firebase Cloud Messaging. The app **builds and runs without Firebase** —
+push is simply reported as unavailable in Settings until it's configured:
+
+1. **Firebase project** — create one for the `dev.hidemyemail.app` package and
+   download its `google-services.json` into `android/app/`. Its presence is what
+   switches on the Google Services Gradle plugin (the build skips it otherwise),
+   so the dependency-injected `FirebaseApp` initialises and the
+   Settings ▸ Notifications toggle becomes enabled.
+2. **Worker** — set the `FCM_SERVICE_ACCOUNT` secret (the Firebase
+   service-account JSON) so the Worker can send via the FCM HTTP v1 API. See
+   [`docs/CONFIGURATION.md`](../docs/CONFIGURATION.md).
+
+`google-services.json` is git-ignored (it's per-project). For **release builds**,
+CI writes it from a `GOOGLE_SERVICES_JSON` repository secret (the file's full
+contents) before `assembleRelease`; without the secret the release APK still
+builds, just with push disabled. The Worker routes each device to its platform's
+transport (APNs for iOS, FCM for Android) off the `push_devices.platform` column.
+
 ## Roadmap
 
-Native-app follow-ups (push notifications, share target, Autofill) are tracked
-in the shared [roadmap](../docs/ROADMAP.md) with parity across iOS and Android.
+Remaining native-app follow-ups (share target, Autofill) are tracked in the
+shared [roadmap](../docs/ROADMAP.md) with parity across iOS and Android.

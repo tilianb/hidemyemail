@@ -30,6 +30,7 @@ built dashboard assets.
 | `docs/` | Setup/deploy/config docs + `ROADMAP.md` (tracked backlog) |
 | `ios/` | Native SwiftUI app (XcodeGen `project.yml`) |
 | `android/` | Native Android app — Kotlin + Jetpack Compose (Gradle, package `dev.hidemyemail.app`) |
+| `website/` | Astro Starlight docs site, generated from `docs/` + README/CHANGELOG/ROADMAP by `scripts/sync-docs.mjs`; published to GitHub Pages |
 
 ## Mobile (iOS + Android)
 
@@ -64,6 +65,12 @@ cd dashboard && npm ci && npm run build
 Always run both before committing; CI (`.github/workflows`) runs them too.
 There is no lint step beyond tsc. Local dev: `npx wrangler dev` in `worker/`
 plus `npm run dev` in `dashboard/` (Vite proxies to the Worker).
+
+Docs site: `cd website && npm install && npm run dev` (build: `npm run build`).
+`npm run sync` (auto-run before dev/build) regenerates `src/content/docs/` from
+the repo markdown — never hand-edit that directory; edit `docs/`/README instead.
+CI: `.github/workflows/docs.yml` builds and deploys to GitHub Pages on push to
+`main`.
 
 ## Conventions
 

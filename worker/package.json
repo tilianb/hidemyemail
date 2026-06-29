@@ -1,6 +1,6 @@
 {
   "name": "hidemyemail-worker",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Cloudflare Worker for HideMyEmail alias service",
   "author": "Tilian Burger",
   "license": "MIT",

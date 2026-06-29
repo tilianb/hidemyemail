@@ -214,3 +214,15 @@ data class RecoverResponse(
     val token: String? = null,
     @SerialName("fresh_auth") val freshAuth: String? = null,
 )
+
+// Per-device push opt-ins, mirroring the Worker's push_devices columns and the
+// iOS `PushPrefs`. Defaults surface the events your inbox can't show you
+// (blocked mail, paused destinations) and leave the noisy, already-in-inbox
+// events (forwards, reply receipts) off.
+@Serializable
+data class PushPrefs(
+    val blocked: Boolean = true,
+    val bounce: Boolean = true,
+    val forward: Boolean = false,
+    val reply: Boolean = false,
+)

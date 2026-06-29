@@ -26,6 +26,10 @@ export interface Env {
   APNS_AUTH_KEY?: string;      // contents of the AuthKey_XXXX.p8 (PEM) — a secret
   APNS_BUNDLE_ID?: string;     // apns-topic (falls back to APPLE_APP_ID suffix)
   APNS_HOST?: string;          // override host; default api.push.apple.com (use api.sandbox.push.apple.com for dev builds)
+  // FCM push credentials (Android, HTTP v1 API). When missing, Android push is
+  // a no-op: registration still works, but no notifications are sent.
+  FCM_SERVICE_ACCOUNT?: string; // full Firebase service-account JSON (a secret)
+  FCM_PROJECT_ID?: string;      // overrides the service account's project_id when set
 }
 
 export interface DomainRow { id: number; domain: string; default_destination: string; active: number; created_at: number; verified_at: number | null; verification_token: string | null; catch_all: number | null; inline_actions_pref: string | null; }
