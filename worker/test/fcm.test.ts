@@ -35,7 +35,9 @@ const FCM_TOKEN = `dEv1ce${"A".repeat(60)}:APA91b${"_x-Z9".repeat(8)}`;
 // `sendBehaviour` decides the send response per token.
 function fcmFetch(sendBehaviour: (token: string) => Response): typeof fetch {
   return (async (url: string, init?: RequestInit) => {
-    if (url.includes("oauth2.googleapis.com")) {
+    // Match on the parsed host, not a substring, so the branch can't be fooled
+    // by an attacker-controlled URL (CodeQL: incomplete URL substring sanitization).
+    if (new URL(url).hostname === "oauth2.googleapis.com") {
       return new Response(JSON.stringify({ access_token: "fake-access-token", expires_in: 3600 }), { status: 200 });
     }
     const sent = JSON.parse(String(init?.body ?? "{}"));
