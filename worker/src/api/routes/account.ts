@@ -13,8 +13,10 @@ export function accountRoutes() {
   /**
    * GET /export
    * Returns a JSON file with the authenticated user's data. Secret columns
-   * (passphrase_hash, recovery_token, recovery_*) are omitted. Destination
-   * emails are decrypted to plaintext.
+   * (passphrase_hash, recovery_token, recovery_*, TOTP secret/backup codes,
+   * passkey public keys) are omitted. Destination emails are decrypted to
+   * plaintext. Includes account preferences, MFA/passkey status, reverse-alias
+   * correspondents, and registered push devices so it is a complete export.
    *
    * Fresh-auth gated: the export contains every destination address in
    * plaintext, so a stolen long-lived session cookie alone must not reach it.
@@ -25,13 +27,21 @@ export function accountRoutes() {
     const db = c.env.DB;
     const key = c.env.DESTINATION_ENCRYPTION_KEY;
 
-    // User row — omit secret columns
+    // User row — omit secret columns; include account-level preferences
     const user = await db.prepare(
-      "SELECT id, created_at, active, forwarding, name, deleted_at FROM users WHERE id = ?"
-    ).bind(userId).first<{
-      id: number; created_at: number; active: number; forwarding: number;
-      name: string | null; deleted_at: number | null;
-    }>();
+      "SELECT id, created_at, active, forwarding, name, username, inline_actions_enabled, inline_actions_pref, inline_actions_position, deleted_at FROM users WHERE id = ?"
+    ).bind(userId).first<Record<string, unknown>>();
+
+    // MFA status — enabled flag only; the TOTP secret and backup codes are secret.
+    const mfaRow = await db.prepare(
+      "SELECT totp_enabled FROM mfa WHERE user_id = ?"
+    ).bind(userId).first<{ totp_enabled: number }>();
+    const mfa = { totp_enabled: (mfaRow?.totp_enabled ?? 0) === 1 };
+
+    // Passkey credentials — metadata only; the public key is omitted.
+    const passkeysResult = await db.prepare(
+      "SELECT id, device_name, transports, sign_count, created_at FROM passkey_credentials WHERE user_id = ?"
+    ).bind(userId).all<Record<string, unknown>>();
 
     // Domains owned by this user
     const domainsResult = await db.prepare(
@@ -71,6 +81,22 @@ export function accountRoutes() {
       }))
     );
     const destinationIds = (destinationsResult.results ?? []).map(d => d.id);
+    const aliasIds = (aliasesResult.results ?? []).map(a => a.id as number);
+
+    // Reverse-alias map — the correspondents (and reply-routing tokens) per alias.
+    let reverseMap: Record<string, unknown>[] = [];
+    if (aliasIds.length > 0) {
+      const placeholders = aliasIds.map(() => "?").join(", ");
+      const rm = await db.prepare(
+        `SELECT token, alias_id, external_sender, created_at, last_used_at FROM reverse_map WHERE alias_id IN (${placeholders})`
+      ).bind(...aliasIds).all<Record<string, unknown>>();
+      reverseMap = rm.results ?? [];
+    }
+
+    // Registered push devices and their per-device notification preferences.
+    const pushDevicesResult = await db.prepare(
+      "SELECT platform, token, notify_blocked, notify_bounce, notify_forward, notify_reply, created_at, last_seen_at FROM push_devices WHERE user_id = ?"
+    ).bind(userId).all<Record<string, unknown>>();
 
     // Blocks owned by this user (global, per-subdomain, and per-alias; block/allow)
     const blocksResult = await db.prepare(
@@ -96,10 +122,14 @@ export function accountRoutes() {
     const payload = {
       exported_at: ts,
       user,
+      mfa,
+      passkeys: passkeysResult.results ?? [],
       domains,
       aliases,
       destinations,
+      reverse_map: reverseMap,
       blocks: blocksResult.results ?? [],
+      push_devices: pushDevicesResult.results ?? [],
       events: [...(eventsResult.results ?? []), ...destinationEvents],
     };
 

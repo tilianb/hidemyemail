@@ -26,6 +26,9 @@
     // Passkeys: "<AppleTeamID>.<bundleID>" — served in the AASA file so iOS can
     // verify the webcredentials association. Omit if not shipping the iOS app.
     "APPLE_APP_ID": "paste-your-team-id.your.bundle.id"
+    // iOS push (optional): APNS_KEY_ID, and optionally APNS_TEAM_ID / APNS_BUNDLE_ID
+    // (both derived from APPLE_APP_ID when omitted) and APNS_HOST. The signing
+    // key APNS_AUTH_KEY is a *secret* — set it with `wrangler secret put`.
   },
   "env": {
     "preview": {

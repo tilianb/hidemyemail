@@ -23,6 +23,10 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   inline_actions_default_position: "footer",
   soft_bounce_threshold: "3",
   reply_distinct_recipient_cap: "15",
+  // Days to retain `events` rows; the scheduled job prunes older ones. The
+  // reply first-contact gate reads the durable `contacts` table, so pruning
+  // never revokes reply access. -1 disables retention (keep events forever).
+  events_retention_days: "90",
   // SES receipt verdict handling for inbound forwards. Forwarded spam is
   // re-signed with the alias domain's DKIM, so it burns OUR reputation:
   // spam → flag (X-Spam-Flag, recipient filters can act), virus → drop.

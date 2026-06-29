@@ -278,6 +278,40 @@ actor APIClient {
         try await requestVoid("/api/destinations/\(id)/unsuppress", method: "POST")
     }
 
+    // MARK: - Push notifications
+
+    /// Devices registered for this account, with their notification prefs.
+    func pushDevices() async throws -> [PushDevice] {
+        try await request("/api/push/devices")
+    }
+
+    /// Register (or refresh) this device's APNs token and notification prefs.
+    /// Idempotent on the token.
+    func registerPushDevice(token: String, prefs: PushPrefs) async throws {
+        try await requestVoid("/api/push/devices", method: "POST", body: [
+            "token": token,
+            "platform": "ios",
+            "prefs": prefsBody(prefs),
+        ])
+    }
+
+    /// Update notification prefs for an already-registered token.
+    func updatePushPrefs(token: String, prefs: PushPrefs) async throws {
+        try await requestVoid("/api/push/devices", method: "PATCH", body: [
+            "token": token,
+            "prefs": prefsBody(prefs),
+        ])
+    }
+
+    /// Unregister a device token (sign-out, or the user disabling push).
+    func unregisterPushDevice(token: String) async throws {
+        try await requestVoid("/api/push/devices", method: "DELETE", body: ["token": token])
+    }
+
+    private func prefsBody(_ p: PushPrefs) -> [String: Any] {
+        ["blocked": p.blocked, "bounce": p.bounce, "forward": p.forward, "reply": p.reply]
+    }
+
     // MARK: - Core request plumbing
 
     private func request<T: Decodable>(

@@ -178,6 +178,9 @@ export const api = {
   adminUpdateDomain: (id: number, data: { allow_custom_aliases?: number; allow_subdomain_aliases?: number; active?: number }) => req<{ ok: true }>(`/api/admin/domains/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   adminVerifyDomain: (id: number) => req<{ ok: true; verified: boolean; error?: string; results?: { verify_txt: boolean; mx: boolean; spf: boolean; wildcard_mx: boolean } }>(`/api/admin/domains/${id}/verify`, { method: "POST" }),
 
+  // Push notification endpoints
+  pushTest: () => req<{ ok: boolean; sent: number; failures: { token: string; status: number; reason?: string }[]; reason?: string }>("/api/push/test", { method: "POST" }),
+
   // Passkey endpoints
   passkeyList: () => req<{ id: string; device_name: string | null; created_at: number }[]>("/api/settings/passkeys"),
   passkeyChallenge: () => req<Record<string, unknown>>("/api/settings/passkeys/challenge", { method: "POST" }),

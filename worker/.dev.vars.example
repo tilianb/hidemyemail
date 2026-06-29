@@ -11,3 +11,11 @@ ACTION_SECRET=replace-with-openssl-rand-hex-32
 AUTH_PASSWORD_SALT=replace-with-worker-scripts-hash-password-output
 AUTH_PASSWORD_HASH=replace-with-worker-scripts-hash-password-output
 DESTINATION_ENCRYPTION_KEY=replace-with-32-byte-hex-key
+
+# iOS push notifications (optional — push is a no-op when unset).
+# APNS_TEAM_ID / APNS_BUNDLE_ID are derived from APPLE_APP_ID when omitted.
+# APNS_HOST: api.sandbox.push.apple.com for Xcode/dev-signed builds (local dev),
+#            api.push.apple.com for TestFlight / App Store (production).
+APNS_KEY_ID=replace-with-10-char-apns-key-id
+APNS_AUTH_KEY=replace-with-contents-of-AuthKey_XXXXXXXXXX.p8
+APNS_HOST=api.sandbox.push.apple.com
