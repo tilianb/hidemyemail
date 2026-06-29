@@ -12,7 +12,7 @@ Self-hosted, **serverless** email aliases for your domains. No VPS, no
 Postfix, no mail stack. It runs as a Cloudflare Worker with a React
 dashboard, Cloudflare D1 for state, and AWS SES/S3/SNS for receiving and
 sending mail. The running cost is **~$0/month** on the Cloudflare free tier
-plus AWS SES usage.
+plus AWS SES usage. Native **iOS** and **Android** apps are included.
 
 <p align="center">
   <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/tilianb/hidemyemail">
@@ -37,6 +37,7 @@ Recipients see the alias.
 | Per-alias / per-subdomain block & allow rules | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Bounce/complaint auto-suppression | ✅ | ✅ | ✅ | n/a | n/a |
 | Multi-user with admin panel | ✅ | hosted plans | hosted plans | ❌ | ❌ |
+| Native mobile apps | ✅ iOS + Android | ✅ | ❌ | ❌ | ❌ |
 | Typical self-host cost | ~$0 + SES cents | VPS $5+/mo | VPS $5+/mo | free (limited) | $9+/mo |
 | Open source | ✅ MIT | ✅ | ✅ | ❌ | ❌ |
 
