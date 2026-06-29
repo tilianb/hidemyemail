@@ -1,6 +1,7 @@
 package dev.hidemyemail.app.push
 
 import android.content.Context
+import dev.hidemyemail.app.AppViewModel
 import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
 import dev.hidemyemail.app.auth.TokenStore
@@ -86,9 +87,14 @@ object PushManager {
     private fun resolveApi(): ApiClient? {
         apiProvider?.invoke()?.let { return it }
         val ctx = appContext ?: return null
-        val serverUrl = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
-            .getString("server_url", null)?.takeIf { it.isNotEmpty() } ?: return null
+        // The bearer token is the real gate (no token → not signed in). The
+        // server URL falls back to the default, because users on the default
+        // server never persist `server_url` (AppViewModel only defaults it in
+        // memory) — without this, a cold-process token rotation would be dropped.
         val token = TokenStore(ctx).load() ?: return null
+        val serverUrl = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
+            .getString("server_url", null)?.takeIf { it.isNotEmpty() }
+            ?: AppViewModel.DEFAULT_SERVER
         return ApiClient(serverUrl, token)
     }
 
