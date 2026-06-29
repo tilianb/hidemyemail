@@ -1,14 +1,62 @@
 import type { Env } from "../types";
 import * as q from "../db/queries";
-import type { PushCategory } from "../db/push";
-import { apnsConfig, getProviderToken, sendApns } from "./apns";
+import type { CategoryDevice, PushCategory } from "../db/push";
+import { apnsConfig, getProviderToken, sendApns, type ApnsAlert, type ApnsResult } from "./apns";
+import { fcmConfig, getAccessToken, sendFcm, type FcmResult } from "./fcm";
 
-// High-level push dispatch. Resolves a user's opted-in device tokens for the
-// given category, sends the alert to each, and prunes any tokens APNs reports
-// as dead. Best-effort: never throws into the mail path — a push failure must
-// never affect delivery.
+// Per-dispatch transport state: each platform's config plus its lazily-minted
+// provider credential, so a single dispatch signs/exchanges at most once per
+// transport (mirrors how the APNs provider token is reused across a batch).
+interface Dispatcher {
+  apns: ReturnType<typeof apnsConfig>;
+  fcm: ReturnType<typeof fcmConfig>;
+  apnsFetch: typeof fetch;
+  fcmFetch: typeof fetch;
+  jwt: string | null;
+  accessToken: string | null;
+}
+
+function makeDispatcher(env: Env): Dispatcher {
+  return {
+    apns: apnsConfig(env),
+    fcm: fcmConfig(env),
+    apnsFetch: (env as any).__apnsFetch ?? fetch,
+    fcmFetch: (env as any).__fcmFetch ?? fetch,
+    jwt: null,
+    accessToken: null,
+  };
+}
+
+// Send one alert to one device on its platform's transport, pruning the token
+// on the spot if the provider reports it dead (APNs 410 / FCM 404·UNREGISTERED).
+// Returns the provider result, or null when that platform isn't configured.
+async function sendToDevice(
+  env: Env,
+  d: Dispatcher,
+  device: CategoryDevice,
+  alert: ApnsAlert,
+  nowSeconds: number,
+): Promise<ApnsResult | FcmResult | null> {
+  if (device.platform === "android") {
+    if (!d.fcm) return null;
+    d.accessToken ??= await getAccessToken(d.fcm, nowSeconds, d.fcmFetch);
+    const res = await sendFcm(d.fcm, d.accessToken, device.token, alert, d.fcmFetch);
+    if (res.dead) await q.prunePushToken(env.DB, device.token);
+    return res;
+  }
+  if (!d.apns) return null;
+  d.jwt ??= await getProviderToken(d.apns, nowSeconds);
+  const res = await sendApns(d.apns, d.jwt, device.token, alert, d.apnsFetch);
+  if (res.dead) await q.prunePushToken(env.DB, device.token);
+  return res;
+}
+
+// High-level push dispatch. Resolves a user's opted-in devices for the given
+// category and sends the alert to each on its platform (APNs for iOS, FCM for
+// Android), pruning tokens the provider reports as dead. Best-effort: never
+// throws into the mail path — a push failure must never affect delivery.
 //
-// Tests inject a fake fetch via `env.__apnsFetch` (mirrors `__sesSend`).
+// Tests inject fake fetches via `env.__apnsFetch` / `env.__fcmFetch`.
 export async function pushToUser(
   env: Env,
   userId: number,
@@ -18,28 +66,25 @@ export async function pushToUser(
   data?: Record<string, string>,
 ): Promise<void> {
   try {
-    const cfg = apnsConfig(env);
-    if (!cfg) return; // push not configured → no-op
+    const d = makeDispatcher(env);
+    if (!d.apns && !d.fcm) return; // push not configured → no-op
 
-    const tokens = await q.tokensForCategory(env.DB, userId, category);
-    if (tokens.length === 0) return;
+    const devices = await q.devicesForCategory(env.DB, userId, category);
+    if (devices.length === 0) return;
 
-    const doFetch: typeof fetch = (env as any).__apnsFetch ?? fetch;
-    const jwt = await getProviderToken(cfg, Math.floor(Date.now() / 1000));
-    const alert = { title, body, data: { category, ...(data ?? {}) } };
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const alert: ApnsAlert = { title, body, data: { category, ...(data ?? {}) } };
 
-    for (const token of tokens) {
+    for (const device of devices) {
       try {
-        const res = await sendApns(cfg, jwt, token, alert, doFetch);
-        if (res.dead) {
-          await q.prunePushToken(env.DB, token);
-        } else if (!res.ok) {
-          // Likely an environment/topic mismatch (wrong APNS_HOST/BUNDLE_ID).
-          // Keep the token; surface the reason so misconfig is debuggable.
-          console.warn(`APNs ${res.status} ${res.reason ?? ""} — keeping token`);
+        const res = await sendToDevice(env, d, device, alert, nowSeconds);
+        if (res && !res.ok && !res.dead) {
+          // Kept token (config/auth/topic/transient). Surface the reason so a
+          // misconfiguration is debuggable without pruning valid tokens.
+          console.warn(`push ${device.platform} ${res.status} ${res.reason ?? ""} — keeping token`);
         }
       } catch (err) {
-        console.error("APNs send failed", err);
+        console.error(`push send failed (${device.platform})`, err);
       }
     }
   } catch (err) {
@@ -65,12 +110,12 @@ export interface TestPushResponse {
 }
 
 // Send a one-off test alert to every device registered to `userId`. Bypasses
-// per-category opt-in so a user can confirm the full APNs pipeline. Self-scoped
-// (own devices only), rate-limited per account, and prunes 410/Unregistered
-// tokens just like the real dispatch path so a dead device doesn't linger.
+// per-category opt-in so a user can confirm the full push pipeline on either
+// platform. Self-scoped (own devices only), rate-limited per account, and
+// prunes dead tokens just like the real dispatch path so they don't linger.
 export async function sendTestPush(env: Env, userId: number, now: number): Promise<TestPushResponse> {
-  const cfg = apnsConfig(env);
-  if (!cfg) return { status: 503, body: { ok: false, error: "APNs not configured" } };
+  const d = makeDispatcher(env);
+  if (!d.apns && !d.fcm) return { status: 503, body: { ok: false, error: "Push not configured" } };
 
   // Per-account cooldown (reuses the rate_limits table, keyed off a synthetic id).
   const key = `pushtest:${userId}`;
@@ -88,17 +133,21 @@ export async function sendTestPush(env: Env, userId: number, now: number): Promi
     "ON CONFLICT(ip) DO UPDATE SET reset_at = excluded.reset_at"
   ).bind(key, now + TEST_PUSH_COOLDOWN_MS).run();
 
-  const doFetch: typeof fetch = (env as any).__apnsFetch ?? fetch;
-  const jwt = await getProviderToken(cfg, Math.floor(now / 1000));
-  const alert = { title: "HideMyEmail", body: "Test push notification" };
+  const nowSeconds = Math.floor(now / 1000);
+  const alert: ApnsAlert = { title: "HideMyEmail", body: "Test push notification" };
   let sent = 0;
   const failures: { token: string; status: number; reason?: string }[] = [];
   for (const dev of devices) {
     try {
-      const res = await sendApns(cfg, jwt, dev.token, alert, doFetch);
+      const res = await sendToDevice(env, d, { token: dev.token, platform: dev.platform }, alert, nowSeconds);
+      if (!res) {
+        // The device's platform transport isn't configured on this Worker.
+        failures.push({ token: dev.token, status: 503, reason: `${dev.platform} push not configured` });
+        continue;
+      }
       if (res.ok) { sent++; continue; }
+      // sendToDevice already pruned the token if it was dead.
       failures.push({ token: dev.token, status: res.status, reason: res.reason });
-      if (res.dead) await q.prunePushToken(env.DB, dev.token); // 410/Unregistered → prune
     } catch {
       /* transient network error mid-send; leave the token for the next dispatch */
     }

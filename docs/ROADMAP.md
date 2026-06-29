@@ -4,13 +4,28 @@ Tracked backlog of recommendations from the pre-v1 review (2026-06-10).
 Items are removed when shipped; see CHANGELOG.md for what already landed.
 
 
-## Push notifications (top priority)
+## Push notifications
 
 - [x] **iOS APNs** — shipped (blocked / paused-destination on by default,
   forward / reply opt-in).
-- [ ] **Android FCM** — pending. Worker dispatch is APNs-only today; needs an
-  FCM HTTP v1 sender (the `push_devices.platform` column already exists to
-  branch on) plus a Firebase project + service-account secret.
+- [x] **Android FCM** — shipped. Worker dispatch routes per `push_devices.platform`
+  (APNs for iOS, FCM HTTP v1 for Android); enable with a Firebase
+  service-account secret (`FCM_SERVICE_ACCOUNT`) + `google-services.json`.
+- [ ] **Hosted push relay for self-hosters** — let self-hosted servers deliver
+  notifications to the **official** App Store / Play Store apps without each
+  operator obtaining their own APNs key and Firebase/FCM project. The official
+  apps are signed with our bundle id, so only credentials tied to that bundle
+  can push to them; a self-hoster's own APNs/FCM project can't. Plan: a small
+  first-party relay endpoint (hosted by us) that the official apps register
+  against and that self-hosted Workers forward push payloads to. Must be:
+  - **Opt-in**, off by default, with a clear disclaimer — surfaced both in the
+    **admin portal** (operator enables relaying for the deployment) and in
+    **user Settings** (each user consents) — that notification metadata
+    (e.g. alias address, sender, subject snippet) transits our relay.
+  - Authenticated per deployment and rate-limited, carrying the minimum
+    metadata needed to render the alert.
+  - A drop-in alternative to self-managed `APNS_*` / `FCM_*`: when the relay is
+    enabled, the Worker dispatches through it instead of direct APNs/FCM.
 - [ ] **Share-to-mint-alias** so an alias can be generated from any app.
   - iOS: Share extension.
   - Android: share-target activity.

@@ -8,6 +8,7 @@ import dev.hidemyemail.app.auth.TokenStore
 import dev.hidemyemail.app.auth.WebSessionAuth
 import dev.hidemyemail.app.net.ApiClient
 import dev.hidemyemail.app.net.ApiException
+import dev.hidemyemail.app.push.PushManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -52,6 +53,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun api(): ApiClient? = client
 
+    init {
+        // Bridge push state to the authed client. Safe before login: registration
+        // is gated on `enabled` and a valid session inside PushManager.
+        PushManager.attach(application, viewModelScope) { client }
+    }
+
     fun setServerUrl(url: String) {
         val trimmed = url.trim()
         _serverUrl.value = trimmed
@@ -78,6 +85,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 refreshIdentity()
                 _phase.value = AuthPhase.LoggedIn
+                runCatching { PushManager.onLogin() }
             } catch (_: Exception) {
                 signOut()
             }
@@ -141,6 +149,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         tokenStore.save(token)
         refreshIdentity()
         _phase.value = AuthPhase.LoggedIn
+        runCatching { PushManager.onLogin() }
     }
 
     private suspend fun refreshIdentity() {
@@ -183,12 +192,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun signOut() {
-        tokenStore.delete()
-        client?.token = null
-        client?.freshAuth = null
-        _userName.value = ""
-        _isAdmin.value = false
-        _phase.value = AuthPhase.LoggedOut
+        viewModelScope.launch {
+            // Detach this device from the account while the token is still valid,
+            // so the signed-out user stops receiving its pushes (best-effort;
+            // mirrors iOS, which awaits the detach before clearing the session).
+            runCatching { PushManager.onLogout() }
+            tokenStore.delete()
+            client?.token = null
+            client?.freshAuth = null
+            _userName.value = ""
+            _isAdmin.value = false
+            _phase.value = AuthPhase.LoggedOut
+        }
     }
 
     /** Called by screens when a request fails with 401 mid-session. */

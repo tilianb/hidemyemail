@@ -29,6 +29,7 @@ These are deployment-specific, not secrets. Store them in the Cloudflare dashboa
 | `APNS_TEAM_ID` | for iOS push | Apple Developer Team ID. Falls back to the `<TeamID>` prefix of `APPLE_APP_ID` if unset. |
 | `APNS_BUNDLE_ID` | for iOS push | APNs topic (the app bundle id, e.g. `dev.hidemyemail.app`). Falls back to the `<bundleId>` suffix of `APPLE_APP_ID`. |
 | `APNS_HOST` | optional | Override the APNs host. Defaults to `api.push.apple.com`; use `api.sandbox.push.apple.com` for development-signed builds. |
+| `FCM_PROJECT_ID` | optional (Android push) | Firebase project id. Falls back to the `project_id` inside `FCM_SERVICE_ACCOUNT` when unset. |
 
 `worker/wrangler.jsonc` sets `keep_vars: true` so dashboard-managed variables are preserved even when Cloudflare Git deploys run plain `wrangler deploy`.
 
@@ -47,6 +48,7 @@ Set with `wrangler secret put`.
 | `DESTINATION_ENCRYPTION_KEY` | yes | 32-byte hex key for encrypted destination emails. |
 | `SNS_ALLOWED_TOPIC_ARN` | yes for outbound SNS | Exact SNS topic for bounces/complaints. |
 | `APNS_AUTH_KEY` | for iOS push | Contents of the APNs `AuthKey_XXXXXXXXXX.p8` (the full PEM, including the `BEGIN/END PRIVATE KEY` lines). With `APNS_KEY_ID` + team/bundle, enables push; omit and push is a no-op (device registration still works, nothing is sent). |
+| `FCM_SERVICE_ACCOUNT` | for Android push | Full Firebase **service-account JSON** (with `client_email` + `private_key`) for the FCM HTTP v1 API. Enables Android push; omit and Android push is a no-op (device registration still works, nothing is sent). The Android app also needs a matching `google-services.json` at build time. |
 
 ## Generate secret values
 

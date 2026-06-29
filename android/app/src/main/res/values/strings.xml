@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">HideMyEmail</string>
+    <string name="push_channel_id">hidemyemail_default</string>
+    <string name="push_channel_name">Alerts</string>
 </resources>
