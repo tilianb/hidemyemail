@@ -70,13 +70,14 @@ object PushManager {
         runCatching { apiProvider?.invoke()?.registerPushDevice(token, _prefs.value) }
     }
 
-    /** Turn push off: drop this device from the server and the local token. */
+    /** Turn push off: drop this device from the server and invalidate the token. */
     suspend fun disable() {
         _enabled.value = false
         persist()
         deviceToken?.let { token ->
             runCatching { apiProvider?.invoke()?.unregisterPushDevice(token) }
         }
+        invalidateToken()
     }
 
     /** Update per-category prefs and push them to the server. */
@@ -103,14 +104,20 @@ object PushManager {
     }
 
     /**
-     * On sign-out, detach this device from the account while the session is
-     * still valid. Best-effort: a lingering server row self-heals when the next
-     * dispatch hits a token FCM reports as gone (mirrors the iOS comment).
+     * On sign-out, detach this device from the account. We first try the server
+     * `DELETE` (best-effort — it can fail offline or with an expired session),
+     * then **always invalidate the FCM token locally** so a signed-out or shared
+     * device stops receiving the previous account's notifications even if that
+     * `DELETE` didn't land. Invalidating the token also makes any lingering
+     * server row self-heal: the next dispatch hits a now-unknown token, FCM
+     * returns 404/UNREGISTERED, and the Worker prunes it. This mirrors iOS,
+     * which calls `unregisterForRemoteNotifications()` on logout.
      */
     suspend fun onLogout() {
         deviceToken?.let { token ->
             runCatching { apiProvider?.invoke()?.unregisterPushDevice(token) }
         }
+        invalidateToken()
         deviceToken = null
     }
 
@@ -131,6 +138,21 @@ object PushManager {
         FirebaseMessaging.getInstance().token
             .addOnSuccessListener { cont.resume(it) }
             .addOnFailureListener { cont.resume(null) }
+    }
+
+    /**
+     * Force FCM to discard this device's registration token, so background
+     * payloads can no longer be delivered to it. No-op (and never throws) when
+     * Firebase isn't configured. The SDK mints a fresh token on next use.
+     */
+    private suspend fun invalidateToken() {
+        if (!_available.value) return
+        runCatching {
+            suspendCancellableCoroutine { cont ->
+                FirebaseMessaging.getInstance().deleteToken()
+                    .addOnCompleteListener { cont.resume(Unit) }
+            }
+        }
     }
 
     private fun persist() {
