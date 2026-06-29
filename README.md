@@ -64,6 +64,9 @@ Recipients see the alias.
 - Per-subdomain policies and scoped block/allow sender rules.
 - Dashboard for aliases, domains, destinations, rules, users, MFA,
   passkeys, and admin settings. It includes data export and account deletion.
+- Native [iOS](ios/README.md) and [Android](android/README.md) apps:
+  passphrase + TOTP or passkey sign-in, alias/domain/destination/rule
+  management, stats, and push notifications (APNs / FCM).
 - SNS signature checks, encrypted destination addresses, and rate limits.
 
 ## Quick start
@@ -102,6 +105,9 @@ You also need D1 databases, Worker secrets, SES/S3/SNS, and DNS. Follow [Getting
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Security notes](docs/SECURITY.md)
 - [Docker self-hosting](docker/README.md)
+- [iOS app](ios/README.md)
+- [Android app](android/README.md)
+- [Roadmap](docs/ROADMAP.md)
 
 ## Development
 
