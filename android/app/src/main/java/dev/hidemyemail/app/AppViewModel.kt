@@ -192,18 +192,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun signOut() {
-        viewModelScope.launch {
-            // Detach this device from the account while the token is still valid,
-            // so the signed-out user stops receiving its pushes (best-effort;
-            // mirrors iOS, which awaits the detach before clearing the session).
-            runCatching { PushManager.onLogout() }
-            tokenStore.delete()
-            client?.token = null
-            client?.freshAuth = null
-            _userName.value = ""
-            _isAdmin.value = false
-            _phase.value = AuthPhase.LoggedOut
-        }
+        // Snapshot the still-authed client so the background push detach can drop
+        // the server-side device row with a valid token...
+        val pushApi = client?.let { c -> ApiClient(serverUrl.value, c.token).also { it.freshAuth = c.freshAuth } }
+        // ...then clear the local session immediately, so sign-out never blocks on
+        // the network (a stalled/offline DELETE must not keep the device logged in).
+        tokenStore.delete()
+        client?.token = null
+        client?.freshAuth = null
+        _userName.value = ""
+        _isAdmin.value = false
+        _phase.value = AuthPhase.LoggedOut
+        // Best-effort, in the background: invalidate the FCM token (stops delivery
+        // even offline) and remove the server-side row. Mirrors iOS.
+        viewModelScope.launch { runCatching { PushManager.onLogout(pushApi) } }
     }
 
     /** Called by screens when a request fails with 401 mid-session. */

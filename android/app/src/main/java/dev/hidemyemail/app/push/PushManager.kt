@@ -3,12 +3,14 @@ package dev.hidemyemail.app.push
 import android.content.Context
 import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
+import dev.hidemyemail.app.auth.TokenStore
 import dev.hidemyemail.app.net.ApiClient
 import dev.hidemyemail.app.net.PushPrefs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
@@ -18,6 +20,11 @@ import kotlin.coroutines.resume
  * the session hooks. The shared singleton is the bridge between the
  * [PushMessagingService] token callback and the Settings UI — mirroring the iOS
  * `PushManager`.
+ *
+ * It can resolve an authed API client two ways: from the wired ViewModel
+ * ([attach]) when the app is running, or — when FCM wakes the service in a cold
+ * process — from the persisted server URL + bearer token, so token rotations are
+ * registered immediately rather than dropped until the next app launch.
  *
  * Push is *available* only when a Firebase project is configured (a
  * `google-services.json` was present at build time). Without it the toggle is
@@ -36,17 +43,30 @@ object PushManager {
     val available: StateFlow<Boolean> = _available
 
     private var prefsStore: android.content.SharedPreferences? = null
+    private var appContext: Context? = null
     private var apiProvider: (() -> ApiClient?)? = null
     private var scope: CoroutineScope? = null
 
-    // Latest FCM token, in memory only — FCM reissues it and onNewToken refreshes.
+    // Latest FCM token, in memory only — FCM reissues it and onTokenRefresh refreshes.
     @Volatile private var deviceToken: String? = null
 
     /** Wire up persistence + the authed API client. Safe to call repeatedly. */
     fun attach(context: Context, scope: CoroutineScope, apiProvider: () -> ApiClient?) {
         this.scope = scope
         this.apiProvider = apiProvider
-        val store = context.applicationContext.getSharedPreferences("push", Context.MODE_PRIVATE)
+        ensureInit(context)
+    }
+
+    /**
+     * Lazily load persisted state. Runs from both [attach] (app running) and the
+     * FCM service path (cold process), so push state is correct without the
+     * ViewModel. Idempotent — only the first call reads SharedPreferences.
+     */
+    private fun ensureInit(context: Context) {
+        val app = context.applicationContext
+        appContext = app
+        if (prefsStore != null) return
+        val store = app.getSharedPreferences("push", Context.MODE_PRIVATE)
         prefsStore = store
         _enabled.value = store.getBoolean(KEY_ENABLED, false)
         _prefs.value = PushPrefs(
@@ -55,7 +75,21 @@ object PushManager {
             forward = store.getBoolean("forward", false),
             reply = store.getBoolean("reply", false),
         )
-        _available.value = FirebaseApp.getApps(context).isNotEmpty()
+        _available.value = FirebaseApp.getApps(app).isNotEmpty()
+    }
+
+    /**
+     * Resolve an authed client: prefer the wired ViewModel one; otherwise rebuild
+     * it from the persisted server URL + bearer token (the FCM service path, where
+     * no ViewModel exists). Returns null when there's no server/token yet.
+     */
+    private fun resolveApi(): ApiClient? {
+        apiProvider?.invoke()?.let { return it }
+        val ctx = appContext ?: return null
+        val serverUrl = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
+            .getString("server_url", null)?.takeIf { it.isNotEmpty() } ?: return null
+        val token = TokenStore(ctx).load() ?: return null
+        return ApiClient(serverUrl, token)
     }
 
     // MARK: User actions
@@ -67,7 +101,7 @@ object PushManager {
         persist()
         val token = fetchToken() ?: return
         deviceToken = token
-        runCatching { apiProvider?.invoke()?.registerPushDevice(token, _prefs.value) }
+        runCatching { resolveApi()?.registerPushDevice(token, _prefs.value) }
     }
 
     /** Turn push off: drop this device from the server and invalidate the token. */
@@ -75,7 +109,7 @@ object PushManager {
         _enabled.value = false
         persist()
         deviceToken?.let { token ->
-            runCatching { apiProvider?.invoke()?.unregisterPushDevice(token) }
+            runCatching { resolveApi()?.unregisterPushDevice(token) }
         }
         invalidateToken()
     }
@@ -86,7 +120,7 @@ object PushManager {
         persist()
         if (!_enabled.value) return
         val token = deviceToken ?: return
-        val api = apiProvider?.invoke() ?: return
+        val api = resolveApi() ?: return
         // The token is already registered, so PATCH is enough; fall back to a
         // full register if the server doesn't know it yet.
         runCatching { api.updatePushPrefs(token, newPrefs) }
@@ -100,35 +134,51 @@ object PushManager {
         if (!_enabled.value || !_available.value) return
         val token = fetchToken() ?: return
         deviceToken = token
-        runCatching { apiProvider?.invoke()?.registerPushDevice(token, _prefs.value) }
+        runCatching { resolveApi()?.registerPushDevice(token, _prefs.value) }
     }
 
     /**
-     * On sign-out, detach this device from the account. We first try the server
-     * `DELETE` (best-effort — it can fail offline or with an expired session),
-     * then **always invalidate the FCM token locally** so a signed-out or shared
-     * device stops receiving the previous account's notifications even if that
-     * `DELETE` didn't land. Invalidating the token also makes any lingering
-     * server row self-heal: the next dispatch hits a now-unknown token, FCM
-     * returns 404/UNREGISTERED, and the Worker prunes it. This mirrors iOS,
-     * which calls `unregisterForRemoteNotifications()` on logout.
+     * On sign-out, stop notifications for this device. We **invalidate the FCM
+     * token locally first** so background payloads can no longer be delivered
+     * even if the network is down, then best-effort drop the server-side row.
+     * The caller ([dev.hidemyemail.app.AppViewModel.signOut]) clears the local
+     * session synchronously and runs this in the background, passing a snapshot
+     * of the still-authed client via [apiOverride] so the server `DELETE` can
+     * succeed without blocking the UI. Any lingering server row self-heals when
+     * the next dispatch hits the now-dead token (FCM 404/UNREGISTERED → prune).
+     * Mirrors iOS calling `unregisterForRemoteNotifications()` on logout.
      */
-    suspend fun onLogout() {
-        deviceToken?.let { token ->
-            runCatching { apiProvider?.invoke()?.unregisterPushDevice(token) }
-        }
+    suspend fun onLogout(apiOverride: ApiClient? = null) {
         invalidateToken()
+        val token = deviceToken
+        val api = apiOverride ?: resolveApi()
+        if (token != null && api != null) {
+            runCatching { api.unregisterPushDevice(token) }
+        }
         deviceToken = null
     }
 
     // MARK: FCM service callback
 
-    /** Called by [PushMessagingService] when FCM issues a new token. */
-    fun onNewToken(token: String) {
+    /**
+     * Called by [PushMessagingService] when FCM issues a new token — including in
+     * a cold/background process where [attach] has not run. Initialises from
+     * persisted state and registers the rotated token immediately if push is on,
+     * so notifications keep flowing without waiting for the next app launch.
+     */
+    fun onTokenRefresh(context: Context, token: String) {
+        ensureInit(context)
         deviceToken = token
         if (!_enabled.value) return
-        scope?.launch {
-            runCatching { apiProvider?.invoke()?.registerPushDevice(token, _prefs.value) }
+        val api = resolveApi() ?: return
+        val activeScope = scope
+        if (activeScope != null) {
+            activeScope.launch { runCatching { api.registerPushDevice(token, _prefs.value) } }
+        } else {
+            // Cold process: no ViewModel scope. Block the FCM callback thread (it
+            // is not the main thread) until registration completes so the rotation
+            // isn't lost when the process is torn down.
+            runBlocking { runCatching { api.registerPushDevice(token, _prefs.value) } }
         }
     }
 

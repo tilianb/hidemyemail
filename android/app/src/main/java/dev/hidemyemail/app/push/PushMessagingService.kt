@@ -11,6 +11,9 @@ import com.google.firebase.messaging.FirebaseMessagingService
  */
 class PushMessagingService : FirebaseMessagingService() {
     override fun onNewToken(token: String) {
-        PushManager.onNewToken(token)
+        // May run in a cold process before the ViewModel wires PushManager, so
+        // pass a context — the manager initialises from persisted state and
+        // registers the rotated token itself.
+        PushManager.onTokenRefresh(applicationContext, token)
     }
 }
