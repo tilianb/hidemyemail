@@ -103,6 +103,7 @@ You also need D1 databases, Worker secrets, SES/S3/SNS, and DNS. Follow [Getting
 - [Deployment guide](docs/DEPLOY.md)
 - [AWS SES setup](docs/AWS_SES_SETUP.md)
 - [Configuration](docs/CONFIGURATION.md)
+- [API (addy.io-compatible)](docs/API.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Security notes](docs/SECURITY.md)
 - [Docker self-hosting](docker/README.md)

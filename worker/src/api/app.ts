@@ -16,6 +16,7 @@ import { adminRoutes } from "./routes/admin";
 import { settingsRoutes } from "./routes/settings";
 import { accountRoutes } from "./routes/account";
 import { pushRoutes } from "./routes/push";
+import { v1Routes } from "./routes/v1";
 import { getSetting } from "../lib/settings";
 import { SETTING_DEFAULTS } from "../config";
 
@@ -41,6 +42,10 @@ export function createApp() {
   app.use("*", cors({
     origin: async (origin, c) => {
       if (!origin) return "";
+      // The addy.io-compatible token API is meant to be called from browser
+      // extensions and third-party tools — allow any origin there. It never
+      // uses cookies (Bearer API keys only), so this widens nothing else.
+      if (new URL(c.req.url).pathname.startsWith("/api/v1/")) return origin;
       // Read CORS allowed domains from DB settings (falls back to defaults)
       let domainsStr: string;
       try {
@@ -58,7 +63,7 @@ export function createApp() {
       } catch (e) {}
       return "";
     },
-    allowHeaders: ["Content-Type", "Cookie", "Authorization", "X-Auth-Mode"],
+    allowHeaders: ["Content-Type", "Cookie", "Authorization", "X-Auth-Mode", "X-Requested-With"],
     credentials: true
   }));
 
@@ -72,6 +77,9 @@ export function createApp() {
   // session guard for everything else under /api
   app.use("/api/*", async (c, next) => {
     const p = new URL(c.req.url).pathname;
+    // /api/v1/* is the addy.io-compatible surface — authenticated by its own
+    // API-key middleware (routes/v1.ts), never by session cookies.
+    if (p.startsWith("/api/v1/")) return next();
     if (
       p === "/api/login" ||
       p === "/api/register" ||
@@ -114,6 +122,8 @@ export function createApp() {
   app.route("/api/settings", settingsRoutes());
   app.route("/api/account", accountRoutes());
   app.route("/api/push", pushRoutes());
+  // addy.io-compatible API (Bearer API keys — see routes/v1.ts)
+  app.route("/api/v1", v1Routes());
 
   // Apple App Site Association — lets the iOS app claim `webcredentials` for
   // passkeys on this domain. Served by the Worker (not a static asset) so the

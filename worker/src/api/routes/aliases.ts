@@ -4,7 +4,7 @@ import { hashDestination, encryptDestination, decryptDestination } from "../../l
 import { getNumericSetting } from "../../lib/settings";
 
 // Validate email local part (RFC 5321 safe subset)
-function isValidLocalPart(s: string): boolean {
+export function isValidLocalPart(s: string): boolean {
   if (!s || s.length > 64) return false;
   // Allow lowercase alphanumeric, dots, hyphens; no leading/trailing dot/hyphen, no consecutive dots
   return /^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/.test(s) && !s.includes("..");
