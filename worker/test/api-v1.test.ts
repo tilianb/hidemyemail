@@ -272,6 +272,20 @@ test("list, get, deactivate/activate, delete round-trip; other users' aliases in
   expect((await list2.json<{ data: unknown[] }>()).data.length).toBe(0);
 });
 
+test("filter[search] treats LIKE wildcards literally", async () => {
+  const app = createApp();
+  const token = await createKey(app);
+  const h = { Authorization: `Bearer ${token}` };
+  await db().prepare(
+    "INSERT INTO aliases (domain_id, user_id, local_part, full_address, active, source, created_at) VALUES (10, 1, 'a_b', 'a_b@hidemyemail.dev', 1, 'api', 123), (10, 1, 'axb', 'axb@hidemyemail.dev', 1, 'api', 123)"
+  ).run();
+
+  const res = await app.request("/api/v1/aliases?filter[search]=a_b", { headers: h }, testEnv);
+  const { data } = await res.json<{ data: { email: string }[] }>();
+  expect(data.length).toBe(1);
+  expect(data[0]!.email).toBe("a_b@hidemyemail.dev");
+});
+
 test("domain-options lists usable domains with the main domain as default", async () => {
   const app = createApp();
   const token = await createKey(app);

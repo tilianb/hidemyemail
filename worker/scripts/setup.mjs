@@ -25,6 +25,7 @@
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
 import process from "node:process";
+import { hashPassphrase } from "./pbkdf2.mjs";
 
 const args = process.argv.slice(2);
 const printOnly = args.includes("--print");
@@ -35,7 +36,7 @@ if (envIdx !== -1 && wranglerEnv === undefined) {
   process.exit(1);
 }
 
-const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
+const hex = (b) => Buffer.from(b).toString("hex");
 
 // One shared readline interface for the whole run — a fresh interface per
 // question swallows buffered lines when input is piped.
@@ -86,16 +87,6 @@ function ask(question, { hidden = false } = {}) {
   });
 }
 
-async function hashPassphrase(passphrase) {
-  const enc = new TextEncoder();
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const key = await crypto.subtle.importKey("raw", enc.encode(passphrase), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 100_000, hash: "SHA-256" }, key, 256
-  );
-  return { salt: hex(salt.buffer), hash: hex(bits) };
-}
-
 function putSecret(name, value) {
   const cmd = ["wrangler", "secret", "put", name];
   if (wranglerEnv) cmd.push("--env", wranglerEnv);
@@ -139,8 +130,8 @@ const { salt, hash } = await hashPassphrase(passphrase);
 const secrets = {
   AUTH_PASSWORD_SALT: salt,
   AUTH_PASSWORD_HASH: hash,
-  SESSION_SECRET: hex(crypto.getRandomValues(new Uint8Array(32)).buffer),
-  ACTION_SECRET: hex(crypto.getRandomValues(new Uint8Array(32)).buffer),
+  SESSION_SECRET: hex(crypto.getRandomValues(new Uint8Array(32))),
+  ACTION_SECRET: hex(crypto.getRandomValues(new Uint8Array(32))),
   // AES-256-GCM key — must decode to exactly 32 bytes, hence base64 not hex.
   DESTINATION_ENCRYPTION_KEY: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64"),
 };

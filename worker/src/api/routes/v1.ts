@@ -1,9 +1,9 @@
 import { Hono } from "hono";
 import type { Env } from "../../types";
 import { authenticateApiKey } from "../../lib/api-keys";
-import { decryptDestination, encryptDestination, hashDestination } from "../../lib/crypto";
-import { getMainGlobalDomain, getNumericSetting } from "../../lib/settings";
-import { isValidLocalPart } from "./aliases";
+import { getMainGlobalDomain } from "../../lib/settings";
+import { isValidLocalPart, randomLocalPart, escapeLike } from "../../lib/alias-format";
+import { aliasQuotaExceeded, resolveDefaultDestination } from "../../db/aliases";
 
 /**
  * addy.io-compatible API surface (/api/v1), authenticated with per-user API
@@ -84,13 +84,6 @@ const ALIAS_SELECT =
   "a.fwd_count, a.blocked_count, a.reply_count, a.created_at, a.last_seen_at, d.domain " +
   "FROM aliases a JOIN domains d ON d.id = a.domain_id";
 
-function randomLocalPart(): string {
-  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  const arr = new Uint8Array(8);
-  crypto.getRandomValues(arr);
-  return Array.from(arr).map((x) => chars[x % chars.length]).join("");
-}
-
 export function v1Routes() {
   const r = new Hono<V1Env>();
 
@@ -120,11 +113,13 @@ export function v1Routes() {
   // plus the caller's own (subdomain) domains.
   r.get("/domain-options", async (c) => {
     const userId = c.get("userId");
-    const rows = await c.env.DB.prepare(
-      "SELECT domain FROM domains WHERE (is_global = 1 AND active = 1 AND verified_at IS NOT NULL) " +
-      "OR (is_global = 0 AND user_id = ?) ORDER BY is_global DESC, domain"
-    ).bind(userId).all<{ domain: string }>();
-    const main = await getMainGlobalDomain(c.env.DB, c.env);
+    const [rows, main] = await Promise.all([
+      c.env.DB.prepare(
+        "SELECT domain FROM domains WHERE (is_global = 1 AND active = 1 AND verified_at IS NOT NULL) " +
+        "OR (is_global = 0 AND user_id = ?) ORDER BY is_global DESC, domain"
+      ).bind(userId).all<{ domain: string }>(),
+      getMainGlobalDomain(c.env.DB, c.env),
+    ]);
     const options = (rows.results ?? []).map((d) => d.domain);
     return c.json({
       data: options,
@@ -136,9 +131,9 @@ export function v1Routes() {
   r.get("/aliases", async (c) => {
     const userId = c.get("userId");
     const search = c.req.query("filter[search]");
-    const sql = `${ALIAS_SELECT} WHERE a.user_id = ?${search ? " AND a.full_address LIKE ?" : ""} ORDER BY a.created_at DESC LIMIT 100`;
+    const sql = `${ALIAS_SELECT} WHERE a.user_id = ?${search ? " AND a.full_address LIKE ? ESCAPE '\\'" : ""} ORDER BY a.created_at DESC LIMIT 100`;
     const stmt = search
-      ? c.env.DB.prepare(sql).bind(userId, `%${search}%`)
+      ? c.env.DB.prepare(sql).bind(userId, `%${escapeLike(search)}%`)
       : c.env.DB.prepare(sql).bind(userId);
     const rows = await stmt.all<AliasDbRow>();
     return c.json({ data: (rows.results ?? []).map(aliasResource) });
@@ -179,13 +174,8 @@ export function v1Routes() {
     }
     if (!dom) return c.json({ message: "The chosen domain is not available." }, 422);
 
-    const maxTotal = await getNumericSetting(c.env.DB, "max_total_aliases");
-    if (maxTotal >= 0) {
-      const total = await c.env.DB.prepare("SELECT COUNT(*) as count FROM aliases WHERE user_id = ?")
-        .bind(userId).first<{ count: number }>();
-      if (total && total.count >= maxTotal) {
-        return c.json({ message: "You have reached your alias limit." }, 403);
-      }
+    if (await aliasQuotaExceeded(c.env.DB, userId)) {
+      return c.json({ message: "You have reached your alias limit." }, 403);
     }
 
     const format = b.format ?? "random_characters";
@@ -208,15 +198,11 @@ export function v1Routes() {
     let destEnc: string | null = null;
     let destHash: string | null = null;
     if (dom.is_global === 1) {
-      const defaultDest = await c.env.DB.prepare(
-        "SELECT email FROM destinations WHERE user_id = ? AND is_default = 1 AND verified_at IS NOT NULL"
-      ).bind(userId).first<{ email: string }>();
-      if (!defaultDest) {
+      const pair = await resolveDefaultDestination(c.env.DB, c.env.DESTINATION_ENCRYPTION_KEY, userId);
+      if (!pair) {
         return c.json({ message: "Set a verified default destination in the dashboard first." }, 422);
       }
-      const dest = (await decryptDestination(defaultDest.email, c.env.DESTINATION_ENCRYPTION_KEY)).toLowerCase();
-      destEnc = await encryptDestination(dest, c.env.DESTINATION_ENCRYPTION_KEY);
-      destHash = await hashDestination(dest, c.env.DESTINATION_ENCRYPTION_KEY);
+      ({ destEnc, destHash } = pair);
     }
 
     // Random formats retry on the (unlikely) UNIQUE collision; custom fails.
