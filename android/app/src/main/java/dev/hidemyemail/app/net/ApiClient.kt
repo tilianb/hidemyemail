@@ -224,6 +224,15 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
 
     suspend fun deletePasskey(id: String) = requestVoid("/api/settings/passkeys/$id", "DELETE")
 
+    // API keys (addy.io-compatible /api/v1). Creation/revocation is
+    // fresh-auth gated; the created token is returned exactly once.
+    suspend fun apiKeys(): List<ApiKey> = request("/api/settings/api-keys")
+
+    suspend fun createApiKey(name: String): ApiKeyCreated =
+        request("/api/settings/api-keys", "POST", buildJsonObject { put("name", name) })
+
+    suspend fun deleteApiKey(id: Int) = requestVoid("/api/settings/api-keys/$id", "DELETE")
+
     /**
      * Full account export (aliases, domains, destinations, rules…) as raw
      * JSON text. Requires a fresh session; the Worker 401s otherwise.

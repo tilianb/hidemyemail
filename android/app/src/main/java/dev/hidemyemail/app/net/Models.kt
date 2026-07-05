@@ -204,6 +204,22 @@ data class RecoveryCodesResponse(val codes: List<String>)
 @Serializable
 data class RecoveryCodesStatus(val remaining: Int)
 
+// GET /api/settings/api-keys — keys for the addy.io-compatible /api/v1
+// surface (Bitwarden's username generator etc.). The token itself is never
+// returned here; only a display prefix.
+@Serializable
+data class ApiKey(
+    val id: Int,
+    val name: String,
+    @SerialName("token_prefix") val tokenPrefix: String,
+    @SerialName("created_at") val createdAt: Double,
+    @SerialName("last_used_at") val lastUsedAt: Double? = null,
+)
+
+// POST /api/settings/api-keys — the full token is returned exactly once.
+@Serializable
+data class ApiKeyCreated(val id: Int, val name: String, val token: String)
+
 // POST /api/recover/code — self-service recovery (username + recovery code).
 @Serializable
 data class RecoverResponse(

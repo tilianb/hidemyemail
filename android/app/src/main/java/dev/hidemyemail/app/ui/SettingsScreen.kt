@@ -110,6 +110,7 @@ fun SettingsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
             NotificationsSection(app)
             InlineActionsSection(app)
             SecuritySection(app)
+            ApiKeysSection(app)
             RecoveryCodesSection(app)
             ExportSection(app)
 

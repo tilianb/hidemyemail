@@ -241,6 +241,23 @@ actor APIClient {
         try await requestVoid("/api/settings/passkeys/\(id)", method: "DELETE")
     }
 
+    // MARK: - API keys (addy.io-compatible /api/v1)
+
+    func apiKeys() async throws -> [ApiKey] {
+        try await request("/api/settings/api-keys")
+    }
+
+    /// Create an API key. Fresh-auth gated; the returned token is shown once
+    /// and never retrievable again.
+    func createApiKey(name: String) async throws -> ApiKeyCreated {
+        try await request("/api/settings/api-keys", method: "POST", body: ["name": name])
+    }
+
+    /// Revoke a key. Fresh-auth gated; anything using it stops working immediately.
+    func deleteApiKey(id: Int) async throws {
+        try await requestVoid("/api/settings/api-keys/\(id)", method: "DELETE")
+    }
+
     /// Full account export (aliases, domains, destinations, rules…) as raw
     /// JSON. Requires a fresh session; the Worker 401s otherwise.
     func exportData() async throws -> Data {

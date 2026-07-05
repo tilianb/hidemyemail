@@ -15,6 +15,10 @@ All notable changes to this project are documented here. The format follows
   and revocable per key. Covers token details, domain options, alias
   create/list/get/delete, and activate/deactivate. See
   [docs/API.md](docs/API.md).
+- **API Keys screen in the iOS and Android apps** (Settings ▸ API Keys),
+  mirroring the dashboard card: create a key (shown once, copyable), list
+  keys with prefix and last-used date, and revoke — against the same
+  fresh-auth-gated `/api/settings/api-keys` endpoints.
 - **One-shot setup script** (`cd worker && npm run setup`): generates
   `SESSION_SECRET`, `ACTION_SECRET`, and a correctly-formatted
   `DESTINATION_ENCRYPTION_KEY`, hashes the admin passphrase, prompts for the

@@ -28,6 +28,7 @@ struct SettingsView: View {
                 NotificationsSection()
                 InlineActionsSection()
                 SecuritySection()
+                ApiKeysSection()
                 RecoveryCodesSection()
                 ExportSection()
                 Section {
