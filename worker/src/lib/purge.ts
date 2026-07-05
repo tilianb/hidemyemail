@@ -11,7 +11,7 @@ import { getNumericSetting } from "./settings";
 /**
  * Permanently delete a user and all their owned rows, in child-before-parent order.
  * Mirrors the cascade in admin.ts DELETE /users/:id, extended to cover mfa,
- * passkey_credentials, and push_devices.
+ * passkey_credentials, push_devices, and api_keys.
  */
 export async function hardDeleteUser(db: D1Database, userId: number): Promise<void> {
   // One atomic batch: child rows before parents, in order. db.batch() runs the
@@ -30,6 +30,7 @@ export async function hardDeleteUser(db: D1Database, userId: number): Promise<vo
     db.prepare("DELETE FROM destinations WHERE user_id = ?").bind(userId),
     db.prepare("DELETE FROM domains WHERE user_id = ?").bind(userId),
     db.prepare("DELETE FROM push_devices WHERE user_id = ?").bind(userId),
+    db.prepare("DELETE FROM api_keys WHERE user_id = ?").bind(userId),
     db.prepare("DELETE FROM users WHERE id = ?").bind(userId),
   ]);
 }

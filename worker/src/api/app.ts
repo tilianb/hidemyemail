@@ -16,6 +16,8 @@ import { adminRoutes } from "./routes/admin";
 import { settingsRoutes } from "./routes/settings";
 import { accountRoutes } from "./routes/account";
 import { pushRoutes } from "./routes/push";
+import { v1Routes } from "./routes/v1";
+import { apiKeyRoutes } from "./routes/api-keys";
 import { getSetting } from "../lib/settings";
 import { SETTING_DEFAULTS } from "../config";
 
@@ -38,7 +40,19 @@ export function createApp() {
     c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   });
 
-  app.use("*", cors({
+  // Two CORS policies, dispatched by path:
+  //  - /api/v1/* (addy.io-compatible token API): any origin, NO credentials.
+  //    It is called from browser extensions and third-party tools and is
+  //    authenticated exclusively by Bearer API keys — never echo an
+  //    arbitrary origin together with Allow-Credentials.
+  //  - everything else (cookie-authenticated dashboard API): allowlisted
+  //    origins from the cors_allowed_domains setting, with credentials.
+  const v1Cors = cors({
+    origin: (origin) => origin,
+    allowHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    credentials: false,
+  });
+  const dashboardCors = cors({
     origin: async (origin, c) => {
       if (!origin) return "";
       // Read CORS allowed domains from DB settings (falls back to defaults)
@@ -60,7 +74,10 @@ export function createApp() {
     },
     allowHeaders: ["Content-Type", "Cookie", "Authorization", "X-Auth-Mode"],
     credentials: true
-  }));
+  });
+  app.use("*", (c, next) =>
+    new URL(c.req.url).pathname.startsWith("/api/v1/") ? v1Cors(c, next) : dashboardCors(c, next)
+  );
 
   // public routes (no session)
   app.route("/api", authRoutes());
@@ -68,10 +85,17 @@ export function createApp() {
   app.route("/api", sesWebhookRoutes());
   app.route("/api", sesInboundRoutes());
   app.route("/api", unsubscribeRoutes());
+  // addy.io-compatible API — authenticated by its own Bearer API-key
+  // middleware (routes/v1.ts), never by session cookies.
+  app.route("/api/v1", v1Routes());
 
   // session guard for everything else under /api
   app.use("/api/*", async (c, next) => {
     const p = new URL(c.req.url).pathname;
+    // /api/v1/* (mounted above, before this guard) authenticates with its own
+    // API-key middleware — exempt the prefix here, belt-and-braces like the
+    // public routes below.
+    if (p.startsWith("/api/v1/")) return next();
     if (
       p === "/api/login" ||
       p === "/api/register" ||
@@ -114,6 +138,7 @@ export function createApp() {
   app.route("/api/settings", settingsRoutes());
   app.route("/api/account", accountRoutes());
   app.route("/api/push", pushRoutes());
+  app.route("/api/settings", apiKeyRoutes());
 
   // Apple App Site Association — lets the iOS app claim `webcredentials` for
   // passkeys on this domain. Served by the Worker (not a static asset) so the

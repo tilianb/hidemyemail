@@ -8,6 +8,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **addy.io-compatible API** (`/api/v1`) for alias generation. Point
+  Bitwarden's username generator (or any addy.io client) at your instance
+  with a per-user API key from **Settings → API Keys** — keys are shown
+  once, stored hashed (`0027_api_keys`), fresh-auth-gated to create/revoke,
+  and revocable per key. Covers token details, domain options, alias
+  create/list/get/delete, and activate/deactivate. See
+  [docs/API.md](docs/API.md).
+- **One-shot setup script** (`cd worker && npm run setup`): generates
+  `SESSION_SECRET`, `ACTION_SECRET`, and a correctly-formatted
+  `DESTINATION_ENCRYPTION_KEY`, hashes the admin passphrase, prompts for the
+  optional AWS credentials, and pushes everything via `wrangler secret put`
+  in one interactive pass (`--print` emits `KEY=VALUE` lines for the Docker
+  `.env` instead).
 - **Push notifications (iOS + Android).** Native alerts for the events your
   inbox can't show you: **blocked** mail and destinations **paused** after
   bounces/complaints (on by default), plus opt-in **forward** and
@@ -44,6 +57,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Secret-generation docs and `docker/gen-secrets.sh` produced a broken
+  `DESTINATION_ENCRYPTION_KEY`: the Worker decodes it as base64 and AES-256
+  needs exactly 32 bytes, so the documented `openssl rand -hex 32` value
+  failed key import at runtime. Now generated as `openssl rand -base64 32`,
+  and the Docker host also passes `ACTION_SECRET` through.
 - iOS: keep the iPad `PortraitUpsideDown` orientation across `xcodegen`
   regenerations (required for App Store iPad submissions).
 - Hardened `POST /api/push/test`: prunes devices on an APNs `410`, adds a

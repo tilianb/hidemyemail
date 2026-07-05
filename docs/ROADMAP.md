@@ -16,17 +16,8 @@ removed when shipped; see CHANGELOG.md for what already landed.
 
 ## P1 — Now (highest leverage)
 
-- [ ] **addy.io-compatible API surface** for alias generation _(product)_.
-  Bitwarden and other password managers already speak the addy.io/SimpleLogin
-  APIs — compatibility gives instant integration with Bitwarden's username
-  generator. Highest usefulness-per-effort item on this list. Then request a
-  listing in Bitwarden's forwarder docs.
-- [ ] **One-shot setup script** (`npm run setup`) _(self-hosting)_. Generates
-  the random secrets (`SESSION_SECRET`, `ACTION_SECRET`,
-  `DESTINATION_ENCRYPTION_KEY`), runs the first-user `hash-password` bootstrap,
-  and `wrangler secret put`s everything in a single interactive pass. Collapses
-  ~6 manual secret steps into one — biggest setup-friction reduction for the
-  least effort.
+- [ ] Request a listing in Bitwarden's forwarder docs now that the
+  addy.io-compatible API surface has shipped (see docs/API.md).
 - [ ] **Hosted push relay for self-hosters** _(push / self-hosting)_. Let
   self-hosted servers deliver notifications to the **official** App Store / Play
   Store apps without each operator obtaining their own APNs key and Firebase/FCM

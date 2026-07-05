@@ -45,7 +45,7 @@ Set with `wrangler secret put`.
 | `ACTION_SECRET` | yes | Signs one-click unsubscribe/action links. |
 | `AUTH_PASSWORD_SALT` | first user bootstrap | PBKDF2 salt from `hash-password.mjs`. |
 | `AUTH_PASSWORD_HASH` | first user bootstrap | PBKDF2 hash from `hash-password.mjs`. |
-| `DESTINATION_ENCRYPTION_KEY` | yes | 32-byte hex key for encrypted destination emails. |
+| `DESTINATION_ENCRYPTION_KEY` | yes | Base64 of exactly 32 random bytes — the AES-256-GCM key for encrypted destination emails. |
 | `SNS_ALLOWED_TOPIC_ARN` | yes for outbound SNS | Exact SNS topic for bounces/complaints. |
 | `APNS_AUTH_KEY` | for iOS push | Contents of the APNs `AuthKey_XXXXXXXXXX.p8` (the full PEM, including the `BEGIN/END PRIVATE KEY` lines). With `APNS_KEY_ID` + team/bundle, enables push; omit and push is a no-op (device registration still works, nothing is sent). |
 | `FCM_SERVICE_ACCOUNT` | for Android push | Full Firebase **service-account JSON** (with `client_email` + `private_key`) for the FCM HTTP v1 API. Enables Android push; omit and Android push is a no-op (device registration still works, nothing is sent). The Android app also needs a matching `google-services.json` at build time. |
@@ -55,13 +55,20 @@ Set with `wrangler secret put`.
 From `worker/`:
 
 ```bash
-node scripts/hash-password.mjs 'your-admin-passphrase'
-openssl rand -hex 32  # SESSION_SECRET
-openssl rand -hex 32  # ACTION_SECRET
-openssl rand -hex 32  # DESTINATION_ENCRYPTION_KEY
+npm run setup   # interactive one-shot: generates + pushes everything
 ```
 
-`DESTINATION_ENCRYPTION_KEY` must be hex. Do not use base64.
+Or manually:
+
+```bash
+node scripts/hash-password.mjs 'your-admin-passphrase'
+openssl rand -hex 32     # SESSION_SECRET
+openssl rand -hex 32     # ACTION_SECRET
+openssl rand -base64 32  # DESTINATION_ENCRYPTION_KEY
+```
+
+`DESTINATION_ENCRYPTION_KEY` must be base64 of exactly 32 bytes (AES-256).
+A hex string fails key import at runtime — do not use `openssl rand -hex`.
 
 ## Database settings
 
