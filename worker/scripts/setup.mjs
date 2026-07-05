@@ -40,7 +40,10 @@ const hex = (b) => Buffer.from(b).toString("hex");
 
 // One shared readline interface for the whole run — a fresh interface per
 // question swallows buffered lines when input is piped.
-const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY });
+// Prompts and status go to stderr (readline output included) so that in
+// --print mode stdout carries ONLY the KEY=VALUE lines and can be
+// redirected straight into an env file.
+const rl = createInterface({ input: process.stdin, output: process.stderr, terminal: process.stdin.isTTY });
 let maskInput = false;
 if (process.stdin.isTTY) {
   const orig = rl._writeToOutput.bind(rl);
@@ -70,9 +73,9 @@ rl.on("close", () => {
 
 function ask(question, { hidden = false } = {}) {
   if (!process.stdin.isTTY) {
-    process.stdout.write(question);
+    process.stderr.write(question);
     return new Promise((resolve) => {
-      const done = (line) => { process.stdout.write("\n"); resolve(line); };
+      const done = (line) => { process.stderr.write("\n"); resolve(line); };
       const buffered = pendingLines.shift();
       if (buffered !== undefined) done(buffered);
       else lineWaiters.push(done);
@@ -101,12 +104,12 @@ function putSecret(name, value) {
   }
 }
 
-console.log("hidemyemail setup — generates all Worker secrets in one pass.\n");
+console.error("hidemyemail setup — generates all Worker secrets in one pass.\n");
 if (printOnly) {
-  console.log("(--print mode: nothing is pushed; KEY=VALUE lines are printed at the end)\n");
+  console.error("(--print mode: stdout gets only KEY=VALUE lines, so `--print >> .env` is safe)\n");
 } else {
-  console.log(`Secrets will be pushed with: npx wrangler secret put <NAME>${wranglerEnv ? ` --env ${wranglerEnv}` : ""}`);
-  console.log("Make sure `npx wrangler whoami` works before continuing.\n");
+  console.error(`Secrets will be pushed with: npx wrangler secret put <NAME>${wranglerEnv ? ` --env ${wranglerEnv}` : ""}`);
+  console.error("Make sure `npx wrangler whoami` works before continuing.\n");
 }
 
 // 1. Admin passphrase → AUTH_PASSWORD_SALT / AUTH_PASSWORD_HASH
@@ -114,12 +117,12 @@ let passphrase;
 for (;;) {
   passphrase = await ask("Choose an admin passphrase: ", { hidden: true });
   if (passphrase.length < 8) {
-    console.log("Use at least 8 characters.\n");
+    console.error("Use at least 8 characters.\n");
     continue;
   }
   const confirmed = await ask("Confirm the passphrase:    ", { hidden: true });
   if (passphrase !== confirmed) {
-    console.log("Passphrases do not match — try again.\n");
+    console.error("Passphrases do not match — try again.\n");
     continue;
   }
   break;
@@ -137,7 +140,7 @@ const secrets = {
 };
 
 // 3. Optional AWS credentials (enter to skip; set later with wrangler secret put)
-console.log("\nAWS credentials for SES sending (press Enter to skip any of these):");
+console.error("\nAWS credentials for SES sending (press Enter to skip any of these):");
 for (const [name, prompt] of [
   ["SES_ACCESS_KEY_ID", "SES access key id:        "],
   ["SES_SECRET_ACCESS_KEY", "SES secret access key:    "],
@@ -154,19 +157,19 @@ if (printOnly) {
   process.exit(0);
 }
 
-console.log(`\nAbout to push ${names.length} secrets: ${names.join(", ")}`);
+console.error(`\nAbout to push ${names.length} secrets: ${names.join(", ")}`);
 const go = (await ask("Continue? [y/N] ")).trim().toLowerCase();
 if (go !== "y" && go !== "yes") {
-  console.log("Aborted — nothing was pushed.");
+  console.error("Aborted — nothing was pushed.");
   process.exit(1);
 }
 
 for (const name of names) {
-  console.log(`\n→ ${name}`);
+  console.error(`\n→ ${name}`);
   putSecret(name, secrets[name]);
 }
 
-console.log(`
+console.error(`
 Done. All secrets are set${wranglerEnv ? ` for env "${wranglerEnv}"` : ""}.
 
 Next steps:
