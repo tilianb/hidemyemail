@@ -5,6 +5,14 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+// Apply the Google Services plugin only when a google-services.json is present.
+// Push needs a Firebase project, but the app must still build (with push simply
+// unavailable) before one is configured — e.g. on CI or for forks. Drop your
+// google-services.json into android/app/ to light up FCM. See android/README.md.
+if (file("google-services.json").exists()) {
+    apply(plugin = libs.plugins.google.services.get().pluginId)
+}
+
 android {
     namespace = "dev.hidemyemail.app"
     compileSdk = 35
@@ -13,8 +21,8 @@ android {
         applicationId = "dev.hidemyemail.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
     }
 
     signingConfigs {
@@ -67,4 +75,9 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
+    // Firebase Cloud Messaging for push. Compiles without google-services.json;
+    // at runtime FirebaseApp simply stays uninitialised and push reports as
+    // unavailable until a Firebase project is configured.
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
 }

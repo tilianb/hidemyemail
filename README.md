@@ -12,7 +12,7 @@ Self-hosted, **serverless** email aliases for your domains. No VPS, no
 Postfix, no mail stack. It runs as a Cloudflare Worker with a React
 dashboard, Cloudflare D1 for state, and AWS SES/S3/SNS for receiving and
 sending mail. The running cost is **~$0/month** on the Cloudflare free tier
-plus AWS SES usage.
+plus AWS SES usage. Native **iOS** and **Android** apps are included.
 
 <p align="center">
   <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/tilianb/hidemyemail">
@@ -37,6 +37,7 @@ Recipients see the alias.
 | Per-alias / per-subdomain block & allow rules | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Bounce/complaint auto-suppression | ✅ | ✅ | ✅ | n/a | n/a |
 | Multi-user with admin panel | ✅ | hosted plans | hosted plans | ❌ | ❌ |
+| Native mobile apps | ✅ iOS + Android | ✅ | ❌ | ❌ | ❌ |
 | Typical self-host cost | ~$0 + SES cents | VPS $5+/mo | VPS $5+/mo | free (limited) | $9+/mo |
 | Open source | ✅ MIT | ✅ | ✅ | ❌ | ❌ |
 
@@ -64,6 +65,9 @@ Recipients see the alias.
 - Per-subdomain policies and scoped block/allow sender rules.
 - Dashboard for aliases, domains, destinations, rules, users, MFA,
   passkeys, and admin settings. It includes data export and account deletion.
+- Native [iOS](ios/README.md) and [Android](android/README.md) apps:
+  passphrase + TOTP or passkey sign-in, alias/domain/destination/rule
+  management, stats, and push notifications (APNs / FCM).
 - SNS signature checks, encrypted destination addresses, and rate limits.
 
 ## Quick start
@@ -99,9 +103,13 @@ You also need D1 databases, Worker secrets, SES/S3/SNS, and DNS. Follow [Getting
 - [Deployment guide](docs/DEPLOY.md)
 - [AWS SES setup](docs/AWS_SES_SETUP.md)
 - [Configuration](docs/CONFIGURATION.md)
+- [API (addy.io-compatible)](docs/API.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Security notes](docs/SECURITY.md)
 - [Docker self-hosting](docker/README.md)
+- [iOS app](ios/README.md)
+- [Android app](android/README.md)
+- [Roadmap](docs/ROADMAP.md)
 
 ## Development
 

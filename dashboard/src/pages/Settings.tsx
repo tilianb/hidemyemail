@@ -3,7 +3,7 @@ import { QRCode } from "react-qr-code";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { useToast } from "../ui";
-import { ShieldCheck, ShieldOff, KeyRound, Copy, RefreshCw, Loader2, Fingerprint, Trash2, Pencil, Mail, Download, AlertTriangle } from "lucide-react";
+import { ShieldCheck, ShieldOff, KeyRound, Copy, RefreshCw, Loader2, Fingerprint, Trash2, Pencil, Mail, Download, AlertTriangle, Bell } from "lucide-react";
 
 type SetupStep = "idle" | "qr" | "verify" | "backup";
 type PasskeyRow = { id: string; device_name: string | null; created_at: number };
@@ -23,6 +23,18 @@ export function Settings() {
   const [showAddPasskey, setShowAddPasskey] = useState(false);
   const [editingPasskeyId, setEditingPasskeyId] = useState<string | null>(null);
   const [editingPasskeyName, setEditingPasskeyName] = useState("");
+
+  // API keys (addy.io-compatible /api/v1 — Bitwarden etc.)
+  type ApiKeyRow = { id: number; name: string; token_prefix: string; created_at: number; last_used_at: number | null };
+  const [apiKeys, setApiKeys] = useState<ApiKeyRow[]>([]);
+  const [showAddApiKey, setShowAddApiKey] = useState(false);
+  const [newApiKeyName, setNewApiKeyName] = useState("");
+  const [creatingApiKey, setCreatingApiKey] = useState(false);
+  const [newApiKeyToken, setNewApiKeyToken] = useState("");
+
+  // Push notifications
+  const [pushTesting, setPushTesting] = useState(false);
+  const [pushResult, setPushResult] = useState<{ sent: number; failures: { token: string; status: number; reason?: string }[] } | null>(null);
 
   // Setup wizard state
   const [setupStep, setSetupStep] = useState<SetupStep>("idle");
@@ -71,9 +83,10 @@ export function Settings() {
   async function loadStatus() {
     setLoading(true);
     try {
-      const [mfa, pks, prefs, profile] = await Promise.all([
+      const [mfa, pks, keys, prefs, profile] = await Promise.all([
         api.mfaStatus(),
         api.passkeyList().catch(() => []),
+        api.apiKeys().catch(() => []),
         api.preferences().catch(() => ({
           inline_actions_pref: null as Tri,
           inline_actions_position: null as Pos,
@@ -84,6 +97,7 @@ export function Settings() {
       setEnabled(mfa.enabled);
       setBackupCodesRemaining(mfa.backupCodesRemaining);
       setPasskeys(pks);
+      setApiKeys(keys);
       if (profile) {
         setUsername(profile.username);
         setUsernameInput(profile.username ?? "");
@@ -179,6 +193,58 @@ export function Settings() {
       toast("Passkey renamed", "success");
     } catch (err: any) {
       toast(err?.message || "Failed to rename passkey", "error");
+    }
+  }
+
+  async function addApiKey(e: React.FormEvent) {
+    e.preventDefault();
+    const name = newApiKeyName.trim();
+    if (!name) return;
+    setCreatingApiKey(true);
+    try {
+      const created = await api.createApiKey(name);
+      setApiKeys(prev => [{ id: created.id, name: created.name, token_prefix: created.token_prefix, created_at: created.created_at, last_used_at: null }, ...prev]);
+      setNewApiKeyToken(created.token);
+      setShowAddApiKey(false);
+      setNewApiKeyName("");
+    } catch (err: any) {
+      // Key creation is fresh-auth gated, like passkey enrolment.
+      toast(err?.message === "Fresh authentication required" || err?.message === "unauthorized"
+        ? "Session is not fresh — log out and back in, then retry"
+        : err?.message || "Failed to create API key", "error");
+    } finally {
+      setCreatingApiKey(false);
+    }
+  }
+
+  async function deleteApiKey(id: number) {
+    if (!confirm("Revoke this API key? Anything using it stops working immediately.")) return;
+    try {
+      await api.deleteApiKey(id);
+      setApiKeys(prev => prev.filter(k => k.id !== id));
+      toast("API key revoked", "success");
+    } catch (err: any) {
+      toast(err?.message === "Fresh authentication required" || err?.message === "unauthorized"
+        ? "Session is not fresh — log out and back in, then retry"
+        : err?.message || "Failed to revoke API key", "error");
+    }
+  }
+
+  async function testPushNotification() {
+    setPushTesting(true);
+    setPushResult(null);
+    try {
+      const res = await api.pushTest();
+      if (res.ok) {
+        toast(`Test push sent to ${res.sent} device${res.sent === 1 ? "" : "s"}`, "success");
+      } else {
+        toast(res.reason || "Push not configured", "error");
+      }
+      setPushResult({ sent: res.sent ?? 0, failures: res.failures ?? [] });
+    } catch (err: any) {
+      toast(err?.message || "Failed to send test push", "error");
+    } finally {
+      setPushTesting(false);
     }
   }
 
@@ -868,6 +934,135 @@ export function Settings() {
             <p className="muted-copy-sm">
               Passkeys are not supported in this browser.
             </p>
+          )}
+        </div>
+      </div>
+
+      {/* Push notifications card */}
+      <div className="card stagger-3 card-spaced-top">
+        <div className="card-header">
+          <span className="card-title">Push Notifications</span>
+        </div>
+        <div className="card-body">
+          <p className="muted-copy card-spaced-bottom">
+            Test that push notifications are delivered to your devices. Sends a generic alert to every registered device, bypassing per-category opt-in. APNs only — Android/FCM is not yet supported.
+          </p>
+          {pushResult && !pushResult.failures.length && pushResult.sent > 0 && (
+            <div className="callout callout-success" style={{ marginBottom: "var(--space-3)" }}>
+              Sent to {pushResult.sent} device{pushResult.sent === 1 ? "" : "s"}.
+            </div>
+          )}
+          {pushResult && pushResult.failures.length > 0 && (
+            <div className="callout callout-warning" style={{ marginBottom: "var(--space-3)" }}>
+              {pushResult.sent > 0 ? `${pushResult.sent} sent, ` : ""}{pushResult.failures.length} failed:{" "}
+              {pushResult.failures.map((f) => `${f.status}${f.reason ? ` (${f.reason})` : ""}`).join(", ")}
+            </div>
+          )}
+          <button
+            type="button"
+            className="btn btn-soft"
+            onClick={testPushNotification}
+            disabled={pushTesting}
+          >
+            {pushTesting ? <Loader2 size={14} className="spin" /> : <Bell size={14} />}
+            {pushTesting ? "Sending…" : "Send test push notification"}
+          </button>
+        </div>
+      </div>
+
+      {/* API keys card */}
+      <div className="card stagger-3 card-spaced-top">
+        <div className="card-header">
+          <span className="card-title">API Keys</span>
+          <span className="badge badge-muted">{apiKeys.length}</span>
+        </div>
+        <div className="card-body">
+          <p className="muted-copy card-spaced-bottom">
+            Generate aliases from other apps via the addy.io-compatible API. In Bitwarden's
+            username generator pick <strong>addy.io</strong> as the forwarder, set the self-host
+            server URL to this instance, and paste a key below as the API token. Keys are shown
+            once at creation and can be revoked here at any time.
+          </p>
+
+          {newApiKeyToken && (
+            <div className="security-code-block">
+              <div className="secret-row">
+                <span style={{ wordBreak: "break-all" }}>{newApiKeyToken}</span>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-compact shrink-0"
+                  onClick={() => copyToClipboard(newApiKeyToken, "API key")}
+                  title="Copy API key"
+                >
+                  <Copy size={14} />
+                </button>
+              </div>
+              <p className="muted-copy-sm">
+                This key will not be shown again. Store it in your password manager now.
+              </p>
+              <button type="button" className="btn btn-ghost btn-compact" onClick={() => setNewApiKeyToken("")}>
+                Hide
+              </button>
+            </div>
+          )}
+
+          {apiKeys.length > 0 && (
+            <div className="passkey-list">
+              {apiKeys.map(k => (
+                <div key={k.id} className="passkey-row">
+                  <KeyRound size={16} className="icon-muted" />
+                  <div className="flex-1">
+                    <div className="passkey-name">{k.name}</div>
+                    <div className="passkey-meta">
+                      {k.token_prefix}… · Created {new Date(k.created_at).toLocaleDateString()}
+                      {k.last_used_at ? ` · Last used ${new Date(k.last_used_at).toLocaleDateString()}` : " · Never used"}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-ghost icon-red"
+                    onClick={() => deleteApiKey(k.id)}
+                    title="Revoke"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {showAddApiKey ? (
+            <form onSubmit={addApiKey} className="security-form-stack">
+              <div className="muted-copy-sm">
+                Name the key after where you'll use it, so you can revoke it precisely later.
+              </div>
+              <div className="security-inline-form">
+                <input
+                  className="input flex-input"
+                  value={newApiKeyName}
+                  onChange={e => setNewApiKeyName(e.target.value)}
+                  placeholder="e.g. Bitwarden"
+                  maxLength={64}
+                  disabled={creatingApiKey}
+                  autoFocus
+                />
+                <button type="submit" className="btn btn-primary shrink-0" disabled={creatingApiKey || !newApiKeyName.trim()}>
+                  {creatingApiKey ? <Loader2 size={14} className="spin" /> : <KeyRound size={14} />}
+                  {creatingApiKey ? "Creating…" : "Create"}
+                </button>
+                <button type="button" className="btn btn-soft" onClick={() => { setShowAddApiKey(false); setNewApiKeyName(""); }} disabled={creatingApiKey}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => { setShowAddApiKey(true); setNewApiKeyToken(""); }}
+            >
+              <KeyRound size={14} /> Create API Key
+            </button>
           )}
         </div>
       </div>

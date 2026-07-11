@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android 13+ requires runtime consent to post notifications; requested
+         from the Settings ▸ Notifications toggle. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- allowBackup=false: SharedPreferences hold the bearer session token,
          and Auto Backup would otherwise copy it into cloud backups and
@@ -35,5 +38,18 @@
                 <data android:scheme="hidemyemail" android:host="auth" />
             </intent-filter>
         </activity>
+
+        <!-- FCM token rotations land here; notification payloads are rendered by
+             the FCM SDK into the channel below. -->
+        <service
+            android:name=".push.PushMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="@string/push_channel_id" />
     </application>
 </manifest>

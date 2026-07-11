@@ -49,6 +49,10 @@ final class AppState {
         do {
             try await refreshIdentity()
             phase = .loggedIn
+            // Restored sessions skip finishLogin(), so re-register for push here:
+            // it refreshes the in-memory APNs token (kept only in memory) so a
+            // later sign-out can detach this device from the account.
+            await PushManager.shared.onLogin()
         } catch {
             await signOut()
         }
@@ -134,6 +138,8 @@ final class AppState {
         KeychainStore.saveToken(token)
         try await refreshIdentity()
         phase = .loggedIn
+        // Re-register this device for push under the (possibly new) account.
+        await PushManager.shared.onLogin()
     }
 
     private func refreshIdentity() async throws {
@@ -172,6 +178,9 @@ final class AppState {
     }
 
     func signOut() async {
+        // Detach this device from the account while the token is still valid, so
+        // the signed-out user stops receiving its pushes.
+        await PushManager.shared.onLogout()
         KeychainStore.deleteToken()
         await client?.setToken(nil)
         await client?.setFreshAuth(nil)

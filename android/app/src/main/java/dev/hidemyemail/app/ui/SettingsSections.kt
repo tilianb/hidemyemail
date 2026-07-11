@@ -1,6 +1,11 @@
 package dev.hidemyemail.app.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,10 +23,13 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,22 +37,117 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import dev.hidemyemail.app.AppViewModel
 import dev.hidemyemail.app.net.ApiException
+import dev.hidemyemail.app.net.ApiKey
 import dev.hidemyemail.app.net.MfaStatus
 import dev.hidemyemail.app.net.Passkey
 import dev.hidemyemail.app.net.Preferences
+import dev.hidemyemail.app.net.PushPrefs
+import dev.hidemyemail.app.push.PushManager
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import java.text.DateFormat
 import java.util.Date
+
+/**
+ * Push-notification controls. A master toggle requests OS permission (Android
+ * 13+) and registers the device; per-category toggles map to the Worker's
+ * `push_devices` opt-in columns. Mirrors the iOS `NotificationsSection`. When
+ * Firebase isn't configured in this build the toggle is disabled and the footer
+ * explains why — exactly like the iOS app no-ops without APNs.
+ */
+@Composable
+fun NotificationsSection(@Suppress("UNUSED_PARAMETER") app: AppViewModel) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val enabled by PushManager.enabled.collectAsState()
+    val prefs by PushManager.prefs.collectAsState()
+    val available by PushManager.available.collectAsState()
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) scope.launch { PushManager.enable() }
+    }
+
+    fun requestEnable() {
+        // Android 13+ gates notifications behind a runtime permission.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            scope.launch { PushManager.enable() }
+        }
+    }
+
+    SectionHeader("Notifications")
+    SectionCard {
+        ToggleRow("Allow Notifications", enabled, enabledRow = available) { on ->
+            if (on) requestEnable() else scope.launch { PushManager.disable() }
+        }
+        if (enabled) {
+            RowDivider()
+            ToggleRow("Blocked mail", prefs.blocked) { on ->
+                scope.launch { PushManager.setPrefs(prefs.copy(blocked = on)) }
+            }
+            RowDivider()
+            ToggleRow("Destination issues", prefs.bounce) { on ->
+                scope.launch { PushManager.setPrefs(prefs.copy(bounce = on)) }
+            }
+            RowDivider()
+            ToggleRow("Forwarded mail", prefs.forward) { on ->
+                scope.launch { PushManager.setPrefs(prefs.copy(forward = on)) }
+            }
+            RowDivider()
+            ToggleRow("Reply receipts", prefs.reply) { on ->
+                scope.launch { PushManager.setPrefs(prefs.copy(reply = on)) }
+            }
+        }
+    }
+    SectionFooter(
+        if (!available) {
+            "Push isn't configured for this build. A Firebase project (google-services.json) is required to enable notifications."
+        } else {
+            "Get alerted about things your inbox never shows you — mail that was blocked and destinations paused after bounces or complaints. Forwards and reply receipts are off by default."
+        }
+    )
+}
+
+/** A label + Material3 Switch row in the grouped-list style. */
+@Composable
+private fun ToggleRow(label: String, checked: Boolean, enabledRow: Boolean = true, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
+        Text(
+            label,
+            style = Theme.bodyStyle(16.sp).copy(color = if (enabledRow) Theme.textPrimary else Theme.textMuted),
+            modifier = Modifier.weight(1f),
+        )
+        Switch(
+            checked = checked,
+            enabled = enabledRow,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedTrackColor = Theme.accent,
+                checkedThumbColor = Color.Black,
+            ),
+        )
+    }
+}
 
 /** Account-wide inline-action preferences (GET/PATCH /api/preferences). */
 @Composable
@@ -302,6 +405,191 @@ fun RecoveryCodesSection(app: AppViewModel) {
             },
             dismissButton = {
                 TextButton(onClick = { confirming = false }) { Text("Cancel", color = Theme.accent) }
+            },
+        )
+    }
+}
+
+/**
+ * API keys for the addy.io-compatible /api/v1 surface
+ * (GET/POST/DELETE /api/settings/api-keys) — the native counterpart of the
+ * dashboard Settings page's "API Keys" card. Keys plug this instance into
+ * Bitwarden's username generator (forwarder "addy.io") and other addy.io
+ * clients. Creation and revocation are fresh-auth gated; the token is shown
+ * exactly once.
+ */
+@Composable
+fun ApiKeysSection(app: AppViewModel) {
+    val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
+    var keys by remember { mutableStateOf<List<ApiKey>>(emptyList()) }
+    var newToken by remember { mutableStateOf<String?>(null) }
+    var creating by remember { mutableStateOf(false) }
+    var naming by remember { mutableStateOf(false) }
+    var nameDraft by remember { mutableStateOf("") }
+    var pendingDelete by remember { mutableStateOf<ApiKey?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    suspend fun load() {
+        try {
+            keys = app.api()?.apiKeys() ?: emptyList()
+        } catch (e: Exception) {
+            error = e.message
+        }
+    }
+
+    LaunchedEffect(Unit) { load() }
+
+    fun freshAuthMessage(e: ApiException.Server): String? =
+        if (e.status == 401 && e.message == "Fresh authentication required") {
+            "Session is not fresh — sign out and back in, then retry."
+        } else {
+            e.message
+        }
+
+    fun create() {
+        val name = nameDraft.trim()
+        if (name.isEmpty()) return
+        creating = true
+        scope.launch {
+            try {
+                val created = app.api()?.createApiKey(name)
+                newToken = created?.token
+                error = null
+                load()
+            } catch (e: ApiException.Server) {
+                error = freshAuthMessage(e)
+            } catch (e: Exception) {
+                error = e.message
+            } finally {
+                creating = false
+            }
+        }
+    }
+
+    fun revoke(key: ApiKey) {
+        scope.launch {
+            try {
+                app.api()?.deleteApiKey(key.id)
+                keys = keys.filter { it.id != key.id }
+                error = null
+            } catch (e: ApiException.Server) {
+                error = freshAuthMessage(e)
+            } catch (e: Exception) {
+                error = e.message
+            }
+        }
+    }
+
+    SectionHeader("API Keys")
+    SectionCard {
+        newToken?.let { token ->
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Text(token, style = Theme.monoStyle(13.sp))
+                Text(
+                    "This key will not be shown again — store it in your password manager now.",
+                    style = Theme.bodyStyle(12.sp).copy(color = Theme.textSecondary),
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                TextButton(onClick = { clipboard.setText(AnnotatedString(token)) }) {
+                    Text("Copy Key", color = Theme.accent)
+                }
+            }
+            RowDivider()
+        }
+        keys.forEach { key ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(key.name, style = Theme.bodyStyle(15.sp))
+                    val usage = key.lastUsedAt?.let {
+                        "Last used " + DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(it.toLong()))
+                    } ?: "Never used"
+                    Text(
+                        "${key.tokenPrefix}… · $usage",
+                        style = Theme.bodyStyle(12.sp).copy(color = Theme.textSecondary),
+                    )
+                }
+                IconButton(onClick = { pendingDelete = key }) {
+                    Icon(Icons.Filled.Delete, contentDescription = "Revoke", tint = Theme.red)
+                }
+            }
+            RowDivider()
+        }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = !creating) { nameDraft = ""; naming = true }
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+            Text(
+                "Create API Key",
+                style = Theme.bodyStyle(15.sp).copy(color = Theme.accent),
+                modifier = Modifier.weight(1f),
+            )
+            if (creating) {
+                CircularProgressIndicator(color = Theme.accent, modifier = Modifier.size(16.dp))
+            }
+        }
+    }
+    SectionFooter(
+        error
+            ?: "Generate aliases from other apps via the addy.io-compatible API — in Bitwarden pick \"addy.io\" as the forwarder, use this server's URL, and paste a key as the API token. Requires a recent sign-in.",
+    )
+
+    if (naming) {
+        AlertDialog(
+            onDismissRequest = { naming = false },
+            containerColor = Theme.surface2,
+            title = { Text("Name the key", style = Theme.displayStyle(18.sp)) },
+            text = {
+                Column {
+                    Text(
+                        "Name it after where you'll use it, so you can revoke it precisely later.",
+                        style = Theme.bodyStyle(14.sp),
+                    )
+                    OutlinedTextField(
+                        value = nameDraft,
+                        onValueChange = { nameDraft = it },
+                        placeholder = { Text("e.g. Bitwarden") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = nameDraft.isNotBlank(),
+                    onClick = { naming = false; create() },
+                ) { Text("Create", color = Theme.accent) }
+            },
+            dismissButton = {
+                TextButton(onClick = { naming = false }) { Text("Cancel", color = Theme.accent) }
+            },
+        )
+    }
+
+    pendingDelete?.let { key ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            containerColor = Theme.surface2,
+            title = { Text("Revoke API key", style = Theme.displayStyle(18.sp)) },
+            text = {
+                Text(
+                    "Revoke \"${key.name}\"? Anything using it stops working immediately.",
+                    style = Theme.bodyStyle(14.sp),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { pendingDelete = null; revoke(key) }) {
+                    Text("Revoke", color = Theme.red)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("Cancel", color = Theme.accent) }
             },
         )
     }

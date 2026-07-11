@@ -8,6 +8,7 @@ import dev.hidemyemail.app.auth.TokenStore
 import dev.hidemyemail.app.auth.WebSessionAuth
 import dev.hidemyemail.app.net.ApiClient
 import dev.hidemyemail.app.net.ApiException
+import dev.hidemyemail.app.push.PushManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -52,6 +53,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun api(): ApiClient? = client
 
+    init {
+        // Bridge push state to the authed client. Safe before login: registration
+        // is gated on `enabled` and a valid session inside PushManager.
+        PushManager.attach(application, viewModelScope) { client }
+    }
+
     fun setServerUrl(url: String) {
         val trimmed = url.trim()
         _serverUrl.value = trimmed
@@ -78,6 +85,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 refreshIdentity()
                 _phase.value = AuthPhase.LoggedIn
+                runCatching { PushManager.onLogin() }
             } catch (_: Exception) {
                 signOut()
             }
@@ -141,6 +149,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         tokenStore.save(token)
         refreshIdentity()
         _phase.value = AuthPhase.LoggedIn
+        runCatching { PushManager.onLogin() }
     }
 
     private suspend fun refreshIdentity() {
@@ -183,12 +192,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun signOut() {
+        // Snapshot the still-authed client so the background push detach can drop
+        // the server-side device row with a valid token...
+        val pushApi = client?.let { c -> ApiClient(serverUrl.value, c.token).also { it.freshAuth = c.freshAuth } }
+        // ...then clear the local session immediately, so sign-out never blocks on
+        // the network (a stalled/offline DELETE must not keep the device logged in).
         tokenStore.delete()
         client?.token = null
         client?.freshAuth = null
         _userName.value = ""
         _isAdmin.value = false
         _phase.value = AuthPhase.LoggedOut
+        // Best-effort, in the background: invalidate the FCM token (stops delivery
+        // even offline) and remove the server-side row. Mirrors iOS.
+        viewModelScope.launch { runCatching { PushManager.onLogout(pushApi) } }
     }
 
     /** Called by screens when a request fails with 401 mid-session. */

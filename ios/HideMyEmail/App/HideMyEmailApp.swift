@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct HideMyEmailApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var app = AppState()
 
     init() {
@@ -15,7 +16,10 @@ struct HideMyEmailApp: App {
                 .brandTint()
                 .font(Theme.body(17))
                 .preferredColorScheme(.dark)
-                .task { await app.bootstrap() }
+                .task {
+                    PushManager.shared.attach(app)
+                    await app.bootstrap()
+                }
         }
     }
 }

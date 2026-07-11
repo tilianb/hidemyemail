@@ -241,6 +241,23 @@ actor APIClient {
         try await requestVoid("/api/settings/passkeys/\(id)", method: "DELETE")
     }
 
+    // MARK: - API keys (addy.io-compatible /api/v1)
+
+    func apiKeys() async throws -> [ApiKey] {
+        try await request("/api/settings/api-keys")
+    }
+
+    /// Create an API key. Fresh-auth gated; the returned token is shown once
+    /// and never retrievable again.
+    func createApiKey(name: String) async throws -> ApiKeyCreated {
+        try await request("/api/settings/api-keys", method: "POST", body: ["name": name])
+    }
+
+    /// Revoke a key. Fresh-auth gated; anything using it stops working immediately.
+    func deleteApiKey(id: Int) async throws {
+        try await requestVoid("/api/settings/api-keys/\(id)", method: "DELETE")
+    }
+
     /// Full account export (aliases, domains, destinations, rules…) as raw
     /// JSON. Requires a fresh session; the Worker 401s otherwise.
     func exportData() async throws -> Data {
@@ -276,6 +293,40 @@ actor APIClient {
     /// Resume forwarding to a soft-suppressed destination.
     func unsuppressDestination(id: Int) async throws {
         try await requestVoid("/api/destinations/\(id)/unsuppress", method: "POST")
+    }
+
+    // MARK: - Push notifications
+
+    /// Devices registered for this account, with their notification prefs.
+    func pushDevices() async throws -> [PushDevice] {
+        try await request("/api/push/devices")
+    }
+
+    /// Register (or refresh) this device's APNs token and notification prefs.
+    /// Idempotent on the token.
+    func registerPushDevice(token: String, prefs: PushPrefs) async throws {
+        try await requestVoid("/api/push/devices", method: "POST", body: [
+            "token": token,
+            "platform": "ios",
+            "prefs": prefsBody(prefs),
+        ])
+    }
+
+    /// Update notification prefs for an already-registered token.
+    func updatePushPrefs(token: String, prefs: PushPrefs) async throws {
+        try await requestVoid("/api/push/devices", method: "PATCH", body: [
+            "token": token,
+            "prefs": prefsBody(prefs),
+        ])
+    }
+
+    /// Unregister a device token (sign-out, or the user disabling push).
+    func unregisterPushDevice(token: String) async throws {
+        try await requestVoid("/api/push/devices", method: "DELETE", body: ["token": token])
+    }
+
+    private func prefsBody(_ p: PushPrefs) -> [String: Any] {
+        ["blocked": p.blocked, "bounce": p.bounce, "forward": p.forward, "reply": p.reply]
     }
 
     // MARK: - Core request plumbing
