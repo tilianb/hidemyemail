@@ -4,6 +4,7 @@ updates:
     directories:
       - "/worker"
       - "/dashboard"
+      - "/docker"
     schedule:
       interval: "weekly"
     target-branch: "dev"

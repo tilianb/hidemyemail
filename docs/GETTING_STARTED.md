@@ -77,27 +77,15 @@ npx wrangler d1 migrations apply DB --remote --env preview
 
 ## 4. Generate secrets
 
-From `worker/`:
+From `worker/`, one interactive pass generates and pushes everything
+(admin passphrase, random secrets, optional AWS credentials):
 
 ```bash
-node scripts/hash-password.mjs 'your-admin-passphrase'
-openssl rand -hex 32  # SESSION_SECRET
-openssl rand -hex 32  # ACTION_SECRET
-openssl rand -hex 32  # DESTINATION_ENCRYPTION_KEY
+npm run setup
 ```
 
-Set the generated values and AWS credentials:
-
-```bash
-npx wrangler secret put AUTH_PASSWORD_SALT --env=""
-npx wrangler secret put AUTH_PASSWORD_HASH --env=""
-npx wrangler secret put SESSION_SECRET --env=""
-npx wrangler secret put ACTION_SECRET --env=""
-npx wrangler secret put DESTINATION_ENCRYPTION_KEY --env=""
-npx wrangler secret put SES_ACCESS_KEY_ID --env=""
-npx wrangler secret put SES_SECRET_ACCESS_KEY --env=""
-npx wrangler secret put SNS_ALLOWED_TOPIC_ARN --env=""
-```
+See [Configuration](CONFIGURATION.md) for the manual per-secret equivalent
+and what each value does.
 
 Repeat with `--env preview` for preview secrets you actually use.
 

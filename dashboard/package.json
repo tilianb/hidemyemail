@@ -1,6 +1,6 @@
 {
   "name": "hidemyemail-dashboard",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "React Dashboard for HideMyEmail alias service",
   "author": "Tilian Burger",
   "license": "MIT",
@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@simplewebauthn/browser": "^13.3.0",
-    "lucide-react": "^1.18.0",
+    "lucide-react": "^1.23.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-qr-code": "^2.2.0"
@@ -21,8 +21,8 @@
   "devDependencies": {
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.2",
+    "@vitejs/plugin-react": "^6.0.3",
     "typescript": "^6.0.3",
-    "vite": "^8.0.16"
+    "vite": "^8.1.3"
   }
 }

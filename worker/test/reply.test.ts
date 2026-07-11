@@ -23,9 +23,10 @@ beforeEach(async () => {
   await q.createDomain(DB(), "hidemyemail.dev", "real@me.com");
   await q.autoCreateAlias(DB(), 1, "shop", "shop@hidemyemail.dev");
   // First-contact rule: a reply is only allowed to an external sender the alias has
-  // already heard from. Seed the prior inbound 'forward' from boss@store.com so the
-  // relay-success tests below model a genuine reply to existing correspondence.
+  // already heard from. The durable record lives in `contacts` (the reply gate reads
+  // it, not `events`); a real forward writes both, so seed both here.
   await q.insertEvent(DB(), { alias_id: 1, type: "forward", external_sender: "boss@store.com", ts: Date.now() });
+  await q.recordContact(DB(), 1, "boss@store.com", Date.now());
 });
 
 test("owner reply with SPF pass → SES send as alias, leaks stripped", async () => {
@@ -149,7 +150,8 @@ test("SECURITY: owner reply to a stranger with no prior inbound → rejected, no
 // a reply to "boss@store.com".
 test("first-contact match is case-insensitive", async () => {
   await DB().prepare("DELETE FROM events").run();
-  await q.insertEvent(DB(), { alias_id: 1, type: "forward", external_sender: "Boss@Store.com", ts: Date.now() });
+  await DB().prepare("DELETE FROM contacts").run();
+  await q.recordContact(DB(), 1, "Boss@Store.com", Date.now());
   const sentinel = { sent: [] as any[] };
   await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
   expect(sentinel.sent.length).toBe(1);
@@ -162,6 +164,7 @@ test("first-contact match is case-insensitive", async () => {
 // Helper: seed a prior inbound 'forward' so the first-contact gate passes.
 async function seedForward(sender: string) {
   await q.insertEvent(DB(), { alias_id: 1, type: "forward", external_sender: sender, ts: Date.now() });
+  await q.recordContact(DB(), 1, sender, Date.now());
 }
 
 test("distinct recipient cap: under cap → reply succeeds", async () => {
@@ -234,6 +237,25 @@ test("reply rate limit: over per-alias cap → rejected, no SES", async () => {
   for (let i = 0; i < 12; i++) {
     await q.insertEvent(DB(), { alias_id: 1, type: "reply", external_sender: "boss@store.com", ts: now });
   }
+  const sentinel = { sent: [] as any[] };
+  await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
+  expect(sentinel.sent.length).toBe(0);
+  const ev = await DB().prepare("SELECT detail FROM events WHERE type='reject' ORDER BY id DESC LIMIT 1").first<{ detail: string }>();
+  expect(ev?.detail).toBe("rate");
+});
+
+// Unified global rate limit: rate_limit_global means total relay volume
+// (forward + reply) on BOTH paths, so inbound forwards count toward it here too.
+test("reply rate limit: forwards count toward the global cap (unified)", async () => {
+  await DB().prepare("DELETE FROM events").run(); // contact for boss@store.com persists
+  const now = Date.now();
+  await q.insertEvent(DB(), { alias_id: 1, type: "forward", external_sender: "boss@store.com", ts: now });
+  await q.insertEvent(DB(), { alias_id: 1, type: "forward", external_sender: "other@store.com", ts: now });
+  await DB().prepare(
+    "INSERT INTO settings (key, value, updated_at) VALUES ('rate_limit_global', '2', ?) " +
+    "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+  ).bind(now).run();
+
   const sentinel = { sent: [] as any[] };
   await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
   expect(sentinel.sent.length).toBe(0);

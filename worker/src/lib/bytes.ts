@@ -1,5 +1,10 @@
 export function utf8(s: string): Uint8Array { return new TextEncoder().encode(s); }
 
+export function toHex(buf: ArrayBuffer | Uint8Array): string {
+  const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export async function streamToBytes(stream: ReadableStream): Promise<Uint8Array> {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];

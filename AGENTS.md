@@ -30,6 +30,7 @@ built dashboard assets.
 | `docs/` | Setup/deploy/config docs + `ROADMAP.md` (tracked backlog) |
 | `ios/` | Native SwiftUI app (XcodeGen `project.yml`) |
 | `android/` | Native Android app — Kotlin + Jetpack Compose (Gradle, package `dev.hidemyemail.app`) |
+| `website/` | Astro Starlight docs site, generated from `docs/` + README/CHANGELOG/ROADMAP by `scripts/sync-docs.mjs`; published to GitHub Pages |
 
 ## Mobile (iOS + Android)
 
@@ -65,6 +66,16 @@ Always run both before committing; CI (`.github/workflows`) runs them too.
 There is no lint step beyond tsc. Local dev: `npx wrangler dev` in `worker/`
 plus `npm run dev` in `dashboard/` (Vite proxies to the Worker).
 
+First-deploy secret bootstrap: `cd worker && npm run setup` (interactive;
+`-- --print` emits KEY=VALUE lines for the Docker `.env`). It shares its
+PBKDF2 derivation with `scripts/hash-password.mjs` via `scripts/pbkdf2.mjs`.
+
+Docs site: `cd website && npm install && npm run dev` (build: `npm run build`).
+`npm run sync` (auto-run before dev/build) regenerates `src/content/docs/` from
+the repo markdown — never hand-edit that directory; edit `docs/`/README instead.
+CI: `.github/workflows/docs.yml` builds and deploys to GitHub Pages on push to
+`main`.
+
 ## Conventions
 
 - **Branches:** work lands on `dev` via feature branches; `main` is release.
@@ -89,6 +100,11 @@ plus `npm run dev` in `dashboard/` (Vite proxies to the Worker).
 
 - Destination emails are AES-encrypted at rest (`lib/crypto.ts`) and looked
   up by HMAC hash (`email_hash`) — never store or log plaintext addresses.
+- API keys for the addy.io-compatible `/api/v1` surface are shown once and
+  stored as SHA-256 only (`lib/api-keys.ts`); creating or revoking one is
+  fresh-auth gated like passkey enrolment. `/api/v1` authenticates
+  exclusively by Bearer key — it must never read session cookies, and its
+  CORS policy (any origin, credentials OFF) depends on that.
 - Sensitive account operations (MFA changes, data export, account deletion)
   require fresh auth via `hasFreshAuth` (`worker/src/api/auth-helpers.ts`),
   not just a session: the `__Host-fresh-auth` cookie for web clients, or the
@@ -112,6 +128,13 @@ plus `npm run dev` in `dashboard/` (Vite proxies to the Worker).
 - `app.ts` route order matters: public routers are mounted BEFORE the
   session-guard middleware; the guard's exempt-path list is belt-and-braces.
   New public endpoints need both (mount before guard + add to the list).
+  `/api/v1` follows the same pattern with its own Bearer-key middleware and
+  its own CORS policy (see the dispatch at the top of `createApp`).
+- Alias-creation rules (quota, local-part validation/generation, default-
+  destination resolution) are shared between the dashboard route
+  (`routes/aliases.ts`) and the addy.io API (`routes/v1.ts`) via
+  `db/aliases.ts` + `lib/alias-format.ts`. Change the rules there so the two
+  surfaces cannot drift.
 - Two forwarding paths in `inbound.ts`: raw-MIME header rewrite (default)
   and full mimetext rebuild (inline-actions / over-quota). Header changes
   must be applied to BOTH.

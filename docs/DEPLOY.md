@@ -20,6 +20,21 @@ npx wrangler d1 migrations apply DB --remote
 
 ## 2. Generate and set secrets
 
+One command does the whole pass — generates the random secrets, hashes your
+admin passphrase, prompts for the (optional) AWS credentials, and pushes
+everything with `wrangler secret put`:
+
+```bash
+cd worker
+npm run setup                    # or: npm run setup -- --env preview
+```
+
+Add `-- --print` to print `KEY=VALUE` lines instead of pushing (useful for the
+Docker self-host `.env`).
+
+<details>
+<summary>Manual equivalent</summary>
+
 Generate the admin password hash:
 
 ```bash
@@ -31,7 +46,8 @@ Generate random secrets:
 ```bash
 openssl rand -hex 32      # SESSION_SECRET
 openssl rand -hex 32      # ACTION_SECRET
-openssl rand -hex 32      # DESTINATION_ENCRYPTION_KEY
+openssl rand -base64 32   # DESTINATION_ENCRYPTION_KEY — must be base64 of
+                          # exactly 32 bytes (a hex string breaks AES key import)
 ```
 
 Set Cloudflare Worker secrets:
@@ -46,6 +62,8 @@ npx wrangler secret put SES_ACCESS_KEY_ID
 npx wrangler secret put SES_SECRET_ACCESS_KEY
 npx wrangler secret put SNS_ALLOWED_TOPIC_ARN
 ```
+
+</details>
 
 Set `SES_REGION`, `S3_INBOUND_BUCKET`, and `SNS_INBOUND_TOPIC_ARN` as normal Cloudflare environment variables.
 

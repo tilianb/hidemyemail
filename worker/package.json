@@ -1,12 +1,13 @@
 {
   "name": "hidemyemail-worker",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Cloudflare Worker for HideMyEmail alias service",
   "author": "Tilian Burger",
   "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {
+    "setup": "node scripts/setup.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "deploy": "wrangler deploy --env=\"\" --keep-vars",
@@ -17,19 +18,19 @@
     "typegen": "wrangler types"
   },
   "dependencies": {
-    "@simplewebauthn/server": "^13.3.1",
+    "@simplewebauthn/server": "^13.3.2",
     "aws4fetch": "^1.0.20",
-    "hono": "^4.12.25",
+    "hono": "^4.12.27",
     "mimetext": "^3.0.28",
-    "postal-mime": "^2.7.4"
+    "postal-mime": "^2.7.5"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.16.15",
-    "@cloudflare/workers-types": "^4.20260609.1",
-    "@types/node": "^25.9.3",
+    "@cloudflare/vitest-pool-workers": "^0.18.0",
+    "@cloudflare/workers-types": "^4.20260616.1",
+    "@types/node": "^26.1.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.8",
-    "wrangler": "^4.98.0"
+    "vitest": "^4.1.9",
+    "wrangler": "^4.103.0"
   },
   "overrides": {
     "esbuild": "^0.28.1"

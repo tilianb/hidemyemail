@@ -1,0 +1,20 @@
+{
+  "name": "hidemyemail-docs",
+  "type": "module",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Astro Starlight documentation site for HideMyEmail (built from the repo's docs/).",
+  "scripts": {
+    "sync": "node scripts/sync-docs.mjs",
+    "predev": "node scripts/sync-docs.mjs",
+    "dev": "astro dev",
+    "prebuild": "node scripts/sync-docs.mjs",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.30.3",
+    "astro": "^5.1.5",
+    "sharp": "^0.33.5"
+  }
+}

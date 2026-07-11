@@ -33,5 +33,7 @@ fi
 
 echo "# Created $(date -u +%FT%TZ) by docker/gen-secrets.sh"
 echo "SESSION_SECRET=$(openssl rand -hex 32)"
-echo "DESTINATION_ENCRYPTION_KEY=$(openssl rand -hex 32)"
+echo "ACTION_SECRET=$(openssl rand -hex 32)"
+# AES-256-GCM key: must be base64 of exactly 32 bytes (hex strings fail key import)
+echo "DESTINATION_ENCRYPTION_KEY=$(openssl rand -base64 32)"
 node "$hash_script" "$password"

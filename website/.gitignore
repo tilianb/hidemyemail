@@ -1,0 +1,9 @@
+# build output
+dist/
+# astro cache + generated types
+.astro/
+# deps
+node_modules/
+# generated docs content (synced from the repo by scripts/sync-docs.mjs)
+src/content/docs/
+public/favicon.svg

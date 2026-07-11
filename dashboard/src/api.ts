@@ -178,6 +178,14 @@ export const api = {
   adminUpdateDomain: (id: number, data: { allow_custom_aliases?: number; allow_subdomain_aliases?: number; active?: number }) => req<{ ok: true }>(`/api/admin/domains/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   adminVerifyDomain: (id: number) => req<{ ok: true; verified: boolean; error?: string; results?: { verify_txt: boolean; mx: boolean; spf: boolean; wildcard_mx: boolean } }>(`/api/admin/domains/${id}/verify`, { method: "POST" }),
 
+  // Push notification endpoints
+  pushTest: () => req<{ ok: boolean; sent: number; failures: { token: string; status: number; reason?: string }[]; reason?: string }>("/api/push/test", { method: "POST" }),
+
+  // API keys (addy.io-compatible /api/v1 surface)
+  apiKeys: () => req<{ id: number; name: string; token_prefix: string; created_at: number; last_used_at: number | null }[]>("/api/settings/api-keys"),
+  createApiKey: (name: string) => req<{ id: number; name: string; token_prefix: string; created_at: number; token: string }>("/api/settings/api-keys", { method: "POST", body: JSON.stringify({ name }) }),
+  deleteApiKey: (id: number) => req<{ ok: true }>(`/api/settings/api-keys/${id}`, { method: "DELETE" }),
+
   // Passkey endpoints
   passkeyList: () => req<{ id: string; device_name: string | null; created_at: number }[]>("/api/settings/passkeys"),
   passkeyChallenge: () => req<Record<string, unknown>>("/api/settings/passkeys/challenge", { method: "POST" }),
