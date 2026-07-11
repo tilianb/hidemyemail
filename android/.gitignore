@@ -8,3 +8,6 @@ captures/
 .cxx/
 release.keystore
 release.keystore
+
+# Firebase config — per-project, supplied at build/deploy time (enables FCM push).
+app/google-services.json

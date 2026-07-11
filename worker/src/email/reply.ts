@@ -4,6 +4,7 @@ import { streamToBytes, toBase64 } from "../lib/bytes";
 import { parseMime, setHeader, removeHeaders, getHeader, serializeMime } from "../lib/mime";
 import { sendRaw, SesTransientError } from "../lib/ses";
 import { getEnvWithOverride, getNumericSetting } from "../lib/settings";
+import { pushReply } from "../lib/push";
 
 type SesSend = typeof sendRaw;
 
@@ -87,13 +88,16 @@ export async function handleReply(
     return;
   }
 
-  // Reply rate limit: outbound consumes SES quota and sender reputation, so cap
-  // replies only. Busy inbound aliases must not lose outbound reply capability
-  // just because they received many forwards. -1 disables a cap.
+  // Reply rate limit. The PER-ALIAS cap counts replies only: outbound consumes
+  // SES quota and sender reputation, and a busy inbound alias must not lose
+  // reply capability just because it received many forwards. The GLOBAL cap,
+  // however, is the same knob the inbound path uses and means the same thing on
+  // both paths — total relay volume (forward + reply) per hour across all
+  // aliases — so it is counted identically here. -1 disables a cap.
   const replyCap = await getNumericSetting(db, "rate_limit_reply_per_alias");
   const globalCap = await getNumericSetting(db, "rate_limit_global");
   const aliasCount = await q.countEventsByTypeSince(db, alias.id, now - 3600_000, ["reply"]);
-  const globalCount = await q.countEventsByTypeSince(db, null, now - 3600_000, ["reply"]);
+  const globalCount = await q.countEventsByTypeSince(db, null, now - 3600_000, ["forward", "reply"]);
   if ((replyCap >= 0 && aliasCount >= replyCap) || (globalCap >= 0 && globalCount >= globalCap)) {
     await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: parsed.externalSender, detail: "rate", ts: now });
     return;
@@ -150,4 +154,5 @@ export async function handleReply(
 
   await q.insertEvent(db, { alias_id: alias.id, type: "reply", external_sender: parsed.externalSender, subject, ts: now });
   await q.incCounter(db, alias.id, "reply_count");
+  await pushReply(env, alias.user_id, alias.full_address, parsed.externalSender, subject);
 }

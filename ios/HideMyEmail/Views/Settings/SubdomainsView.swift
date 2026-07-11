@@ -53,16 +53,6 @@ struct SubdomainsView: View {
             .overlay(alignment: .bottom) {
                 if let error { ErrorBanner(message: error) }
             }
-            .confirmationDialog(
-                pendingDelete.map { "Delete \($0.domain) and all its aliases?" } ?? "",
-                isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
-                titleVisibility: .visible
-            ) {
-                Button("Delete", role: .destructive) {
-                    if let d = pendingDelete { Task { await remove(d) } }
-                }
-                Button("Cancel", role: .cancel) { pendingDelete = nil }
-            }
             .task { if domains.isEmpty { await reload() } }
             .sheet(item: $editing) { d in
                 EditSubdomainView(domain: d, destinations: verifiedDestinations) {
@@ -156,6 +146,19 @@ struct SubdomainsView: View {
                     .swipeActions {
                         Button("Delete", role: .destructive) { pendingDelete = d }
                         Button("Edit") { editing = d }.tint(Theme.accent)
+                    }
+                    .confirmationDialog(
+                        "Delete \(d.domain) and all its aliases?",
+                        isPresented: Binding(
+                            get: { pendingDelete?.id == d.id },
+                            set: { if !$0 { pendingDelete = nil } }
+                        ),
+                        titleVisibility: .visible
+                    ) {
+                        Button("Delete", role: .destructive) {
+                            Task { await remove(d) }
+                        }
+                        Button("Cancel", role: .cancel) { pendingDelete = nil }
                     }
                     .contentShape(Rectangle())
                     .onTapGesture { editing = d }

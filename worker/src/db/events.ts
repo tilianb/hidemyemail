@@ -9,13 +9,28 @@ export async function insertEvent(
   ).bind(e.alias_id ?? null, e.type, e.external_sender ?? null, e.subject ?? null, e.bytes ?? null, e.detail ?? null, e.ts).run();
 }
 
+// Record that an alias forwarded inbound mail from an external sender. This is
+// the durable first-contact store the reply gate reads, kept separate from
+// `events` so events retention can prune freely without revoking reply access.
+// Idempotent on (alias_id, external_sender); refreshes last_seen_at on repeats.
+export async function recordContact(
+  db: D1Database, aliasId: number, externalSender: string, now: number
+): Promise<void> {
+  await db.prepare(
+    "INSERT INTO contacts (alias_id, external_sender, first_seen_at, last_seen_at) VALUES (?, LOWER(?), ?, ?) " +
+    "ON CONFLICT(alias_id, external_sender) DO UPDATE SET last_seen_at = excluded.last_seen_at"
+  ).bind(aliasId, externalSender, now, now).run();
+}
+
 // First-contact gate for replies: has this alias previously forwarded inbound mail
 // FROM this external sender? Reverse addresses are guessable, so a reply is only
-// authorised to a correspondent the alias has actually heard from. Case-insensitive
-// because envelope MAIL FROM casing is not normalised on the inbound path.
+// authorised to a correspondent the alias has actually heard from. Reads the
+// durable `contacts` table (not `events`), so events retention never revokes
+// reply access. Case-insensitive because envelope MAIL FROM casing is not
+// normalised on the inbound path.
 export async function hasPriorInbound(db: D1Database, aliasId: number, externalSender: string): Promise<boolean> {
   const r = await db.prepare(
-    "SELECT 1 AS n FROM events WHERE alias_id = ? AND type = 'forward' AND LOWER(external_sender) = LOWER(?) LIMIT 1"
+    "SELECT 1 AS n FROM contacts WHERE alias_id = ? AND external_sender = LOWER(?) LIMIT 1"
   ).bind(aliasId, externalSender).first<{ n: number }>();
   return !!r;
 }

@@ -5,6 +5,7 @@ import { verifySnsMessage } from "../../lib/sns";
 import { decryptDestination, hashDestination } from "../../lib/crypto";
 import { buildNotificationEmail } from "../../lib/emails";
 import { sendRaw } from "../../lib/ses";
+import { pushSuppression } from "../../lib/push";
 import * as q from "../../db/queries";
 
 // SNS posts JSON (often Content-Type text/plain). We verify SNS signatures,
@@ -129,7 +130,10 @@ async function processBounce(env: AppEnv["Bindings"], msg: any, encKey: string, 
       // reference stored — the plaintext address must never land in events.
       await q.insertEvent(db, { alias_id: null, type: "bounce", detail: `dest:${dest.id}`, ts: now });
       const changed = await q.suppressDestination(db, dest.id, "hard_bounce", "hard", now);
-      if (changed) await notifySuppression(env, dest, "hard_bounce", "hard");
+      if (changed) {
+        await notifySuppression(env, dest, "hard_bounce", "hard");
+        await pushSuppression(env, dest.user_id, "hard_bounce");
+      }
     } else {
       // Soft/transient bounce: record as soft_bounce so the threshold counts
       // ONLY soft bounces (a prior hard bounce must never inflate the count).
@@ -139,7 +143,10 @@ async function processBounce(env: AppEnv["Bindings"], msg: any, encKey: string, 
       const softCount = await q.countEventsForDestinationSince(db, dest.id, "soft_bounce", since);
       if (softThreshold > 0 && softCount >= softThreshold) {
         const changed = await q.suppressDestination(db, dest.id, "soft_bounce", "soft", now);
-        if (changed) await notifySuppression(env, dest, "soft_bounce", "soft");
+        if (changed) {
+          await notifySuppression(env, dest, "soft_bounce", "soft");
+          await pushSuppression(env, dest.user_id, "soft_bounce");
+        }
       }
     }
   });
@@ -157,7 +164,10 @@ async function processComplaint(env: AppEnv["Bindings"], msg: any, encKey: strin
     await q.insertEvent(db, { alias_id: null, type: "complaint", detail: `dest:${dest.id}`, ts: now });
     // Always hard-suppress on complaint.
     const changed = await q.suppressDestination(db, dest.id, "complaint", "hard", now);
-    if (changed) await notifySuppression(env, dest, "complaint", "hard");
+    if (changed) {
+      await notifySuppression(env, dest, "complaint", "hard");
+      await pushSuppression(env, dest.user_id, "complaint");
+    }
   });
 }
 

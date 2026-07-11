@@ -204,6 +204,22 @@ data class RecoveryCodesResponse(val codes: List<String>)
 @Serializable
 data class RecoveryCodesStatus(val remaining: Int)
 
+// GET /api/settings/api-keys — keys for the addy.io-compatible /api/v1
+// surface (Bitwarden's username generator etc.). The token itself is never
+// returned here; only a display prefix.
+@Serializable
+data class ApiKey(
+    val id: Int,
+    val name: String,
+    @SerialName("token_prefix") val tokenPrefix: String,
+    @SerialName("created_at") val createdAt: Double,
+    @SerialName("last_used_at") val lastUsedAt: Double? = null,
+)
+
+// POST /api/settings/api-keys — the full token is returned exactly once.
+@Serializable
+data class ApiKeyCreated(val id: Int, val name: String, val token: String)
+
 // POST /api/recover/code — self-service recovery (username + recovery code).
 @Serializable
 data class RecoverResponse(
@@ -213,4 +229,16 @@ data class RecoverResponse(
     val userId: Int? = null,
     val token: String? = null,
     @SerialName("fresh_auth") val freshAuth: String? = null,
+)
+
+// Per-device push opt-ins, mirroring the Worker's push_devices columns and the
+// iOS `PushPrefs`. Defaults surface the events your inbox can't show you
+// (blocked mail, paused destinations) and leave the noisy, already-in-inbox
+// events (forwards, reply receipts) off.
+@Serializable
+data class PushPrefs(
+    val blocked: Boolean = true,
+    val bounce: Boolean = true,
+    val forward: Boolean = false,
+    val reply: Boolean = false,
 )

@@ -25,11 +25,16 @@
   },
   "vars": {
     "ENVIRONMENT": "production",
-    "APPLE_APP_ID": "3L2C79636P.dev.hidemyemail.app"
+    "APPLE_APP_ID": "3L2C79636P.dev.hidemyemail.app",
+    // Production APNs gateway — TestFlight / App Store builds register here.
+    "APNS_HOST": "api.push.apple.com",
+    // 10-char APNs key id (not sensitive). The .p8 signing key is the secret.
+    "APNS_KEY_ID": "5RLSMQK7CL"
   },
   // Secrets (wrangler secret put): SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY,
   // SESSION_SECRET, ACTION_SECRET, AUTH_PASSWORD_HASH, AUTH_PASSWORD_SALT,
-  // DESTINATION_ENCRYPTION_KEY, SNS_ALLOWED_TOPIC_ARN
+  // DESTINATION_ENCRYPTION_KEY, SNS_ALLOWED_TOPIC_ARN, APNS_AUTH_KEY,
+  // FCM_SERVICE_ACCOUNT
   "env": {
     "preview": {
       "observability": { "enabled": true },
@@ -48,7 +53,11 @@
       ],
       "vars": {
         "ENVIRONMENT": "preview",
-        "APPLE_APP_ID": "3L2C79636P.dev.hidemyemail.app"
+        "APPLE_APP_ID": "3L2C79636P.dev.hidemyemail.app",
+        // Sandbox APNs gateway — development-signed (Xcode) builds register here.
+        "APNS_HOST": "api.sandbox.push.apple.com",
+        // 10-char APNs key id (not sensitive). The .p8 signing key is the secret.
+        "APNS_KEY_ID": "5RLSMQK7CL"
       }
     },
   },

@@ -270,6 +270,26 @@ struct Profile: Decodable {
     }
 }
 
+// Per-device push-notification preferences (GET/POST/PATCH /api/push/devices).
+// Mirrors the Worker's `push_devices` opt-in columns. Defaults match the
+// product decision: the "silent" events (blocked mail, dead destinations) are
+// on; events that already land in your inbox (forwards, reply receipts) are off.
+struct PushPrefs: Codable, Equatable {
+    var blocked: Bool
+    var bounce: Bool
+    var forward: Bool
+    var reply: Bool
+
+    static let `default` = PushPrefs(blocked: true, bounce: true, forward: false, reply: false)
+}
+
+// One registered device returned by GET /api/push/devices.
+struct PushDevice: Decodable {
+    let token: String
+    let platform: String
+    let prefs: PushPrefs
+}
+
 // PATCH /api/account/username
 struct UsernameResponse: Decodable {
     let ok: Bool?
@@ -281,6 +301,31 @@ struct RecoveryCodesResponse: Decodable { let codes: [String] }
 
 // GET /api/account/recovery-codes
 struct RecoveryCodesStatus: Decodable { let remaining: Int }
+
+// GET /api/settings/api-keys — keys for the addy.io-compatible /api/v1
+// surface (Bitwarden's username generator etc.). The token itself is never
+// returned here; only a display prefix.
+struct ApiKey: Decodable, Identifiable {
+    let id: Int
+    let name: String
+    let tokenPrefix: String
+    let createdAt: Double
+    let lastUsedAt: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case tokenPrefix = "token_prefix"
+        case createdAt = "created_at"
+        case lastUsedAt = "last_used_at"
+    }
+}
+
+// POST /api/settings/api-keys — the full token is returned exactly once.
+struct ApiKeyCreated: Decodable {
+    let id: Int
+    let name: String
+    let token: String
+}
 
 // POST /api/recover/code — self-service recovery (username + recovery code).
 struct RecoverResponse: Decodable {

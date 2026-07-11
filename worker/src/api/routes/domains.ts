@@ -223,6 +223,7 @@ export function domainRoutes() {
     const stmts: D1PreparedStatement[] = [];
     for (const aid of aliasIds) {
       stmts.push(c.env.DB.prepare("DELETE FROM reverse_map WHERE alias_id = ?").bind(aid));
+      stmts.push(c.env.DB.prepare("DELETE FROM contacts WHERE alias_id = ?").bind(aid));
       stmts.push(c.env.DB.prepare("DELETE FROM blocks WHERE alias_id = ?").bind(aid));
       stmts.push(c.env.DB.prepare("DELETE FROM events WHERE alias_id = ?").bind(aid));
     }

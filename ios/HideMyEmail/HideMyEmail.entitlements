@@ -6,5 +6,9 @@
 	<array>
 		<string>webcredentials:app.hidemyemail.dev</string>
 	</array>
+	<!-- APNs. "development" works for debug/TestFlight builds; Xcode/App Store
+	     remaps this to production automatically for release distribution. -->
+	<key>aps-environment</key>
+	<string>development</string>
 </dict>
 </plist>

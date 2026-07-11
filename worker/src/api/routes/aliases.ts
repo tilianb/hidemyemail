@@ -1,14 +1,8 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import { hashDestination, encryptDestination, decryptDestination } from "../../lib/crypto";
-import { getNumericSetting } from "../../lib/settings";
-
-// Validate email local part (RFC 5321 safe subset)
-function isValidLocalPart(s: string): boolean {
-  if (!s || s.length > 64) return false;
-  // Allow lowercase alphanumeric, dots, hyphens; no leading/trailing dot/hyphen, no consecutive dots
-  return /^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/.test(s) && !s.includes("..");
-}
+import { isValidLocalPart, randomLocalPart, escapeLike } from "../../lib/alias-format";
+import { aliasQuotaExceeded, resolveDefaultDestination } from "../../db/aliases";
 
 export function aliasRoutes() {
   const r = new Hono<AppEnv>();
@@ -17,9 +11,9 @@ export function aliasRoutes() {
     const userId = c.get("userId");
     const query = c.req.query("q");
     const sql = query
-      ? "SELECT a.*, d.domain FROM aliases a JOIN domains d ON d.id=a.domain_id WHERE a.user_id = ? AND a.full_address LIKE ? ORDER BY a.created_at DESC LIMIT 500"
+      ? "SELECT a.*, d.domain FROM aliases a JOIN domains d ON d.id=a.domain_id WHERE a.user_id = ? AND a.full_address LIKE ? ESCAPE '\\' ORDER BY a.created_at DESC LIMIT 500"
       : "SELECT a.*, d.domain FROM aliases a JOIN domains d ON d.id=a.domain_id WHERE a.user_id = ? ORDER BY a.created_at DESC LIMIT 500";
-    const stmt = query ? c.env.DB.prepare(sql).bind(userId, `%${query}%`) : c.env.DB.prepare(sql).bind(userId);
+    const stmt = query ? c.env.DB.prepare(sql).bind(userId, `%${escapeLike(query)}%`) : c.env.DB.prepare(sql).bind(userId);
     const rows = await stmt.all<any>();
     
     const results = [];
@@ -38,12 +32,8 @@ export function aliasRoutes() {
     const dom = await c.env.DB.prepare("SELECT domain, is_global, user_id, allow_custom_aliases, active, verified_at FROM domains WHERE id=?").bind(b.domain_id).first<{ domain: string, is_global: number, user_id: number, allow_custom_aliases: number, active: number, verified_at: number | null }>();
     if (!dom) return c.json({ error: "Unknown domain" }, 400);
     
-    const maxTotal = await getNumericSetting(c.env.DB, "max_total_aliases");
-    if (maxTotal >= 0) {
-      const totalCount = await c.env.DB.prepare("SELECT COUNT(*) as count FROM aliases WHERE user_id = ?").bind(userId).first<{ count: number }>();
-      if (totalCount && totalCount.count >= maxTotal) {
-        return c.json({ error: "Total alias quota exceeded" }, 400);
-      }
+    if (await aliasQuotaExceeded(c.env.DB, userId)) {
+      return c.json({ error: "Total alias quota exceeded" }, 400);
     }
 
     if (dom.is_global === 0 && dom.user_id !== userId) {
@@ -53,27 +43,26 @@ export function aliasRoutes() {
       return c.json({ error: "Domain unavailable" }, 400);
     }
 
-    let destinationToUse = b.destination;
-    if (!destinationToUse && dom.is_global === 1) {
-      const defaultDest = await c.env.DB.prepare("SELECT email FROM destinations WHERE user_id = ? AND is_default = 1").bind(userId).first<{ email: string }>();
-      if (!defaultDest) {
-        return c.json({ error: "You must select a destination or set a default destination" }, 400);
-      }
-      destinationToUse = await decryptDestination(defaultDest.email, c.env.DESTINATION_ENCRYPTION_KEY);
-    }
-
-    if (destinationToUse) {
-      const emailHash = await hashDestination(destinationToUse.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY);
+    let destEnc: string | null = null;
+    let destHash: string | null = null;
+    if (b.destination) {
+      const email = b.destination.toLowerCase();
+      const emailHash = await hashDestination(email, c.env.DESTINATION_ENCRYPTION_KEY);
       const destVerified = await c.env.DB.prepare("SELECT id FROM destinations WHERE user_id = ? AND email_hash = ? AND verified_at IS NOT NULL").bind(userId, emailHash).first();
       if (!destVerified) return c.json({ error: "Destination email not verified" }, 400);
+      destEnc = await encryptDestination(email, c.env.DESTINATION_ENCRYPTION_KEY);
+      destHash = emailHash;
+    } else if (dom.is_global === 1) {
+      const pair = await resolveDefaultDestination(c.env.DB, c.env.DESTINATION_ENCRYPTION_KEY, userId);
+      if (!pair) {
+        return c.json({ error: "You must select a destination or set a default destination" }, 400);
+      }
+      ({ destEnc, destHash } = pair);
     }
 
     let localPart = b.local_part.toLowerCase();
     if (dom.is_global === 1 && !dom.allow_custom_aliases) {
-      const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-      const arr = new Uint8Array(8);
-      crypto.getRandomValues(arr);
-      localPart = Array.from(arr).map(x => chars[x % chars.length]).join("");
+      localPart = randomLocalPart();
     } else {
       if (localPart.startsWith("r.")) return c.json({ error: "Reserved prefix" }, 400);
       if (!isValidLocalPart(localPart)) {
@@ -84,9 +73,6 @@ export function aliasRoutes() {
     const full = `${localPart}@${dom.domain}`;
     
     try {
-      const destEnc = destinationToUse ? await encryptDestination(destinationToUse.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY) : null;
-      const destHash = destinationToUse ? await hashDestination(destinationToUse.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY) : null;
-
       const row = await c.env.DB.prepare(
         "INSERT INTO aliases (domain_id, user_id, local_part, full_address, destination, destination_hash, label, active, source, created_at) " +
         "VALUES (?,?,?,?,?,?,?,1,'dashboard',?) RETURNING *"
@@ -159,6 +145,7 @@ export function aliasRoutes() {
       if (!exists) return c.json({ error: "Alias not found" }, 404);
       await c.env.DB.batch([
         c.env.DB.prepare("DELETE FROM reverse_map WHERE alias_id=?").bind(id),
+        c.env.DB.prepare("DELETE FROM contacts WHERE alias_id=?").bind(id),
         c.env.DB.prepare("DELETE FROM blocks WHERE alias_id=?").bind(id),
         c.env.DB.prepare("DELETE FROM events WHERE alias_id=?").bind(id),
         c.env.DB.prepare("DELETE FROM aliases WHERE id=? AND user_id=?").bind(id, userId),
