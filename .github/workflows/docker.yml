@@ -289,7 +289,8 @@ jobs:
         run: |
           source_ref="${{ env.GHCR_IMAGE }}:sha-${GITHUB_SHA::7}"
           if ! crane digest "$source_ref" >/dev/null; then
-            source_ref="${{ env.GHCR_IMAGE }}:main"
+            echo "::error::Source image $source_ref not found — refusing to release a possibly-mismatched image. Ensure the main build for this commit succeeded." >&2
+            exit 1
           fi
           echo "Using source image: $source_ref"
           mapfile -t tags < <(jq -r --arg image '${{ env.GHCR_IMAGE }}' '.tags[] | select(startswith($image + ":")) | "-t", .' <<< "$META_JSON")
@@ -301,7 +302,8 @@ jobs:
         run: |
           source_ref="${{ env.GHCR_IMAGE }}:sha-${GITHUB_SHA::7}"
           if ! crane digest "$source_ref" >/dev/null; then
-            source_ref="${{ env.GHCR_IMAGE }}:main"
+            echo "::error::Source image $source_ref not found — refusing to release a possibly-mismatched image. Ensure the main build for this commit succeeded." >&2
+            exit 1
           fi
           echo "Using source image: $source_ref"
           mapfile -t tags < <(jq -r --arg image '${{ env.DOCKERHUB_IMAGE }}' '.tags[] | select(startswith($image + ":"))' <<< "$META_JSON")

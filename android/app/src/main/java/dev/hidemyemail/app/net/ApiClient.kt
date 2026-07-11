@@ -7,9 +7,11 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.CookieJar
@@ -222,6 +224,15 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
 
     suspend fun deletePasskey(id: String) = requestVoid("/api/settings/passkeys/$id", "DELETE")
 
+    // API keys (addy.io-compatible /api/v1). Creation/revocation is
+    // fresh-auth gated; the created token is returned exactly once.
+    suspend fun apiKeys(): List<ApiKey> = request("/api/settings/api-keys")
+
+    suspend fun createApiKey(name: String): ApiKeyCreated =
+        request("/api/settings/api-keys", "POST", buildJsonObject { put("name", name) })
+
+    suspend fun deleteApiKey(id: Int) = requestVoid("/api/settings/api-keys/$id", "DELETE")
+
     /**
      * Full account export (aliases, domains, destinations, rules…) as raw
      * JSON text. Requires a fresh session; the Worker 401s otherwise.
@@ -256,6 +267,38 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
 
     /** Recent activity for one alias, newest first. */
     suspend fun events(aliasId: Int): List<EmailEvent> = request("/api/aliases/$aliasId/events")
+
+    // MARK: Push notifications (FCM)
+
+    /** Register (or refresh) this device's FCM token + prefs. Idempotent on token. */
+    suspend fun registerPushDevice(token: String, prefs: PushPrefs) = requestVoid(
+        "/api/push/devices", "POST",
+        buildJsonObject {
+            put("token", token)
+            put("platform", "android")
+            putJsonObject("prefs") { putPrefs(prefs) }
+        },
+    )
+
+    /** Update notification prefs for an already-registered token. */
+    suspend fun updatePushPrefs(token: String, prefs: PushPrefs) = requestVoid(
+        "/api/push/devices", "PATCH",
+        buildJsonObject {
+            put("token", token)
+            putJsonObject("prefs") { putPrefs(prefs) }
+        },
+    )
+
+    /** Unregister a device token (sign-out, or the user disabling push). */
+    suspend fun unregisterPushDevice(token: String) =
+        requestVoid("/api/push/devices", "DELETE", buildJsonObject { put("token", token) })
+
+    private fun JsonObjectBuilder.putPrefs(p: PushPrefs) {
+        put("blocked", p.blocked)
+        put("bounce", p.bounce)
+        put("forward", p.forward)
+        put("reply", p.reply)
+    }
 
     // MARK: Core request plumbing
 
