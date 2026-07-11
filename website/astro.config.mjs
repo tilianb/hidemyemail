@@ -14,9 +14,13 @@ export default defineConfig({
       description:
         "Self-hosted, serverless email aliases for your domains — Cloudflare Workers + AWS SES, with native iOS and Android apps.",
       favicon: "/favicon.svg",
-      social: {
-        github: "https://github.com/tilianb/hidemyemail",
-      },
+      social: [
+        {
+          icon: "github",
+          label: "GitHub",
+          href: "https://github.com/tilianb/hidemyemail",
+        },
+      ],
       // Source of truth lives in the repo root, not in website/. The sync step
       // copies it into src/content/docs/, so "edit this page" points back there.
       editLink: {
