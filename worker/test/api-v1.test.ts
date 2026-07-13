@@ -142,7 +142,7 @@ test("v1 custom alias cannot claim another user's reserved address", async () =>
   }, testEnv);
 
   expect(res.status).toBe(422);
-  expect(await res.json()).toMatchObject({ message: "That alias is reserved by its original owner." });
+  expect(await res.json()).toMatchObject({ message: "That alias is already taken or not available." });
 });
 
 test("POST /api/v1/aliases without a domain uses the main global domain", async () => {

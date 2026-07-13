@@ -131,7 +131,7 @@ export function domainRoutes() {
     );
     if (!resolvedDefaultDestination) return c.json({ error: "Destination email not verified" }, 400);
     if (!(await canUseIdentifier(c.env.DB, "subdomain", fullDomain, userId))) {
-      return c.json({ error: "Subdomain is reserved by its original owner" }, 409);
+      return c.json({ error: "Subdomain is already taken or not available" }, 409);
     }
 
     try {
@@ -143,7 +143,7 @@ export function domainRoutes() {
       return c.json({ id: row!.id, domain: fullDomain, default_destination: resolvedDefaultDestination.publicValue });
     } catch (err: any) {
       if (isIdentifierReservationError(err)) {
-        return c.json({ error: "Subdomain is reserved by its original owner" }, 409);
+        return c.json({ error: "Subdomain is already taken or not available" }, 409);
       }
       if (err.message?.includes("UNIQUE constraint failed")) {
         return c.json({ error: "Domain already exists" }, 409);
