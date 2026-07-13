@@ -79,6 +79,12 @@ order (the abstraction is the enabler; later items get cheaper once it lands):
 
 ## P2 — Next
 
+- [ ] **Operator-defined blocked subdomains** _(security / self-hosting)_. Add
+  an environment variable containing a comma-separated denylist of subdomain
+  names or patterns that users may not claim (for example reserved service,
+  brand, and infrastructure names). Normalize entries and requested names
+  before matching, validate malformed patterns at startup, and apply the check
+  before creating an ownership reservation.
 - [ ] **Browser extension** (or interim bookmarklet) _(product)_. Generate an
   alias in signup forms without opening the dashboard. The daily-driver feature
   of SimpleLogin/addy.
