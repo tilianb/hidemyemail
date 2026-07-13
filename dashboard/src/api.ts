@@ -134,7 +134,14 @@ export interface SuppressionSummary {
 }
 
 export const api = {
-  config: () => req<{ main_global_domain: string; max_subdomains: number; max_total_aliases: number; alias_quota_buffer_enabled: boolean }>("/api/config"),
+  config: () => req<{
+    main_global_domain: string;
+    max_subdomains: number;
+    max_total_aliases: number;
+    alias_quota_buffer_enabled: boolean;
+    catch_all_auto_create: boolean;
+    inline_actions_default_enabled: boolean;
+  }>("/api/config"),
   login: (password: string) => req<{ ok: true; userId: number } | { mfa_required: true }>("/api/login", { method: "POST", body: JSON.stringify({ password }) }),
   // Native-app login handoff: trade the current web session for a short-lived
   // code bound to the app's PKCE challenge (see pages/AppAuth.tsx)
