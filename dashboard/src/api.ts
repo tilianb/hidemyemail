@@ -138,6 +138,7 @@ export const api = {
     main_global_domain: string;
     max_subdomains: number;
     max_total_aliases: number;
+    registration_enabled: boolean;
     alias_quota_buffer_enabled: boolean;
     catch_all_auto_create: boolean;
     inline_actions_default_enabled: boolean;
