@@ -1,5 +1,6 @@
 import { env } from "cloudflare:test";
 import { beforeAll, beforeEach, expect, test } from "vitest";
+import PostalMime from "postal-mime";
 import { createApp } from "../src/api/app";
 import { signSession } from "../src/lib/auth";
 import { resetDb } from "./helpers";
@@ -142,8 +143,10 @@ test("GET and POST /api/verify with invalid / missing token", async () => {
 
 test("POST /api/destinations stores pending destination before sending verification email", async () => {
   let releaseSend!: () => void;
+  let sentMessage: any;
   const sendStarted = new Promise<void>((resolve) => {
-    testEnv.__sesSend = async () => {
+    testEnv.__sesSend = async (_config: any, message: any) => {
+      sentMessage = message;
       resolve();
       await new Promise<void>((release) => { releaseSend = release; });
       return "message-id";
@@ -170,6 +173,12 @@ test("POST /api/destinations stores pending destination before sending verificat
   ).first<{ token: string; verified_at: number | null }>();
   expect(row?.token).toBeTruthy();
   expect(row?.verified_at).toBeNull();
+
+  const rawBytes = Uint8Array.from(atob(sentMessage.rawBase64), (char) => char.charCodeAt(0));
+  const rawMessage = new TextDecoder().decode(rawBytes);
+  expect(rawMessage).not.toContain("—");
+  const parsed = await PostalMime.parse(rawBytes);
+  expect(parsed.text).toContain("Verify your email address — HideMyEmail");
 
   releaseSend();
   delete testEnv.__sesSend;
@@ -201,7 +210,10 @@ test("POST /api/destinations/:id/resend sends the existing verification token to
   expect(await res.json()).toEqual({ ok: true });
   expect(sent).toHaveLength(1);
   expect(sent[0].to).toBe(email);
-  expect(atob(sent[0].rawBase64)).toContain(`/api/verify?token=${token}`);
+  const rawBytes = Uint8Array.from(atob(sent[0].rawBase64), (char) => char.charCodeAt(0));
+  const parsed = await PostalMime.parse(rawBytes);
+  expect(parsed.text).toContain(`/api/verify?token=${token}`);
+  expect(parsed.html).toContain(`/api/verify?token=${token}`);
   const stored = await (env.DB as D1Database).prepare("SELECT email, token, verified_at FROM destinations WHERE id = ?")
     .bind(inserted!.id).first<{ email: string; token: string; verified_at: number | null }>();
   expect(stored).toEqual({ email: encryptedEmail, token, verified_at: null });
