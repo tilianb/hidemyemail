@@ -101,4 +101,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          gh release upload "$TAG" android/app/build/outputs/apk/release/app-release.apk --clobber
+          apk_name="HideMyEmail-${TAG}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "$apk_name"
+          gh release upload "$TAG" "$apk_name" --clobber
