@@ -156,6 +156,7 @@ export const api = {
   
   destinations: () => req<Destination[]>("/api/destinations"),
   createDestination: (email: string) => req<{ ok: true }>("/api/destinations", { method: "POST", body: JSON.stringify({ email }) }),
+  resendDestinationVerification: (id: number) => req<{ ok: true }>(`/api/destinations/${id}/resend`, { method: "POST" }),
   deleteDestination: (id: number) => req<{ ok: true }>(`/api/destinations/${id}`, { method: "DELETE" }),
   setDefaultDestination: (id: number) => req<{ ok: true }>(`/api/destinations/${id}/default`, { method: "PATCH" }),
   unsuppressDestination: (id: number) => req<{ ok: true }>(`/api/destinations/${id}/unsuppress`, { method: "POST" }),
