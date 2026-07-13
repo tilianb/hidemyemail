@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "./auth";
 import { Login } from "./pages/Login";
 import { Domains } from "./pages/Domains";
@@ -15,6 +15,14 @@ import { Globe, Mail, Ban, BarChart3, LogOut, Send, Shield, Settings as Settings
 import { useToast } from "./ui";
 
 type Tab = "domains" | "aliases" | "destinations" | "blocks" | "stats" | "settings" | "admin";
+const TABS: Tab[] = ["domains", "aliases", "destinations", "blocks", "stats", "settings", "admin"];
+
+function tabFromHash(isAdmin: boolean): Tab {
+  const candidate = window.location.hash.slice(1);
+  return TABS.includes(candidate as Tab) && (candidate !== "admin" || isAdmin)
+    ? candidate as Tab
+    : "domains";
+}
 
 // `overflow` items leave the mobile bottom tab bar (max 5 tabs) and surface
 // as icon buttons in the mobile top bar instead. Desktop sidebar shows all.
@@ -30,7 +38,7 @@ const BASE_NAV: NavItem[] = [
 
 export function App() {
   const { authed, isAdmin, userName, setAuthed, loading } = useAuth();
-  const [tab, setTab] = useState<Tab>("domains");
+  const [tab, setTab] = useState<Tab>(() => tabFromHash(isAdmin));
 
   const { toast } = useToast();
 
@@ -38,6 +46,25 @@ export function App() {
     ? [...BASE_NAV, { id: "admin" as Tab, label: "Admin", icon: Shield, title: "System Administration", overflow: true }]
     : BASE_NAV;
   const overflowItems = navItems.filter(n => n.overflow);
+
+  const navigate = (next: Tab) => {
+    const allowed = next !== "admin" || isAdmin;
+    const destination = allowed ? next : "domains";
+    if (window.location.hash !== `#${destination}`) window.location.hash = destination;
+    else setTab(destination);
+  };
+
+  useEffect(() => {
+    if (loading) return;
+    const syncTab = () => {
+      const next = tabFromHash(isAdmin);
+      setTab(next);
+      if (window.location.hash !== `#${next}`) history.replaceState(null, "", `#${next}`);
+    };
+    syncTab();
+    window.addEventListener("hashchange", syncTab);
+    return () => window.removeEventListener("hashchange", syncTab);
+  }, [isAdmin, loading]);
 
   const logout = async () => {
     try {
@@ -94,6 +121,16 @@ export function App() {
 
   return (
     <div id="app-shell" style={{ display: "flex", width: "100%", minHeight: "100dvh" }}>
+      <a
+        className="skip-link"
+        href="#main-content"
+        onClick={event => {
+          event.preventDefault();
+          document.getElementById("main-content")?.focus();
+        }}
+      >
+        Skip to main content
+      </a>
       {/* Mobile-only top bar (hidden on desktop via CSS) */}
       <header className="mobile-topbar">
         <span className="sidebar-logo">
@@ -106,9 +143,10 @@ export function App() {
               <button
                 key={n.id}
                 className={`btn-ghost mobile-top-action${tab === n.id ? " active" : ""}`}
-                onClick={() => setTab(n.id)}
+                onClick={() => navigate(n.id)}
                 title={n.title}
                 aria-label={n.label}
+                aria-current={tab === n.id ? "page" : undefined}
               >
                 <Icon size={18} />
               </button>
@@ -129,15 +167,16 @@ export function App() {
           <div className="sidebar-logo-sub">.dev — privacy console</div>
         </div>
 
-        <nav className="sidebar-nav">
+        <nav className="sidebar-nav" aria-label="Dashboard navigation">
           {navItems.map(n => {
             const Icon = n.icon;
             return (
               <button
                 key={n.id}
                 className={`nav-item${tab === n.id ? " active" : ""}${n.overflow ? " nav-overflow" : ""}`}
-                onClick={() => setTab(n.id)}
+                onClick={() => navigate(n.id)}
                 title={n.title}
+                aria-current={tab === n.id ? "page" : undefined}
               >
                 <span className="nav-icon">
                   <Icon size={16} />
@@ -170,9 +209,9 @@ export function App() {
       </aside>
 
       {/* Main content */}
-      <main className="page-main">
+      <main id="main-content" className="page-main" tabIndex={-1}>
         <div className="page-content">
-          {tab === "domains" && <Domains onNavigateDestinations={() => setTab("destinations")} />}
+          {tab === "domains" && <Domains onNavigateDestinations={() => navigate("destinations")} />}
           {tab === "aliases" && <Aliases />}
           {tab === "destinations" && <Destinations />}
           {tab === "blocks" && <Blocks />}

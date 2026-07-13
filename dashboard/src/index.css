@@ -21,7 +21,7 @@
   /* Text */
   --text-primary:  #e8e8ec;
   --text-secondary:#9898a8;
-  --text-muted:    #55555f;
+  --text-muted:    #858594;
   --text-accent:   #ffb300;
 
   /* Semantic */
@@ -37,9 +37,9 @@
   --redact-reveal: #ffb300;
 
   /* Typography */
-  --font-display:  'Bricolage Grotesque', sans-serif;
-  --font-body:     'IBM Plex Sans', system-ui, sans-serif;
-  --font-mono:     'JetBrains Mono', 'Menlo', monospace;
+  --font-display:  'Bricolage Grotesque Variable', sans-serif;
+  --font-body:     'IBM Plex Sans Variable', system-ui, sans-serif;
+  --font-mono:     'JetBrains Mono Variable', 'Menlo', monospace;
 
   /* Spacing scale */
   --space-1: 4px;
@@ -90,6 +90,20 @@ body {
 
 /* ─── App shell ──────────────────────────────────────────────────────────── */
 #root { display: flex; min-height: 100dvh; }
+.skip-link {
+  position: fixed;
+  top: var(--space-3);
+  left: var(--space-3);
+  z-index: 10000;
+  padding: var(--space-2) var(--space-4);
+  border: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+  color: var(--accent);
+  font-weight: 600;
+  transform: translateY(-150%);
+}
+.skip-link:focus { transform: translateY(0); }
 
 /* ─── Typography helpers ─────────────────────────────────────────────────── */
 .font-display { font-family: var(--font-display); }
@@ -523,7 +537,7 @@ table.dossier tbody td {
 .badge-red    { background: var(--red-dim);    color: var(--red); }
 .badge-amber  { background: var(--accent-dim); color: var(--accent); }
 .badge-blue   { background: var(--blue-dim);   color: var(--blue); }
-.badge-muted  { background: var(--surface-3);  color: var(--text-muted); }
+.badge-muted  { background: var(--surface-3);  color: var(--text-secondary); }
 .badge-count  {
   background: var(--surface-3);
   color: var(--text-secondary);
@@ -967,7 +981,7 @@ table.dossier tbody td {
 }
 
 /* ─── Source badge ───────────────────────────────────────────────────────── */
-.source-auto { background: var(--surface-3); color: var(--text-muted); }
+.source-auto { background: var(--surface-3); color: var(--text-secondary); }
 .source-manual { background: var(--accent-dim); color: var(--accent); }
 
 /* ─── Confirm dialog overlay ─────────────────────────────────────────────── */
@@ -1130,7 +1144,7 @@ table.dossier tbody td {
   border-top: 1px solid var(--border);
 }
 
-@media (max-width: 700px) {
+@media (max-width: 700px), (pointer: coarse) and (max-width: 900px) and (max-height: 500px) {
   .stat-grid-2 {
     grid-template-columns: 1fr;
   }
@@ -1188,6 +1202,36 @@ table.dossier tbody td {
   font-size: 0.78em;
   color: var(--text-primary);
 }
+.help-callout { padding: var(--space-3) var(--space-4); }
+.help-callout summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-weight: 600;
+  list-style: none;
+}
+.help-callout summary::-webkit-details-marker { display: none; }
+.help-callout summary::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  margin-left: auto;
+  border-right: 2px solid var(--text-secondary);
+  border-bottom: 2px solid var(--text-secondary);
+  transform: rotate(-45deg);
+  transition: transform var(--t-fast), border-color var(--t-fast);
+}
+.help-callout summary:hover::after { border-color: var(--accent); }
+.help-callout[open] summary::after { transform: rotate(45deg); }
+.help-callout summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 2px;
+}
+.help-callout[open] summary { margin-bottom: var(--space-2); }
 .form-help {
   margin-top: var(--space-2);
   color: var(--text-secondary);
@@ -1694,7 +1738,7 @@ table.dossier tbody td {
   .domain-actions { justify-content: flex-start; }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 640px), (pointer: coarse) and (max-width: 900px) and (max-height: 500px) {
   .login-panel-left { display: none; }
   .login-form-pane { padding: var(--space-6); }
   .security-inline-form,
@@ -1710,7 +1754,7 @@ table.dossier tbody td {
 ::-webkit-scrollbar-thumb:hover { background: var(--surface-hover); }
 
 /* ─── Responsive: mobile chrome (top bar + bottom tab bar) ──────────────── */
-@media (max-width: 700px) {
+@media (max-width: 700px), (pointer: coarse) and (max-width: 900px) and (max-height: 500px) {
   #root { flex-direction: column; }
   #app-shell { flex-direction: column; }
 
@@ -1813,7 +1857,27 @@ table.dossier tbody td {
   }
 
   /* Prevent iOS focus zoom (inputs < 16px trigger zoom) */
-  .input { font-size: 16px; }
+  .input { font-size: 16px; min-height: 44px; height: 44px; }
+  button, .btn, .btn-icon, .btn-ghost { min-height: 44px; }
+  .btn-icon, .btn-ghost { min-width: 44px; }
+  .copy-btn { min-width: 44px; min-height: 44px; justify-content: center; }
+  .help-callout summary { min-height: 44px; }
+  .help-callout summary::before {
+    content: 'Tap to expand';
+    order: 1;
+    margin-left: auto;
+    color: var(--text-muted);
+    font-family: var(--font-body);
+    font-size: 0.72rem;
+    font-weight: 400;
+  }
+  .help-callout[open] summary::before { content: 'Tap to collapse'; }
+  .help-callout summary::after { order: 2; margin-left: 0; }
+  .switch { width: 44px; height: 44px; }
+  .switch-track { inset: 12px 5px; }
+  .form-strip { flex-direction: column; align-items: stretch; }
+  .form-strip .field, .form-strip .field.grow, .domain-builder-field { width: 100%; min-width: 0; }
+  .form-strip > .btn { align-self: stretch; justify-content: center; margin-bottom: 0; }
 
   /* Toasts sit above the bottom bar, full-width with margins */
   .toast-container {
@@ -1872,6 +1936,15 @@ table.dossier tbody td {
   table.dossier-stack tbody td .addr-mono {
     max-width: 100%;
   }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation: none !important;
+  }
+  .inline-spinner, .spin { animation: none !important; }
 }
 
 /* ─── Inline Editing ─────────────────────────────────────────────────────── */
@@ -1933,4 +2006,3 @@ table.dossier tbody td {
   max-width: 240px;
   box-sizing: border-box;
 }
-

@@ -141,9 +141,10 @@ export function Domains({ onNavigateDestinations }: { onNavigateDestinations: ()
         </div>
       )}
 
-      <div className="callout stagger-1 card-form-gap">
-        <strong>How subdomains work —</strong> Each subdomain inherits DNS from its parent global domain. Catch-all auto-creates aliases for unrecognized addresses. Each subdomain can override the default destination, or fall back to the global default.
-      </div>
+      <details className="callout help-callout stagger-1 card-form-gap">
+        <summary>How subdomains work</summary>
+        <div>Each subdomain inherits DNS from its parent global domain. Catch-all auto-creates aliases for unrecognized addresses. Each subdomain can override the default destination, or fall back to the global default.</div>
+      </details>
 
       <div className="card stagger-2 card-form-gap">
         <div className="card-header">
@@ -167,6 +168,7 @@ export function Domains({ onNavigateDestinations }: { onNavigateDestinations: ()
                 <div className="domain-dot font-mono">.</div>
                 <select
                   id="dom-base"
+                  aria-label="Base domain"
                   className="input input-mono domain-base-select"
                   value={form.base_domain_id}
                   onChange={e => setForm(f => ({ ...f, base_domain_id: Number(e.target.value) }))}
