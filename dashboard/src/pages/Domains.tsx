@@ -3,7 +3,7 @@ import { api, type Domain, type Destination } from "../api";
 import { useToast, CopyButton, ConfirmDialog, TableSkeleton, EmptyState } from "../ui";
 import { Globe, Trash2, Pencil, Check, X } from "lucide-react";
 
-export function Domains() {
+export function Domains({ onNavigateDestinations }: { onNavigateDestinations: () => void }) {
   const { toast } = useToast();
   const [rows, setRows] = useState<Domain[]>([]);
   const [destinations, setDestinations] = useState<Destination[]>([]);
@@ -126,6 +126,21 @@ export function Domains() {
         </p>
       </div>
 
+      {!loading && destinations.length === 0 && (
+        <div className="callout stagger-1 card-form-gap">
+          <strong>Add a verified destination first</strong>
+          <div>Domains need a verified email address for forwarded mail.</div>
+          <button
+            className="btn btn-primary btn-sm"
+            type="button"
+            style={{ marginTop: "var(--space-3)" }}
+            onClick={onNavigateDestinations}
+          >
+            Go to Destinations →
+          </button>
+        </div>
+      )}
+
       <div className="callout stagger-1 card-form-gap">
         <strong>How subdomains work —</strong> Each subdomain inherits DNS from its parent global domain. Catch-all auto-creates aliases for unrecognized addresses. Each subdomain can override the default destination, or fall back to the global default.
       </div>
@@ -185,11 +200,6 @@ export function Domains() {
           {allowedBaseDomains.length === 0 && (
             <div className="form-help">
               No global domains currently allow subdomain aliases.
-            </div>
-          )}
-          {destinations.length === 0 && (
-            <div className="form-help">
-              You must verify a destination email first.
             </div>
           )}
         </form>
