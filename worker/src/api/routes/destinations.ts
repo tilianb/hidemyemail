@@ -1,6 +1,8 @@
 import { Hono } from "hono";
+import { createMimeMessage, Mailbox } from "mimetext";
 import type { AppEnv } from "../app";
 import { sendRaw } from "../../lib/ses";
+import { toBase64, toBase64Mime } from "../../lib/bytes";
 import { hashDestination, encryptDestination, decryptDestination } from "../../lib/crypto";
 import { getEnvWithOverride, getMainGlobalDomain } from "../../lib/settings";
 
@@ -544,8 +546,6 @@ function renderErrorPage(): string {
 // ---------------------------------------------------------------------------
 
 function buildVerificationEmail(to: string, verifyUrl: string, mainGlobalDomain: string = "example.com"): string {
-  const boundary = `----=_Part_${Date.now().toString(36)}`;
-
   const htmlBody = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -652,32 +652,21 @@ This link expires in 24 hours. If you did not request this, you can safely ignor
 
 — HideMyEmail (https://${mainGlobalDomain})`;
 
-  // Build a MIME multipart/alternative message
-  const msgLines = [
-    `From: HideMyEmail <noreply@${mainGlobalDomain}>`,
-    `To: ${to}`,
-    `Subject: Verify your email address`,
-    `Date: ${new Date().toUTCString()}`,
-    `Message-ID: <${crypto.randomUUID()}@${mainGlobalDomain}>`,
-    `Reply-To: HideMyEmail <noreply@${mainGlobalDomain}>`,
-    `MIME-Version: 1.0`,
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
-    ``,
-    `--${boundary}`,
-    `Content-Type: text/plain; charset=UTF-8`,
-    `Content-Transfer-Encoding: quoted-printable`,
-    ``,
-    textBody,
-    ``,
-    `--${boundary}`,
-    `Content-Type: text/html; charset=UTF-8`,
-    `Content-Transfer-Encoding: base64`,
-    ``,
-    btoa(unescape(encodeURIComponent(htmlBody))),
-    ``,
-    `--${boundary}--`,
-  ];
-
-  const rawMsg = msgLines.join("\r\n");
-  return btoa(unescape(encodeURIComponent(rawMsg)));
+  const msg = createMimeMessage();
+  const sender = { name: "HideMyEmail", addr: `noreply@${mainGlobalDomain}` };
+  msg.setSender(sender);
+  msg.setTo(to);
+  msg.setSubject("Verify your email address");
+  msg.setHeader("Reply-To", new Mailbox(sender));
+  msg.addMessage({
+    contentType: "text/plain",
+    encoding: "base64",
+    data: toBase64Mime(new TextEncoder().encode(textBody)),
+  });
+  msg.addMessage({
+    contentType: "text/html",
+    encoding: "base64",
+    data: toBase64Mime(new TextEncoder().encode(htmlBody)),
+  });
+  return toBase64(new TextEncoder().encode(msg.asRaw()));
 }
