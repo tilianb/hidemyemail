@@ -1,6 +1,7 @@
 import type { AliasRow } from "../types";
 import { getNumericSetting } from "../lib/settings";
 import { decryptDestination, encryptDestination, hashDestination } from "../lib/crypto";
+import { isIdentifierReservationError, reserveIdentifierAndRun } from "./reservations";
 
 export async function getAlias(db: D1Database, fullAddress: string): Promise<AliasRow | null> {
   return db.prepare("SELECT * FROM aliases WHERE full_address = ?").bind(fullAddress).first<AliasRow>();
@@ -20,15 +21,15 @@ export async function autoCreateAlias(
   if (!dom || !dom.default_destination) return null; // Do not auto-create if there is no default destination
 
   try {
-    await db.prepare(
+    const created = await reserveIdentifierAndRun<AliasRow>(db, "alias", fullAddress, dom.user_id, db.prepare(
       "INSERT INTO aliases (domain_id, user_id, local_part, full_address, active, source, created_at) VALUES (?,?,?,?,1,?,?) " +
-      "ON CONFLICT(full_address) DO NOTHING"
-    ).bind(domainId, dom.user_id, localPart, fullAddress, source, Date.now()).run();
+      "ON CONFLICT(full_address) DO NOTHING RETURNING *"
+    ).bind(domainId, dom.user_id, localPart, fullAddress, source, Date.now()));
+    return created ?? await getAlias(db, fullAddress);
   } catch (err) {
-    if (err instanceof Error && err.message.includes("identifier reserved")) return null;
+    if (isIdentifierReservationError(err)) return null;
     throw err;
   }
-  return await getAlias(db, fullAddress);
 }
 
 export async function incCounter(db: D1Database, aliasId: number, col: "fwd_count" | "blocked_count" | "reply_count"): Promise<void> {

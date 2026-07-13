@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import { encryptDestination, decryptDestination, hashDestination } from "../../lib/crypto";
 import { getMainGlobalDomain, getEnvWithOverride } from "../../lib/settings";
-import { canUseIdentifier } from "../../db/reservations";
+import { canUseIdentifier, isIdentifierReservationError, reserveIdentifierAndRun } from "../../db/reservations";
 
 type ResolvedDefaultDestination = {
   encrypted: string | null;
@@ -135,13 +135,14 @@ export function domainRoutes() {
     }
 
     try {
-      const res = await c.env.DB.prepare(
-        "INSERT INTO domains (user_id, is_global, domain, default_destination, default_destination_hash, created_at) VALUES (?, 0, ?, ?, ?, ?)"
-      ).bind(userId, fullDomain, resolvedDefaultDestination.encrypted, resolvedDefaultDestination.hash, Date.now()).run();
+      const row = await reserveIdentifierAndRun<{ id: number }>(c.env.DB, "subdomain", fullDomain, userId, c.env.DB.prepare(
+        "INSERT INTO domains (user_id, is_global, domain, default_destination, default_destination_hash, created_at) " +
+        "VALUES (?, 0, ?, ?, ?, ?) RETURNING id"
+      ).bind(userId, fullDomain, resolvedDefaultDestination.encrypted, resolvedDefaultDestination.hash, Date.now()));
       
-      return c.json({ id: res.meta.last_row_id, domain: fullDomain, default_destination: resolvedDefaultDestination.publicValue });
+      return c.json({ id: row!.id, domain: fullDomain, default_destination: resolvedDefaultDestination.publicValue });
     } catch (err: any) {
-      if (err.message?.includes("identifier reserved")) {
+      if (isIdentifierReservationError(err)) {
         return c.json({ error: "Subdomain is reserved by its original owner" }, 409);
       }
       if (err.message?.includes("UNIQUE constraint failed")) {
