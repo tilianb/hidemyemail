@@ -172,7 +172,7 @@ export function App() {
       {/* Main content */}
       <main className="page-main">
         <div className="page-content">
-          {tab === "domains" && <Domains />}
+          {tab === "domains" && <Domains onNavigateDestinations={() => setTab("destinations")} />}
           {tab === "aliases" && <Aliases />}
           {tab === "destinations" && <Destinations />}
           {tab === "blocks" && <Blocks />}
