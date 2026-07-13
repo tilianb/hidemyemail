@@ -191,7 +191,7 @@ export function Login() {
                 />
               </div>
               {err && (
-                <div className="auth-error">
+                <div className="auth-error" role="alert" aria-live="polite">
                   {err}
                 </div>
               )}
@@ -289,7 +289,7 @@ export function Login() {
               </div>
 
               {err && (
-                <div className="auth-error">
+                <div className="auth-error" role="alert" aria-live="polite">
                   {err}
                 </div>
               )}
@@ -325,7 +325,7 @@ export function Login() {
                     className="btn btn-soft flex-1 btn-center"
                     disabled={loading}
                   >
-                    Generate New
+                    Create account
                   </button>
                 )}
               </div>
