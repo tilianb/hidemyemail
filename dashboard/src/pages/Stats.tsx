@@ -109,12 +109,14 @@ export function Stats() {
       </div>
 
       {/* ── Reply hint callout ── */}
-      <div className="callout stagger-1 card-form-gap">
-        <strong>How reverse-reply works —</strong>{" "}
+      <details className="callout help-callout stagger-1 card-form-gap">
+        <summary>How reverse-reply works</summary>
+        <div>
         Reverse-reply addresses are generated per alias+sender pair. Your outbound reply appears
         to originate from the alias — your real inbox address is never exposed to the original
         sender.
-      </div>
+        </div>
+      </details>
 
       {/* ── Totals row ── */}
       <div className="stagger-2 stat-grid-2">

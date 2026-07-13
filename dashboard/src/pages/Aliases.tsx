@@ -181,8 +181,9 @@ export function Aliases() {
       )}
 
       {/* Reply hint callout */}
-      <div className="callout stagger-1 card-form-gap">
-        <strong>How replies work —</strong>{" "}
+      <details className="callout help-callout stagger-1 card-form-gap">
+        <summary>How replies work</summary>
+        <div>
         When mail is forwarded, the{" "}
         <code>Reply-To</code>{" "}
         header is set to a unique reverse-alias:{" "}
@@ -191,7 +192,8 @@ export function Aliases() {
         </code>
         . Replying from your real inbox routes through SES and arrives as the alias — the sender
         never sees your real address.
-      </div>
+        </div>
+      </details>
 
       {/* Create alias form */}
       <div className="card stagger-2 card-form-gap">
@@ -266,6 +268,7 @@ export function Aliases() {
       {/* Search */}
       <div className="stagger-3 table-toolbar">
         <input
+          aria-label="Search aliases"
           className="input table-search"
           type="search"
           placeholder="Search aliases, labels, destinations…"
