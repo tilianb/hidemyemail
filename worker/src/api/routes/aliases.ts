@@ -3,7 +3,7 @@ import type { AppEnv } from "../app";
 import { hashDestination, encryptDestination, decryptDestination } from "../../lib/crypto";
 import { isValidLocalPart, randomLocalPart, escapeLike } from "../../lib/alias-format";
 import { aliasQuotaExceeded, resolveDefaultDestination } from "../../db/aliases";
-import { canUseIdentifier } from "../../db/reservations";
+import { canUseIdentifier, isIdentifierReservationError, reserveIdentifierAndRun } from "../../db/reservations";
 
 export function aliasRoutes() {
   const r = new Hono<AppEnv>();
@@ -77,17 +77,17 @@ export function aliasRoutes() {
     }
     
     try {
-      const row = await c.env.DB.prepare(
+      const row = await reserveIdentifierAndRun<any>(c.env.DB, "alias", full, userId, c.env.DB.prepare(
         "INSERT INTO aliases (domain_id, user_id, local_part, full_address, destination, destination_hash, label, active, source, created_at) " +
         "VALUES (?,?,?,?,?,?,?,1,'dashboard',?) RETURNING *"
-      ).bind(b.domain_id, userId, localPart, full, destEnc, destHash, b.label ?? null, Date.now()).first<any>();
+      ).bind(b.domain_id, userId, localPart, full, destEnc, destHash, b.label ?? null, Date.now()));
       
       if (row && row.destination) {
         row.destination = await decryptDestination(row.destination, c.env.DESTINATION_ENCRYPTION_KEY);
       }
       return c.json(row);
     } catch (err: any) {
-      if (err.message?.includes("identifier reserved")) {
+      if (isIdentifierReservationError(err)) {
         return c.json({ error: "Alias is reserved by its original owner" }, 409);
       }
       if (err.message && err.message.includes("UNIQUE constraint failed")) {

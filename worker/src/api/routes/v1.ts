@@ -4,7 +4,7 @@ import { authenticateApiKey } from "../../lib/api-keys";
 import { getMainGlobalDomain } from "../../lib/settings";
 import { isValidLocalPart, randomLocalPart, escapeLike } from "../../lib/alias-format";
 import { aliasQuotaExceeded, resolveDefaultDestination } from "../../db/aliases";
-import { canUseIdentifier } from "../../db/reservations";
+import { canUseIdentifier, isIdentifierReservationError, reserveIdentifierAndRun } from "../../db/reservations";
 
 /**
  * addy.io-compatible API surface (/api/v1), authenticated with per-user API
@@ -218,13 +218,13 @@ export function v1Routes() {
         continue;
       }
       try {
-        const row = await c.env.DB.prepare(
+        const row = await reserveIdentifierAndRun<AliasDbRow>(c.env.DB, "alias", full, userId, c.env.DB.prepare(
           "INSERT INTO aliases (domain_id, user_id, local_part, full_address, destination, destination_hash, label, active, source, created_at) " +
           "VALUES (?,?,?,?,?,?,?,1,'api',?) RETURNING *"
-        ).bind(dom.id, userId, localPart, full, destEnc, destHash, b.description ?? null, Date.now()).first<AliasDbRow>();
+        ).bind(dom.id, userId, localPart, full, destEnc, destHash, b.description ?? null, Date.now()));
         return c.json({ data: aliasResource({ ...row!, domain: dom.domain }) }, 201);
       } catch (err: any) {
-        if (err.message?.includes("identifier reserved")) {
+        if (isIdentifierReservationError(err)) {
           if (i === attempts - 1) return c.json({ message: "That alias is reserved by its original owner." }, 422);
           continue;
         }
