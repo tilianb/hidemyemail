@@ -106,6 +106,66 @@ export function destinationRoutes() {
     }
   });
 
+  r.post("/destinations/:id/resend", async (c) => {
+    const userId = c.get("userId");
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id) || id <= 0) return c.json({ error: "Invalid id" }, 400);
+
+    const dest = await c.env.DB.prepare(
+      "SELECT email, token, verified_at FROM destinations WHERE id = ? AND user_id = ?"
+    ).bind(id, userId).first<{ email: string; token: string; verified_at: number | null }>();
+    if (!dest) return c.json({ error: "Destination not found" }, 404);
+    if (dest.verified_at !== null) return c.json({ error: "Destination is already verified" }, 409);
+
+    const sesAccessKeyId = await getEnvWithOverride(c.env.DB, c.env, "ses_access_key_id");
+    const sesSecretAccessKey = await getEnvWithOverride(c.env.DB, c.env, "ses_secret_access_key");
+    const sesRegion = await getEnvWithOverride(c.env.DB, c.env, "ses_region");
+
+    if (!sesAccessKeyId || !sesSecretAccessKey || !sesRegion) {
+      return c.json({ error: "Email sending is not configured" }, 503);
+    }
+
+    const email = await decryptDestination(dest.email, c.env.DESTINATION_ENCRYPTION_KEY);
+    const verifyUrl = new URL(`/api/verify?token=${dest.token}`, c.req.url).toString();
+    const mainGlobalDomain = await getMainGlobalDomain(c.env.DB, c.env);
+    const rawBase64 = buildVerificationEmail(email, verifyUrl, mainGlobalDomain);
+    const cooldownKey = `destination-resend:${userId}:${id}`;
+    const now = Date.now();
+    const newReset = now + 60_000;
+    const claimed = await c.env.DB.prepare(
+      "INSERT INTO rate_limits (ip, attempts, reset_at) VALUES (?, 1, ?) " +
+      "ON CONFLICT(ip) DO UPDATE SET reset_at = excluded.reset_at " +
+      "WHERE rate_limits.reset_at <= ? RETURNING reset_at"
+    ).bind(cooldownKey, newReset, now).first<{ reset_at: number }>();
+    if (!claimed) {
+      return c.json({ error: "Please wait before resending verification email" }, 429);
+    }
+
+    const sesSend: typeof sendRaw = (c.env as any).__sesSend ?? sendRaw;
+    const startedAt = Date.now();
+    const sendTask = sesSend({
+        accessKeyId: sesAccessKeyId,
+        secretAccessKey: sesSecretAccessKey,
+        region: sesRegion
+      }, {
+        from: `HideMyEmail <noreply@${mainGlobalDomain}>`,
+        to: email,
+        rawBase64
+      }).then((messageId) => {
+        console.log("Verification email resent", { messageId, ms: Date.now() - startedAt });
+      }).catch((err) => {
+        console.error("Verification email resend failed", err);
+      });
+
+    try {
+      c.executionCtx.waitUntil(sendTask);
+    } catch {
+      void sendTask;
+    }
+
+    return c.json({ ok: true });
+  });
+
   r.delete("/destinations/:id", async (c) => {
     const userId = c.get("userId");
     const id = parseInt(c.req.param("id"), 10);

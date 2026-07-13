@@ -9,6 +9,7 @@ export function Destinations() {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ email: "" });
   const [submitting, setSubmitting] = useState(false);
+  const [resending, setResending] = useState<Set<number>>(new Set());
 
   async function load() {
     setLoading(true);
@@ -46,6 +47,22 @@ export function Destinations() {
       toast("Destination removed", "success");
     } catch (err: any) {
       toast(err.message || "Failed to remove destination", "error");
+    }
+  }
+
+  async function resend(d: Destination) {
+    setResending(ids => new Set(ids).add(d.id));
+    try {
+      await api.resendDestinationVerification(d.id);
+      toast(`Verification email resent to ${d.email}`, "success");
+    } catch (err: any) {
+      toast(err.message || "Failed to resend verification email", "error");
+    } finally {
+      setResending(ids => {
+        const next = new Set(ids);
+        next.delete(d.id);
+        return next;
+      });
     }
   }
 
@@ -161,6 +178,11 @@ export function Destinations() {
                     </td>
                     <td>
                       <div className="table-actions">
+                        {d.verified_at === null && (
+                          <button className="btn btn-secondary btn-compact" onClick={() => resend(d)} disabled={resending.has(d.id)} title="Resend verification email">
+                            <Send size={14} /> {resending.has(d.id) ? "Sending..." : "Resend"}
+                          </button>
+                        )}
                         {d.suppressed_at && d.suppression_class === "soft" && (
                           <button className="btn btn-secondary btn-compact" onClick={() => unsuppress(d.id)} title="Resume forwarding">
                             <PlayCircle size={14} /> Resume
