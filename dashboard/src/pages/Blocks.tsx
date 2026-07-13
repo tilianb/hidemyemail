@@ -116,8 +116,9 @@ export function Blocks() {
       </div>
 
       {/* Explainer callout */}
-      <div className="callout stagger-1 card-form-gap">
-        <strong>How rules work —</strong>{" "}
+      <details className="callout help-callout stagger-1 card-form-gap">
+        <summary>How rules work</summary>
+        <div>
         <strong>Block</strong> rules drop matching senders before forwarding.{" "}
         <strong>Allow</strong> rules turn on allowlist mode for their scope: once any allow rule
         exists, only senders matching one are forwarded (everything else is dropped). Each rule is
@@ -127,7 +128,8 @@ export function Blocks() {
         matches an entire domain;{" "}
         <code>evil@badactor.org</code>{" "}
         matches a specific sender.
-      </div>
+        </div>
+      </details>
 
       {/* Add block form */}
       <div className="card stagger-2 card-form-gap">

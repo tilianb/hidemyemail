@@ -602,7 +602,9 @@ export function Settings() {
             A public handle that replaces the default <strong>User&nbsp;#…</strong> label wherever your account is shown, and identifies your account when you recover it with a recovery code. It is not a password and not used to log in. Leave blank to stay anonymous.
           </p>
           <form onSubmit={saveUsername} className="security-inline-form">
+            <label className="field-label" htmlFor="settings-username">Username</label>
             <input
+              id="settings-username"
               className="input flex-input"
               value={usernameInput}
               onChange={e => setUsernameInput(e.target.value)}
@@ -648,6 +650,7 @@ export function Settings() {
             </div>
             <div className="inline-actions inline-actions-select">
               <select
+                aria-label="Inline action links"
                 className="input"
                 value={currentChoice}
                 disabled={savingInlineActions}
@@ -661,9 +664,10 @@ export function Settings() {
             </div>
           </div>
           {effectiveEnabled && (
-            <div className="callout" style={{ marginTop: "var(--space-3)" }}>
-              <strong>Deliverability note.</strong> The inline action bar adds three <code>mailto:</code> buttons to every forwarded message. Spam filters at Microsoft / Outlook treat that pattern as marketing-list footer, which — combined with a new sending domain — can push messages to Junk. If you see forwards landing in Spam, switch this to <em>Disabled</em> while your sending domain builds reputation; the same actions remain available via the email's standard Unsubscribe button.
-            </div>
+            <details className="callout help-callout" style={{ marginTop: "var(--space-3)" }}>
+              <summary>Deliverability note</summary>
+              <div>The inline action bar adds three <code>mailto:</code> buttons to every forwarded message. Spam filters at Microsoft / Outlook treat that pattern as marketing-list footer, which — combined with a new sending domain — can push messages to Junk. If you see forwards landing in Spam, switch this to <em>Disabled</em> while your sending domain builds reputation; the same actions remain available via the email's standard Unsubscribe button.</div>
+            </details>
           )}
         </div>
       </div>

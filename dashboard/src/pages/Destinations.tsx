@@ -97,11 +97,10 @@ export function Destinations() {
         </p>
       </div>
 
-      <div className="callout stagger-1 card-form-gap">
-        <strong>How destinations work —</strong> Aliases can forward mail to any verified destination.
-        Add your real email addresses below. Your oldest verified address is your default destination
-        and will be used for system notifications and account recovery.
-      </div>
+      <details className="callout help-callout stagger-1 card-form-gap">
+        <summary>How destinations work</summary>
+        <div>Aliases can forward mail to any verified destination. Add your real email addresses below. Your oldest verified address is your default destination and will be used for system notifications and account recovery.</div>
+      </details>
 
       <div className="card stagger-2 card-form-gap">
         <div className="card-header">
