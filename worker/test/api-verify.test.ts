@@ -175,6 +175,203 @@ test("POST /api/destinations stores pending destination before sending verificat
   delete testEnv.__sesSend;
 });
 
+test("POST /api/destinations/:id/resend sends the existing verification token to the decrypted destination", async () => {
+  const email = "pending@example.com";
+  const token = "existing-verification-token";
+  const { encryptDestination, hashDestination } = await import("../src/lib/crypto");
+  const encryptedEmail = await encryptDestination(email, testEnv.DESTINATION_ENCRYPTION_KEY);
+  const emailHash = await hashDestination(email, testEnv.DESTINATION_ENCRYPTION_KEY);
+  const inserted = await (env.DB as D1Database).prepare(
+    "INSERT INTO destinations (user_id, email, email_hash, token, created_at) VALUES (1, ?, ?, ?, ?) RETURNING id"
+  ).bind(encryptedEmail, emailHash, token, Date.now()).first<{ id: number }>();
+  const sent: any[] = [];
+
+  const res = await createApp().request(`/api/destinations/${inserted!.id}/resend`, {
+    method: "POST",
+    headers: { cookie },
+  }, {
+    ...testEnv,
+    SES_ACCESS_KEY_ID: "akid",
+    SES_SECRET_ACCESS_KEY: "secret",
+    SES_REGION: "ap-southeast-2",
+    __sesSend: async (_config: any, message: any) => { sent.push(message); return "message-id"; },
+  });
+
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ ok: true });
+  expect(sent).toHaveLength(1);
+  expect(sent[0].to).toBe(email);
+  expect(atob(sent[0].rawBase64)).toContain(`/api/verify?token=${token}`);
+  const stored = await (env.DB as D1Database).prepare("SELECT email, token, verified_at FROM destinations WHERE id = ?")
+    .bind(inserted!.id).first<{ email: string; token: string; verified_at: number | null }>();
+  expect(stored).toEqual({ email: encryptedEmail, token, verified_at: null });
+});
+
+test("POST /api/destinations/:id/resend rejects missing SES configuration without sending or consuming cooldown", async () => {
+  const email = "unconfigured@example.com";
+  const { encryptDestination, hashDestination } = await import("../src/lib/crypto");
+  const inserted = await (env.DB as D1Database).prepare(
+    "INSERT INTO destinations (user_id, email, email_hash, token, created_at) VALUES (1, ?, ?, ?, ?) RETURNING id"
+  ).bind(
+    await encryptDestination(email, testEnv.DESTINATION_ENCRYPTION_KEY),
+    await hashDestination(email, testEnv.DESTINATION_ENCRYPTION_KEY),
+    "unconfigured-token",
+    Date.now()
+  ).first<{ id: number }>();
+  const sent: any[] = [];
+
+  const res = await createApp().request(`/api/destinations/${inserted!.id}/resend`, {
+    method: "POST",
+    headers: { cookie },
+  }, {
+    ...testEnv,
+    SES_ACCESS_KEY_ID: undefined,
+    SES_SECRET_ACCESS_KEY: undefined,
+    SES_REGION: undefined,
+    __sesSend: async (...args: any[]) => { sent.push(args); return "message-id"; },
+  });
+
+  expect(res.status).toBe(503);
+  expect(await res.json()).toEqual({ error: "Email sending is not configured" });
+  expect(sent).toHaveLength(0);
+  const cooldown = await (env.DB as D1Database).prepare("SELECT reset_at FROM rate_limits WHERE ip = ?")
+    .bind(`destination-resend:1:${inserted!.id}`).first();
+  expect(cooldown).toBeNull();
+});
+
+test("POST /api/destinations/:id/resend rate limits a second immediate send", async () => {
+  const email = "cooldown@example.com";
+  const { encryptDestination, hashDestination } = await import("../src/lib/crypto");
+  const inserted = await (env.DB as D1Database).prepare(
+    "INSERT INTO destinations (user_id, email, email_hash, token, created_at) VALUES (1, ?, ?, ?, ?) RETURNING id"
+  ).bind(
+    await encryptDestination(email, testEnv.DESTINATION_ENCRYPTION_KEY),
+    await hashDestination(email, testEnv.DESTINATION_ENCRYPTION_KEY),
+    "cooldown-token",
+    Date.now()
+  ).first<{ id: number }>();
+  const sent: any[] = [];
+  const requestEnv = {
+    ...testEnv,
+    SES_ACCESS_KEY_ID: "akid",
+    SES_SECRET_ACCESS_KEY: "secret",
+    SES_REGION: "ap-southeast-2",
+    __sesSend: async (...args: any[]) => { sent.push(args); return "message-id"; },
+  };
+  const app = createApp();
+
+  const first = await app.request(`/api/destinations/${inserted!.id}/resend`, {
+    method: "POST", headers: { cookie },
+  }, requestEnv);
+  const second = await app.request(`/api/destinations/${inserted!.id}/resend`, {
+    method: "POST", headers: { cookie },
+  }, requestEnv);
+
+  expect(first.status).toBe(200);
+  expect(second.status).toBe(429);
+  expect(await second.json()).toEqual({ error: "Please wait before resending verification email" });
+  expect(sent).toHaveLength(1);
+});
+
+test("POST /api/destinations/:id/resend atomically rate limits concurrent sends", async () => {
+  const email = "concurrent-cooldown@example.com";
+  const { encryptDestination, hashDestination } = await import("../src/lib/crypto");
+  const inserted = await (env.DB as D1Database).prepare(
+    "INSERT INTO destinations (user_id, email, email_hash, token, created_at) VALUES (1, ?, ?, ?, ?) RETURNING id"
+  ).bind(
+    await encryptDestination(email, testEnv.DESTINATION_ENCRYPTION_KEY),
+    await hashDestination(email, testEnv.DESTINATION_ENCRYPTION_KEY),
+    "concurrent-cooldown-token",
+    Date.now()
+  ).first<{ id: number }>();
+  const sent: any[] = [];
+  const requestEnv = {
+    ...testEnv,
+    SES_ACCESS_KEY_ID: "akid",
+    SES_SECRET_ACCESS_KEY: "secret",
+    SES_REGION: "ap-southeast-2",
+    __sesSend: async (...args: any[]) => { sent.push(args); return "message-id"; },
+  };
+  const app = createApp();
+  const request = () => app.request(`/api/destinations/${inserted!.id}/resend`, {
+    method: "POST",
+    headers: { cookie },
+  }, requestEnv);
+
+  const responses = await Promise.all([request(), request()]);
+
+  expect(responses.map((response) => response.status).sort()).toEqual([200, 429]);
+  expect(sent).toHaveLength(1);
+  const rejected = responses.find((response) => response.status === 429)!;
+  expect(await rejected.json()).toEqual({ error: "Please wait before resending verification email" });
+});
+
+test("POST /api/destinations/:id/resend rejects malformed and zero ids", async () => {
+  for (const id of ["wat", "0"]) {
+    const res = await createApp().request(`/api/destinations/${id}/resend`, {
+      method: "POST",
+      headers: { cookie },
+    }, testEnv);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Invalid id" });
+  }
+});
+
+test("POST /api/destinations/:id/resend rejects a verified destination without sending", async () => {
+  const { encryptDestination, hashDestination } = await import("../src/lib/crypto");
+  const email = "verified@example.com";
+  const inserted = await (env.DB as D1Database).prepare(
+    "INSERT INTO destinations (user_id, email, email_hash, token, verified_at, created_at) VALUES (1, ?, ?, ?, ?, ?) RETURNING id"
+  ).bind(
+    await encryptDestination(email, testEnv.DESTINATION_ENCRYPTION_KEY),
+    await hashDestination(email, testEnv.DESTINATION_ENCRYPTION_KEY),
+    "verified-token",
+    Date.now(),
+    Date.now()
+  ).first<{ id: number }>();
+  const sent: any[] = [];
+
+  const res = await createApp().request(`/api/destinations/${inserted!.id}/resend`, {
+    method: "POST",
+    headers: { cookie },
+  }, { ...testEnv, __sesSend: async (...args: any[]) => { sent.push(args); return "message-id"; } });
+
+  expect(res.status).toBe(409);
+  expect(await res.json()).toEqual({ error: "Destination is already verified" });
+  expect(sent).toHaveLength(0);
+  const cooldown = await (env.DB as D1Database).prepare("SELECT reset_at FROM rate_limits WHERE ip = ?")
+    .bind(`destination-resend:1:${inserted!.id}`).first();
+  expect(cooldown).toBeNull();
+});
+
+test("POST /api/destinations/:id/resend hides another user's destination without sending", async () => {
+  const db = env.DB as D1Database;
+  await db.prepare("INSERT INTO users (id, passphrase_hash, created_at) VALUES (2, 'hash', ?)").bind(Date.now()).run();
+  const { encryptDestination, hashDestination } = await import("../src/lib/crypto");
+  const email = "other@example.com";
+  const inserted = await db.prepare(
+    "INSERT INTO destinations (user_id, email, email_hash, token, created_at) VALUES (2, ?, ?, ?, ?) RETURNING id"
+  ).bind(
+    await encryptDestination(email, testEnv.DESTINATION_ENCRYPTION_KEY),
+    await hashDestination(email, testEnv.DESTINATION_ENCRYPTION_KEY),
+    "other-token",
+    Date.now()
+  ).first<{ id: number }>();
+  const sent: any[] = [];
+
+  const res = await createApp().request(`/api/destinations/${inserted!.id}/resend`, {
+    method: "POST",
+    headers: { cookie },
+  }, { ...testEnv, __sesSend: async (...args: any[]) => { sent.push(args); return "message-id"; } });
+
+  expect(res.status).toBe(404);
+  expect(await res.json()).toEqual({ error: "Destination not found" });
+  expect(sent).toHaveLength(0);
+  const cooldown = await db.prepare("SELECT reset_at FROM rate_limits WHERE ip = ?")
+    .bind(`destination-resend:1:${inserted!.id}`).first();
+  expect(cooldown).toBeNull();
+});
+
 test("admin can send a selected test email type to an arbitrary destination", async () => {
   const sent: any[] = [];
   const app = createApp();
