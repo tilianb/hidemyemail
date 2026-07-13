@@ -126,6 +126,25 @@ test("Bitwarden flow: POST /api/v1/aliases with domain+description creates a ran
   expect(await decryptDestination(row!.destination, testEnv.DESTINATION_ENCRYPTION_KEY)).toBe("real@me.com");
 });
 
+test("v1 custom alias cannot claim another user's reserved address", async () => {
+  const app = createApp();
+  await addDefaultDestination();
+  await db().prepare("UPDATE domains SET allow_custom_aliases = 1 WHERE id = 10").run();
+  await db().prepare(
+    "INSERT INTO identifier_reservations (kind, value, user_id, created_at) VALUES ('alias', 'reserved@hidemyemail.dev', 99, 123)"
+  ).run();
+  const token = await createKey(app);
+
+  const res = await app.request("/api/v1/aliases", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ domain: "hidemyemail.dev", format: "custom", local_part: "reserved" }),
+  }, testEnv);
+
+  expect(res.status).toBe(422);
+  expect(await res.json()).toMatchObject({ message: "That alias is reserved by its original owner." });
+});
+
 test("POST /api/v1/aliases without a domain uses the main global domain", async () => {
   const app = createApp();
   await addDefaultDestination();

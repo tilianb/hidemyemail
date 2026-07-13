@@ -15,6 +15,8 @@ export function Domains() {
   const [editDest, setEditDest] = useState("global");
   const [savingId, setSavingId] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; domain: string } | null>(null);
+  const [inheritedCatchAll, setInheritedCatchAll] = useState(false);
+  const [inheritedInlineActions, setInheritedInlineActions] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -36,6 +38,8 @@ export function Domains() {
       }));
       
       setMaxSubdomains(conf.max_subdomains);
+      setInheritedCatchAll(conf.catch_all_auto_create);
+      setInheritedInlineActions(conf.inline_actions_default_enabled);
     } catch {
       toast("Failed to load domains", "error");
     } finally {
@@ -257,7 +261,7 @@ export function Domains() {
                         }}
                         title="Auto-create an alias for any address on this subdomain"
                       >
-                        <option value="inherit">Inherit</option>
+                        <option value="inherit">Inherit ({inheritedCatchAll ? "On" : "Off"})</option>
                         <option value="on">On</option>
                         <option value="off">Off</option>
                       </select>
@@ -273,7 +277,7 @@ export function Domains() {
                         }}
                         title="Show the unsubscribe/mute toolbar on mail forwarded from this subdomain"
                       >
-                        <option value="inherit">Inherit</option>
+                        <option value="inherit">Inherit ({inheritedInlineActions ? "On" : "Off"})</option>
                         <option value="on">On</option>
                         <option value="off">Off</option>
                       </select>

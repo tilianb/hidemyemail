@@ -127,11 +127,17 @@ final class ModelDecodingTests: XCTestCase {
 
     func testServerConfigDecodes() throws {
         let cfg = try decoder.decode(ServerConfig.self, from: Data("""
-        {"main_global_domain": "example.com", "max_subdomains": 5, "max_total_aliases": 10, "alias_quota_buffer_enabled": true}
+        {"main_global_domain": "example.com", "max_subdomains": 5, "max_total_aliases": 10, "alias_quota_buffer_enabled": true, "catch_all_auto_create": true, "inline_actions_default_enabled": false}
         """.utf8))
         XCTAssertEqual(cfg.mainGlobalDomain, "example.com")
         XCTAssertEqual(cfg.maxTotalAliases, 10)
         XCTAssertTrue(cfg.aliasQuotaBufferEnabled)
+        XCTAssertEqual(cfg.catchAllAutoCreate, true)
+
+        let legacy = try decoder.decode(ServerConfig.self, from: Data("""
+        {"main_global_domain": "example.com", "max_subdomains": 5, "max_total_aliases": 10, "alias_quota_buffer_enabled": true}
+        """.utf8))
+        XCTAssertNil(legacy.catchAllAutoCreate)
     }
 
     func testDestinationSuppressionDecodes() throws {

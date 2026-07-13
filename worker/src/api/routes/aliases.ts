@@ -3,6 +3,7 @@ import type { AppEnv } from "../app";
 import { hashDestination, encryptDestination, decryptDestination } from "../../lib/crypto";
 import { isValidLocalPart, randomLocalPart, escapeLike } from "../../lib/alias-format";
 import { aliasQuotaExceeded, resolveDefaultDestination } from "../../db/aliases";
+import { canUseIdentifier } from "../../db/reservations";
 
 export function aliasRoutes() {
   const r = new Hono<AppEnv>();
@@ -71,6 +72,9 @@ export function aliasRoutes() {
     }
     
     const full = `${localPart}@${dom.domain}`;
+    if (!(await canUseIdentifier(c.env.DB, "alias", full, userId))) {
+      return c.json({ error: "Alias is reserved by its original owner" }, 409);
+    }
     
     try {
       const row = await c.env.DB.prepare(
@@ -83,6 +87,9 @@ export function aliasRoutes() {
       }
       return c.json(row);
     } catch (err: any) {
+      if (err.message?.includes("identifier reserved")) {
+        return c.json({ error: "Alias is reserved by its original owner" }, 409);
+      }
       if (err.message && err.message.includes("UNIQUE constraint failed")) {
         return c.json({ error: "Alias already exists" }, 409);
       }

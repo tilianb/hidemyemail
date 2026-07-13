@@ -85,3 +85,21 @@ test("PATCH on another user's domain → 404 (no IDOR)", async () => {
   const res = await app.request(`/api/domains/${id}`, { method: "PATCH", headers: { cookie: otherCookie, "Content-Type": "application/json" }, body: JSON.stringify({ default_destination: "work@me.com" }) }, testEnv);
   expect(res.status).toBe(404);
 });
+
+test("deleted subdomain remains reserved for its original owner", async () => {
+  const app = createApp();
+  const domainId = await seed();
+  const otherCookie = "__Host-session=" + (await signSession("sek", 93, 3600));
+  await DB().prepare("INSERT OR IGNORE INTO users (id, passphrase_hash, active, forwarding, created_at) VALUES (93, 'DOMAIN_RESERVATION_USER', 1, 1, 123)").run();
+
+  expect((await app.request(`/api/domains/${domainId}`, { method: "DELETE", headers: { cookie } }, testEnv)).status).toBe(200);
+
+  const create = (sessionCookie: string) => app.request("/api/domains", {
+    method: "POST",
+    headers: { cookie: sessionCookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ domain: "shop", default_destination: "global" }),
+  }, testEnv);
+
+  expect((await create(otherCookie)).status).toBe(409);
+  expect((await create(cookie)).status).toBe(200);
+});
