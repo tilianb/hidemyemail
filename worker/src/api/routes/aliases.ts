@@ -73,7 +73,7 @@ export function aliasRoutes() {
     
     const full = `${localPart}@${dom.domain}`;
     if (!(await canUseIdentifier(c.env.DB, "alias", full, userId))) {
-      return c.json({ error: "Alias is reserved by its original owner" }, 409);
+      return c.json({ error: "Alias is already taken or not available" }, 409);
     }
     
     try {
@@ -88,7 +88,7 @@ export function aliasRoutes() {
       return c.json(row);
     } catch (err: any) {
       if (isIdentifierReservationError(err)) {
-        return c.json({ error: "Alias is reserved by its original owner" }, 409);
+        return c.json({ error: "Alias is already taken or not available" }, 409);
       }
       if (err.message && err.message.includes("UNIQUE constraint failed")) {
         return c.json({ error: "Alias already exists" }, 409);

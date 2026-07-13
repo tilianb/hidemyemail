@@ -214,7 +214,7 @@ export function v1Routes() {
         : randomLocalPart();
       const full = `${localPart}@${dom.domain}`;
       if (!(await canUseIdentifier(c.env.DB, "alias", full, userId))) {
-        if (i === attempts - 1) return c.json({ message: "That alias is reserved by its original owner." }, 422);
+        if (i === attempts - 1) return c.json({ message: "That alias is already taken or not available." }, 422);
         continue;
       }
       try {
@@ -225,7 +225,7 @@ export function v1Routes() {
         return c.json({ data: aliasResource({ ...row!, domain: dom.domain }) }, 201);
       } catch (err: any) {
         if (isIdentifierReservationError(err)) {
-          if (i === attempts - 1) return c.json({ message: "That alias is reserved by its original owner." }, 422);
+          if (i === attempts - 1) return c.json({ message: "That alias is already taken or not available." }, 422);
           continue;
         }
         if (err.message?.includes("UNIQUE constraint failed")) {
