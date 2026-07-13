@@ -81,7 +81,16 @@ export function authRoutes() {
     const max_subdomains = await getNumericSetting(c.env.DB, "max_subdomains");
     const max_total_aliases = await getNumericSetting(c.env.DB, "max_total_aliases");
     const alias_quota_buffer_enabled = await getBoolSetting(c.env.DB, "alias_quota_buffer_enabled");
-    return c.json({ main_global_domain, max_subdomains, max_total_aliases, alias_quota_buffer_enabled });
+    const catch_all_auto_create = await getBoolSetting(c.env.DB, "catch_all_auto_create");
+    const inline_actions_default_enabled = await getBoolSetting(c.env.DB, "inline_actions_default_enabled");
+    return c.json({
+      main_global_domain,
+      max_subdomains,
+      max_total_aliases,
+      alias_quota_buffer_enabled,
+      catch_all_auto_create,
+      inline_actions_default_enabled,
+    });
   });
 
   /**

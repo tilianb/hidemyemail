@@ -471,6 +471,10 @@ test("purge: user with deleted_at past 7 days is fully removed", async () => {
   // Alias-scoped blocks must be gone before their parent alias is deleted
   const blockRow = await DB().prepare("SELECT id FROM blocks WHERE alias_id = ?").bind(aliasId).first();
   expect(blockRow).toBeNull();
+
+  // Privacy reservations intentionally outlive the deleted account.
+  const reservations = await DB().prepare("SELECT value FROM identifier_reservations WHERE user_id = ? ORDER BY value").bind(userId).all<{ value: string }>();
+  expect(reservations.results?.map(row => row.value)).toEqual(["a@purge.example.com", "purge.example.com"]);
 });
 
 test("purge: user with deleted_at within 7 days is retained", async () => {

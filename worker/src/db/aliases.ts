@@ -19,10 +19,15 @@ export async function autoCreateAlias(
   const dom = await db.prepare("SELECT user_id, default_destination FROM domains WHERE id = ?").bind(domainId).first<{ user_id: number, default_destination: string | null }>();
   if (!dom || !dom.default_destination) return null; // Do not auto-create if there is no default destination
 
-  await db.prepare(
-    "INSERT INTO aliases (domain_id, user_id, local_part, full_address, active, source, created_at) VALUES (?,?,?,?,1,?,?) " +
-    "ON CONFLICT(full_address) DO NOTHING"
-  ).bind(domainId, dom.user_id, localPart, fullAddress, source, Date.now()).run();
+  try {
+    await db.prepare(
+      "INSERT INTO aliases (domain_id, user_id, local_part, full_address, active, source, created_at) VALUES (?,?,?,?,1,?,?) " +
+      "ON CONFLICT(full_address) DO NOTHING"
+    ).bind(domainId, dom.user_id, localPart, fullAddress, source, Date.now()).run();
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("identifier reserved")) return null;
+    throw err;
+  }
   return await getAlias(db, fullAddress);
 }
 
