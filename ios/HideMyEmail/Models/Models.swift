@@ -233,12 +233,14 @@ struct ServerConfig: Decodable {
     let maxSubdomains: Int
     let maxTotalAliases: Int
     let aliasQuotaBufferEnabled: Bool
+    let catchAllAutoCreate: Bool?
 
     enum CodingKeys: String, CodingKey {
         case mainGlobalDomain = "main_global_domain"
         case maxSubdomains = "max_subdomains"
         case maxTotalAliases = "max_total_aliases"
         case aliasQuotaBufferEnabled = "alias_quota_buffer_enabled"
+        case catchAllAutoCreate = "catch_all_auto_create"
     }
 }
 

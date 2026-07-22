@@ -138,6 +138,7 @@ data class ServerConfig(
     @SerialName("max_subdomains") val maxSubdomains: Int,
     @SerialName("max_total_aliases") val maxTotalAliases: Int,
     @SerialName("alias_quota_buffer_enabled") val aliasQuotaBufferEnabled: Boolean,
+    @SerialName("catch_all_auto_create") val catchAllAutoCreate: Boolean? = null,
 )
 
 // GET /api/mfa — TOTP status for the signed-in user.

@@ -3,7 +3,7 @@ import { api, type Domain, type Destination } from "../api";
 import { useToast, CopyButton, ConfirmDialog, TableSkeleton, EmptyState } from "../ui";
 import { Globe, Trash2, Pencil, Check, X } from "lucide-react";
 
-export function Domains() {
+export function Domains({ onNavigateDestinations }: { onNavigateDestinations: () => void }) {
   const { toast } = useToast();
   const [rows, setRows] = useState<Domain[]>([]);
   const [destinations, setDestinations] = useState<Destination[]>([]);
@@ -15,6 +15,8 @@ export function Domains() {
   const [editDest, setEditDest] = useState("global");
   const [savingId, setSavingId] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; domain: string } | null>(null);
+  const [inheritedCatchAll, setInheritedCatchAll] = useState(false);
+  const [inheritedInlineActions, setInheritedInlineActions] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -36,6 +38,8 @@ export function Domains() {
       }));
       
       setMaxSubdomains(conf.max_subdomains);
+      setInheritedCatchAll(conf.catch_all_auto_create);
+      setInheritedInlineActions(conf.inline_actions_default_enabled);
     } catch {
       toast("Failed to load domains", "error");
     } finally {
@@ -122,9 +126,25 @@ export function Domains() {
         </p>
       </div>
 
-      <div className="callout stagger-1 card-form-gap">
-        <strong>How subdomains work —</strong> Each subdomain inherits DNS from its parent global domain. Catch-all auto-creates aliases for unrecognized addresses. Each subdomain can override the default destination, or fall back to the global default.
-      </div>
+      {!loading && destinations.length === 0 && (
+        <div className="callout stagger-1 card-form-gap">
+          <strong>Add a verified destination first</strong>
+          <div>Domains need a verified email address for forwarded mail.</div>
+          <button
+            className="btn btn-primary btn-sm"
+            type="button"
+            style={{ marginTop: "var(--space-3)" }}
+            onClick={onNavigateDestinations}
+          >
+            Go to Destinations →
+          </button>
+        </div>
+      )}
+
+      <details className="callout help-callout stagger-1 card-form-gap">
+        <summary>How subdomains work</summary>
+        <div>Each subdomain inherits DNS from its parent global domain. Catch-all auto-creates aliases for unrecognized addresses. Each subdomain can override the default destination, or fall back to the global default.</div>
+      </details>
 
       <div className="card stagger-2 card-form-gap">
         <div className="card-header">
@@ -148,6 +168,7 @@ export function Domains() {
                 <div className="domain-dot font-mono">.</div>
                 <select
                   id="dom-base"
+                  aria-label="Base domain"
                   className="input input-mono domain-base-select"
                   value={form.base_domain_id}
                   onChange={e => setForm(f => ({ ...f, base_domain_id: Number(e.target.value) }))}
@@ -181,11 +202,6 @@ export function Domains() {
           {allowedBaseDomains.length === 0 && (
             <div className="form-help">
               No global domains currently allow subdomain aliases.
-            </div>
-          )}
-          {destinations.length === 0 && (
-            <div className="form-help">
-              You must verify a destination email first.
             </div>
           )}
         </form>
@@ -257,7 +273,7 @@ export function Domains() {
                         }}
                         title="Auto-create an alias for any address on this subdomain"
                       >
-                        <option value="inherit">Inherit</option>
+                        <option value="inherit">Inherit ({inheritedCatchAll ? "On" : "Off"})</option>
                         <option value="on">On</option>
                         <option value="off">Off</option>
                       </select>
@@ -273,7 +289,7 @@ export function Domains() {
                         }}
                         title="Show the unsubscribe/mute toolbar on mail forwarded from this subdomain"
                       >
-                        <option value="inherit">Inherit</option>
+                        <option value="inherit">Inherit ({inheritedInlineActions ? "On" : "Off"})</option>
                         <option value="on">On</option>
                         <option value="off">Off</option>
                       </select>

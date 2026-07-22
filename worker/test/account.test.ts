@@ -11,6 +11,7 @@ import { createApp } from "../src/api/app";
 import { signSession, signFreshAuth, derivePassphraseHash } from "../src/lib/auth";
 import { encryptDestination, hashDestination } from "../src/lib/crypto";
 import { purgeDeletedAccounts } from "../src/lib/purge";
+import { reserveIdentifierAndRun } from "../src/db/reservations";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -430,14 +431,16 @@ test("purge: user with deleted_at past 7 days is fully removed", async () => {
   const destId = await insertDestination("purge@example.com", userId);
 
   // Create an alias + event so we can assert they are gone too
-  const domRes = await DB().prepare(
+  await reserveIdentifierAndRun(DB(), "subdomain", "purge.example.com", userId, DB().prepare(
     "INSERT INTO domains (user_id, is_global, domain, active, created_at) VALUES (?, 0, 'purge.example.com', 1, ?)"
-  ).bind(userId, Date.now()).run();
-  const domainId = Number(domRes.meta.last_row_id);
-  const aliasRes = await DB().prepare(
+  ).bind(userId, Date.now()));
+  const domain = await DB().prepare("SELECT id FROM domains WHERE domain = 'purge.example.com'").first<{ id: number }>();
+  const domainId = domain!.id;
+  await reserveIdentifierAndRun(DB(), "alias", "a@purge.example.com", userId, DB().prepare(
     "INSERT INTO aliases (domain_id, user_id, local_part, full_address, active, source, created_at) VALUES (?, ?, 'a', 'a@purge.example.com', 1, 'dashboard', ?)"
-  ).bind(domainId, userId, Date.now()).run();
-  const aliasId = Number(aliasRes.meta.last_row_id);
+  ).bind(domainId, userId, Date.now()));
+  const alias = await DB().prepare("SELECT id FROM aliases WHERE full_address = 'a@purge.example.com'").first<{ id: number }>();
+  const aliasId = alias!.id;
   await DB().prepare("INSERT INTO events (alias_id, type, ts) VALUES (?, 'forward', ?)").bind(aliasId, Date.now()).run();
   await DB().prepare("INSERT INTO blocks (user_id, alias_id, pattern, created_at) VALUES (?, ?, 'spam@example.com', ?)").bind(userId, aliasId, Date.now()).run();
   await DB().prepare("INSERT INTO events (alias_id, type, detail, ts) VALUES (NULL, 'bounce', ?, ?)").bind(`dest:${destId}`, Date.now()).run();
@@ -471,6 +474,10 @@ test("purge: user with deleted_at past 7 days is fully removed", async () => {
   // Alias-scoped blocks must be gone before their parent alias is deleted
   const blockRow = await DB().prepare("SELECT id FROM blocks WHERE alias_id = ?").bind(aliasId).first();
   expect(blockRow).toBeNull();
+
+  // Privacy reservations intentionally outlive the deleted account.
+  const reservations = await DB().prepare("SELECT value FROM identifier_reservations WHERE user_id = ? ORDER BY value").bind(userId).all<{ value: string }>();
+  expect(reservations.results?.map(row => row.value)).toEqual(["a@purge.example.com", "purge.example.com"]);
 });
 
 test("purge: user with deleted_at within 7 days is retained", async () => {

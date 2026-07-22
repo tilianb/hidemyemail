@@ -4,7 +4,68 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
-## [Unreleased] — v1.1.0 candidate
+## [Unreleased]
+
+## [1.2.0] — 2026-07-22
+
+### Added
+
+- **Identifier reservations.** Deleted alias addresses and personal subdomains
+  remain tied to their original owner, preventing another account from claiming
+  an identifier that may still receive trusted mail. Migration
+  `0028_identifier_reservations.sql` backfills identifiers present during the
+  upgrade; identifiers deleted before the upgrade cannot be recovered.
+- Pending destination verification emails can now be resent from the
+  dashboard, with cooldown and expiry handling to prevent abuse.
+- Domain rows link directly to their configured destination in the dashboard.
+
+### Changed
+
+- The dashboard now works better on phones and tablets, with responsive
+  navigation, larger touch targets, URL-backed section state, accessible skip
+  navigation, reduced-motion support, and clearer expandable help.
+- Effective inherited subdomain policies are shown consistently across the
+  dashboard, iOS, and Android apps.
+- Dashboard fonts are self-hosted; hashed assets receive immutable cache
+  headers and the Content Security Policy no longer needs Google Fonts.
+- Updated Worker, dashboard, and Docker dependencies, including Hono, Wrangler,
+  Miniflare, Vite, Vitest, and TypeScript.
+
+### Fixed
+
+- Disabled registration no longer appears available on the login screen.
+- Destination verification messages safely encode display names and addresses
+  containing MIME-sensitive characters.
+- Identifier conflicts no longer reveal whether another account reserved the
+  requested alias or subdomain.
+- D1 identifier reservations use atomic batches instead of triggers, avoiding
+  Cloudflare's remote migration parser limitation while preserving ownership
+  guarantees.
+- Android release APK filenames now include the release version.
+- Docker release tags build the exact tagged commit instead of depending on a
+  pre-existing commit image.
+
+## [1.1.1] — 2026-07-11
+
+### Security
+
+- Upgraded Astro to 7.0.7, Starlight to 0.41.3, and esbuild to 0.28.1 to resolve
+  the documentation website's known dependency alerts; added its lockfile for
+  reproducible installs and moved docs CI to Node.js 22.
+
+### Fixed
+
+- TestFlight builds now derive their marketing version from the release tag,
+  use a unique CI build number, and fail when Apple's upload tool reports an
+  error despite returning a successful exit code.
+- Updated Starlight social-link configuration for its current schema.
+
+### Docs
+
+- Added roadmap items for deleted identifier safety and clearer inherited
+  settings.
+
+## [1.1.0] — 2026-07-11
 
 ### Added
 
@@ -75,6 +136,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Docs / CI
 
+- Added the Astro Starlight documentation website, generated from repository
+  documentation and published through GitHub Pages.
 - Added a native [Android app README](android/README.md) and moved the iOS
   roadmap into the shared [`docs/ROADMAP.md`](docs/ROADMAP.md), kept at parity
   across iOS and Android.
@@ -179,7 +242,10 @@ All notable changes to this project are documented here. The format follows
 Pre-v1 baseline: core alias forwarding, reply-from-alias, MFA + passkeys,
 admin settings, Docker self-host, Cloudflare Workers deploy.
 
-[Unreleased]: https://github.com/tilianb/hidemyemail/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/tilianb/hidemyemail/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/tilianb/hidemyemail/compare/v1.1.1...v1.2.0
+[1.1.1]: https://github.com/tilianb/hidemyemail/compare/v1.1.0...v1.1.1
+[1.1.0]: https://github.com/tilianb/hidemyemail/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/tilianb/hidemyemail/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/tilianb/hidemyemail/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/tilianb/hidemyemail/compare/v0.9.2...v1.0.0

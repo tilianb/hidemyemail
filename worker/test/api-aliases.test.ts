@@ -98,6 +98,40 @@ test("user can create subdomain under any enabled global domain", async () => {
   expect(created.domain).toBe("shop.second.example");
 });
 
+test("deleted alias remains reserved for its original owner", async () => {
+  const app = createApp();
+  const db = env.DB as D1Database;
+  const ownerHeaders = { cookie, "Content-Type": "application/json" };
+  const otherCookie = "__Host-session=" + (await signSession("sek", 92, 3600));
+  const otherHeaders = { cookie: otherCookie, "Content-Type": "application/json" };
+
+  await db.prepare("INSERT OR IGNORE INTO users (id, passphrase_hash, active, forwarding, created_at) VALUES (92, 'RESERVATION_USER', 1, 1, 123)").run();
+  await db.prepare(
+    "INSERT INTO domains (id, user_id, is_global, domain, allow_custom_aliases, active, verified_at, created_at) VALUES (50, 1, 1, 'shared.example', 1, 1, 123, 123)"
+  ).run();
+  for (const [userId, email, token] of [[1, "owner@example.com", "owner-token"], [92, "other@example.com", "other-token"]] as const) {
+    const encrypted = await encryptDestination(email, testEnv.DESTINATION_ENCRYPTION_KEY);
+    const hash = await hashDestination(email, testEnv.DESTINATION_ENCRYPTION_KEY);
+    await db.prepare(
+      "INSERT INTO destinations (user_id, email, email_hash, token, verified_at, is_default, created_at) VALUES (?, ?, ?, ?, 123, 1, 123)"
+    ).bind(userId, encrypted, hash, token).run();
+  }
+
+  const create = (headers: typeof ownerHeaders) => app.request("/api/aliases", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ domain_id: 50, local_part: "private" }),
+  }, testEnv);
+
+  const first = await create(ownerHeaders);
+  expect(first.status).toBe(200);
+  const firstAlias = await first.json<{ id: number }>();
+  expect((await app.request(`/api/aliases/${firstAlias.id}`, { method: "DELETE", headers: { cookie } }, testEnv)).status).toBe(200);
+
+  expect((await create(otherHeaders)).status).toBe(409);
+  expect((await create(ownerHeaders)).status).toBe(200);
+});
+
 test("user cannot create subdomain under disabled global domain", async () => {
   const app = createApp();
   const db = env.DB as D1Database;
