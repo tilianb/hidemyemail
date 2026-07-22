@@ -54,9 +54,9 @@ function wantsToken(c: Context<AppEnv>): boolean {
   return c.req.header("X-Auth-Mode") === "token" && !c.req.header("Origin");
 }
 
-async function setAuthenticatedCookies(c: Context<AppEnv>, userId: number): Promise<{ token: string; freshAuth: string }> {
-  const sessionToken = await signSession(c.env.SESSION_SECRET, userId, SESSION_TTL);
-  const freshAuthToken = await signFreshAuth(c.env.SESSION_SECRET, userId, FRESH_AUTH_TTL);
+async function setAuthenticatedCookies(c: Context<AppEnv>, userId: number, authVersion: number): Promise<{ token: string; freshAuth: string }> {
+  const sessionToken = await signSession(c.env.SESSION_SECRET, userId, SESSION_TTL, authVersion);
+  const freshAuthToken = await signFreshAuth(c.env.SESSION_SECRET, userId, FRESH_AUTH_TTL, authVersion);
   setCookie(c, "__Host-session", sessionToken, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: SESSION_TTL });
   setCookie(c, "__Host-fresh-auth", freshAuthToken, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: FRESH_AUTH_TTL });
   return { token: sessionToken, freshAuth: freshAuthToken };
@@ -106,8 +106,8 @@ export function authRoutes() {
    */
   r.post("/app-auth/code", async (c) => {
     const sessionCookie = getCookie(c, "__Host-session");
-    const userId = sessionCookie ? await verifySession(c.env.SESSION_SECRET, sessionCookie) : null;
-    if (userId === null) return c.json({ error: "Unauthorized" }, 401);
+    const principal = sessionCookie ? await verifySession(c.env.SESSION_SECRET, sessionCookie) : null;
+    if (principal === null) return c.json({ error: "Unauthorized" }, 401);
 
     // Minting a code creates a NEW device credential (the exchanged bearer
     // token), so a stolen long-lived session cookie alone must not be enough —
@@ -115,7 +115,7 @@ export function authRoutes() {
     // This also narrows what same-origin XSS can do with the cookie jar to
     // the 10-minute window right after an interactive login.
     const freshAuth = getCookie(c, "__Host-fresh-auth");
-    if (!freshAuth || !(await verifyFreshAuth(c.env.SESSION_SECRET, freshAuth, userId))) {
+    if (!freshAuth || !(await verifyFreshAuth(c.env.SESSION_SECRET, freshAuth, principal.userId, principal.authVersion))) {
       return c.json({ error: "Fresh authentication required" }, 401);
     }
 
@@ -126,11 +126,12 @@ export function authRoutes() {
       return c.json({ error: "Invalid challenge" }, 400);
     }
 
-    const user = await c.env.DB.prepare("SELECT active FROM users WHERE id = ?")
-      .bind(userId).first<{ active: number }>();
+    const user = await c.env.DB.prepare("SELECT active, auth_version FROM users WHERE id = ?")
+      .bind(principal.userId).first<{ active: number; auth_version: number }>();
     if (!user || user.active === 0) return c.json({ error: "Account is disabled" }, 403);
+    if (user.auth_version !== principal.authVersion) return c.json({ error: "Unauthorized" }, 401);
 
-    return c.json({ code: await signAppAuthCode(c.env.SESSION_SECRET, userId, challenge) });
+    return c.json({ code: await signAppAuthCode(c.env.SESSION_SECRET, principal.userId, principal.authVersion, challenge) });
   });
 
   /**
@@ -165,14 +166,15 @@ export function authRoutes() {
       return c.json({ error: "Invalid or expired code" }, 401);
     }
 
-    const user = await c.env.DB.prepare("SELECT active FROM users WHERE id = ?")
-      .bind(parsed.userId).first<{ active: number }>();
+    const user = await c.env.DB.prepare("SELECT active, auth_version FROM users WHERE id = ?")
+      .bind(parsed.userId).first<{ active: number; auth_version: number }>();
     if (!user || user.active === 0) return c.json({ error: "Account is disabled" }, 403);
+    if (user.auth_version !== parsed.authVersion) return c.json({ error: "Unauthorized" }, 401);
 
-    const token = await signSession(c.env.SESSION_SECRET, parsed.userId, SESSION_TTL);
+    const token = await signSession(c.env.SESSION_SECRET, parsed.userId, SESSION_TTL, parsed.authVersion);
     // The user just completed an interactive web login seconds ago, so the
     // exchanged session is as fresh as a direct token-mode login.
-    const freshAuth = await signFreshAuth(c.env.SESSION_SECRET, parsed.userId, FRESH_AUTH_TTL);
+    const freshAuth = await signFreshAuth(c.env.SESSION_SECRET, parsed.userId, FRESH_AUTH_TTL, parsed.authVersion);
     return c.json({ ok: true, userId: parsed.userId, token, fresh_auth: freshAuth });
   });
 
@@ -185,15 +187,21 @@ export function authRoutes() {
     const { password } = await c.req.json<{ password: string }>().catch(() => ({ password: "" }));
 
     let userId: number | null = null;
+    let authVersion: number | null = null;
 
     const isAdmin = await verifyPassword(password, c.env.AUTH_PASSWORD_SALT, c.env.AUTH_PASSWORD_HASH);
     if (isAdmin) {
-      userId = 1;
+      const admin = await c.env.DB.prepare("SELECT auth_version FROM users WHERE id = 1")
+        .first<{ auth_version: number }>();
+      if (admin) {
+        userId = 1;
+        authVersion = admin.auth_version;
+      }
     } else {
       const hash = await derivePassphraseHash(password, c.env.AUTH_PASSWORD_SALT);
       const user = await c.env.DB.prepare(
-        "SELECT id, active, deleted_at FROM users WHERE passphrase_hash = ?"
-      ).bind(hash).first<{ id: number; active: number; deleted_at: number | null }>();
+        "SELECT id, active, deleted_at, auth_version FROM users WHERE passphrase_hash = ?"
+      ).bind(hash).first<{ id: number; active: number; deleted_at: number | null; auth_version: number }>();
 
       if (!user) {
         await recordFailedAttempt(ip, c.env.DB);
@@ -211,9 +219,10 @@ export function authRoutes() {
         return c.json({ error: "Account is disabled" }, 403);
       }
       userId = user.id;
+      authVersion = user.auth_version;
     }
 
-    if (!userId) {
+    if (userId === null || authVersion === null) {
       await recordFailedAttempt(ip, c.env.DB);
       return c.json({ error: "Invalid" }, 401);
     }
@@ -223,14 +232,14 @@ export function authRoutes() {
     ).bind(userId).first<{ totp_enabled: number }>();
 
     if (mfa?.totp_enabled === 1) {
-      const challenge = await signMfaChallenge(c.env.SESSION_SECRET, userId);
+      const challenge = await signMfaChallenge(c.env.SESSION_SECRET, userId, authVersion);
       setCookie(c, "__Host-mfa-challenge", challenge, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: 300 });
       // Native clients carry the short-lived challenge themselves since they
       // can't rely on the __Host-mfa-challenge cookie round-trip.
       return c.json(wantsToken(c) ? { mfa_required: true, mfa_token: challenge } : { mfa_required: true });
     }
 
-    const { token, freshAuth } = await setAuthenticatedCookies(c, userId);
+    const { token, freshAuth } = await setAuthenticatedCookies(c, userId, authVersion);
     return c.json(wantsToken(c) ? { ok: true, userId, token, fresh_auth: freshAuth } : { ok: true, userId });
   });
 
@@ -315,7 +324,7 @@ export function authRoutes() {
       ).bind(hash, Date.now(), JSON.stringify(hashed)).run();
 
       const userId = res.meta.last_row_id;
-      const { token, freshAuth } = await setAuthenticatedCookies(c, userId);
+      const { token, freshAuth } = await setAuthenticatedCookies(c, userId, 0);
       return c.json(wantsToken(c)
         ? { ok: true, userId, token, fresh_auth: freshAuth, recovery_codes: plain }
         : { ok: true, userId, recovery_codes: plain });
@@ -346,16 +355,18 @@ export function authRoutes() {
     const challenge = getCookie(c, "__Host-mfa-challenge") || mfa_token;
     if (!challenge) return c.json({ error: "No challenge" }, 401);
 
-    const userId = await verifyMfaChallenge(c.env.SESSION_SECRET, challenge);
-    if (!userId) return c.json({ error: "Challenge expired" }, 401);
+    const principal = await verifyMfaChallenge(c.env.SESSION_SECRET, challenge);
+    if (!principal) return c.json({ error: "Challenge expired" }, 401);
+    const { userId } = principal;
 
     if (!code) return c.json({ error: "Missing code" }, 400);
 
     const mfa = await c.env.DB.prepare(
-      "SELECT totp_secret, totp_backup_codes FROM mfa WHERE user_id = ? AND totp_enabled = 1"
-    ).bind(userId).first<{ totp_secret: string; totp_backup_codes: string | null }>();
+      "SELECT m.totp_secret, m.totp_backup_codes, u.auth_version FROM mfa m JOIN users u ON u.id = m.user_id WHERE m.user_id = ? AND m.totp_enabled = 1"
+    ).bind(userId).first<{ totp_secret: string; totp_backup_codes: string | null; auth_version: number }>();
 
     if (!mfa) return c.json({ error: "MFA not configured" }, 401);
+    if (mfa.auth_version !== principal.authVersion) return c.json({ error: "Challenge expired" }, 401);
 
     const { decryptDestination } = await import("../../lib/crypto");
     const { verifyTOTP, verifyBackupCode } = await import("../../lib/totp");
@@ -388,7 +399,7 @@ export function authRoutes() {
     }
 
     deleteCookie(c, "__Host-mfa-challenge", { path: "/", secure: true });
-    const { token, freshAuth } = await setAuthenticatedCookies(c, userId);
+    const { token, freshAuth } = await setAuthenticatedCookies(c, userId, principal.authVersion);
     return c.json(wantsToken(c) ? { ok: true, userId, token, fresh_auth: freshAuth } : { ok: true, userId });
   });
 
@@ -435,8 +446,8 @@ export function authRoutes() {
     if (!expectedChallenge) return c.json({ error: "Challenge expired" }, 401);
 
     const cred = await c.env.DB.prepare(
-      "SELECT user_id, public_key, sign_count, transports FROM passkey_credentials WHERE id = ?"
-    ).bind(response.id).first<{ user_id: number; public_key: string; sign_count: number; transports: string | null }>();
+      "SELECT p.user_id, p.public_key, p.sign_count, p.transports, u.auth_version FROM passkey_credentials p JOIN users u ON u.id = p.user_id WHERE p.id = ?"
+    ).bind(response.id).first<{ user_id: number; public_key: string; sign_count: number; transports: string | null; auth_version: number }>();
 
     if (!cred) {
       await recordFailedAttempt(ip, c.env.DB);
@@ -477,7 +488,7 @@ export function authRoutes() {
       .bind(result.authenticationInfo.newCounter, response.id).run();
 
     deleteCookie(c, "__Host-passkey-challenge", { path: "/", secure: true });
-    const { token, freshAuth } = await setAuthenticatedCookies(c, cred.user_id);
+    const { token, freshAuth } = await setAuthenticatedCookies(c, cred.user_id, cred.auth_version);
 
     return c.json(wantsToken(c) ? { ok: true, userId: cred.user_id, token, fresh_auth: freshAuth } : { ok: true, userId: cred.user_id });
   });
@@ -544,8 +555,8 @@ export function authRoutes() {
 
     const db = c.env.DB;
     const user = await db.prepare(
-      "SELECT id FROM users WHERE recovery_token = ? AND recovery_mfa_code = ? AND recovery_expires_at > ? AND active = 1"
-    ).bind(token, code, Date.now()).first<{ id: number }>();
+      "SELECT id, recovery_expires_at, auth_version FROM users WHERE recovery_token = ? AND recovery_mfa_code = ? AND recovery_expires_at > ? AND active = 1"
+    ).bind(token, code, Date.now()).first<{ id: number; recovery_expires_at: number; auth_version: number }>();
 
     if (!user) {
       await recordFailedAttempt(ip, c.env.DB);
@@ -555,17 +566,22 @@ export function authRoutes() {
     const { generatePassphrase } = await import("../../lib/passphrase");
     const newPassphrase = generatePassphrase();
     const hash = await derivePassphraseHash(newPassphrase, c.env.AUTH_PASSWORD_SALT);
-    
-    await db.prepare(
-      "UPDATE users SET passphrase_hash = ?, recovery_token = NULL, recovery_expires_at = NULL, recovery_mfa_code = NULL WHERE id = ?"
-    ).bind(hash, user.id).run();
-
-    await db.prepare(
-      "UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL WHERE user_id = ?"
-    ).bind(user.id).run();
+    const nextVersion = user.auth_version + 1;
+    const [consumed] = await db.batch([
+      db.prepare(
+        "UPDATE users SET passphrase_hash = ?, recovery_token = NULL, recovery_expires_at = NULL, recovery_mfa_code = NULL, auth_version = ? WHERE id = ? AND recovery_token = ? AND recovery_mfa_code = ? AND recovery_expires_at = ? AND recovery_expires_at > ? AND auth_version = ? AND active = 1"
+      ).bind(hash, nextVersion, user.id, token, code, user.recovery_expires_at, Date.now(), user.auth_version),
+      db.prepare(
+        "UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL WHERE user_id = ? AND EXISTS (SELECT 1 FROM users WHERE id = ? AND passphrase_hash = ? AND auth_version = ?)"
+      ).bind(user.id, user.id, hash, nextVersion),
+    ]);
+    if (consumed?.meta.changes !== 1) {
+      await recordFailedAttempt(ip, db);
+      return c.json({ error: "Invalid token or code" }, 400);
+    }
 
     // Log them in immediately
-    await setAuthenticatedCookies(c, user.id);
+    await setAuthenticatedCookies(c, user.id, nextVersion);
 
     return c.json({ ok: true, passphrase: newPassphrase });
   });
@@ -590,8 +606,8 @@ export function authRoutes() {
 
     const db = c.env.DB;
     const user = await db.prepare(
-      "SELECT id, recovery_codes FROM users WHERE lower(username) = lower(?) AND active = 1 AND deleted_at IS NULL"
-    ).bind(username).first<{ id: number; recovery_codes: string | null }>();
+      "SELECT id, recovery_codes, auth_version FROM users WHERE lower(username) = lower(?) AND active = 1 AND deleted_at IS NULL"
+    ).bind(username).first<{ id: number; recovery_codes: string | null; auth_version: number }>();
 
     // Unknown username and wrong code are indistinguishable by design — both
     // consume rate-limit budget and return the same generic error.
@@ -622,16 +638,21 @@ export function authRoutes() {
     const { generatePassphrase } = await import("../../lib/passphrase");
     const newPassphrase = generatePassphrase();
     const newHash = await derivePassphraseHash(newPassphrase, c.env.AUTH_PASSWORD_SALT);
+    const nextVersion = user.auth_version + 1;
+    const [consumed] = await db.batch([
+      db.prepare(
+        "UPDATE users SET passphrase_hash = ?, recovery_codes = ?, recovery_token = NULL, recovery_expires_at = NULL, recovery_mfa_code = NULL, auth_version = ? WHERE id = ? AND recovery_codes = ? AND auth_version = ? AND active = 1 AND deleted_at IS NULL"
+      ).bind(newHash, JSON.stringify(hashed), nextVersion, user.id, user.recovery_codes, user.auth_version),
+      db.prepare(
+        "UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL WHERE user_id = ? AND EXISTS (SELECT 1 FROM users WHERE id = ? AND passphrase_hash = ? AND auth_version = ?)"
+      ).bind(user.id, user.id, newHash, nextVersion),
+    ]);
+    if (consumed?.meta.changes !== 1) {
+      await recordFailedAttempt(ip, db);
+      return c.json({ error: "Invalid username or recovery code" }, 400);
+    }
 
-    await db.prepare(
-      "UPDATE users SET passphrase_hash = ?, recovery_codes = ?, recovery_token = NULL, recovery_expires_at = NULL, recovery_mfa_code = NULL WHERE id = ?"
-    ).bind(newHash, JSON.stringify(hashed), user.id).run();
-
-    await db.prepare(
-      "UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL WHERE user_id = ?"
-    ).bind(user.id).run();
-
-    const { token, freshAuth } = await setAuthenticatedCookies(c, user.id);
+    const { token, freshAuth } = await setAuthenticatedCookies(c, user.id, nextVersion);
     return c.json(wantsToken(c)
       ? { ok: true, userId: user.id, passphrase: newPassphrase, codes_remaining: hashed.length, token, fresh_auth: freshAuth }
       : { ok: true, passphrase: newPassphrase, codes_remaining: hashed.length });

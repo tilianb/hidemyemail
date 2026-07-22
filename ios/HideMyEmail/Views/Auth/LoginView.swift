@@ -196,7 +196,7 @@ struct RecoverWithCodeView: View {
                         TextField("username", text: $username)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
-                        TextField("XXXX-XXXX", text: $code)
+                        TextField("XXXX-XXXX-…", text: $code)
                             .textInputAutocapitalization(.characters)
                             .autocorrectionDisabled()
                     } header: {
