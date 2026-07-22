@@ -1,6 +1,8 @@
 import { Hono } from "hono";
+import { createMimeMessage, Mailbox } from "mimetext";
 import type { AppEnv } from "../app";
 import { sendRaw } from "../../lib/ses";
+import { toBase64, toBase64Mime } from "../../lib/bytes";
 import { hashDestination, encryptDestination, decryptDestination } from "../../lib/crypto";
 import { getEnvWithOverride, getMainGlobalDomain } from "../../lib/settings";
 
@@ -104,6 +106,66 @@ export function destinationRoutes() {
       }
       return c.json({ error: "Internal error" }, 500);
     }
+  });
+
+  r.post("/destinations/:id/resend", async (c) => {
+    const userId = c.get("userId");
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id) || id <= 0) return c.json({ error: "Invalid id" }, 400);
+
+    const dest = await c.env.DB.prepare(
+      "SELECT email, token, verified_at FROM destinations WHERE id = ? AND user_id = ?"
+    ).bind(id, userId).first<{ email: string; token: string; verified_at: number | null }>();
+    if (!dest) return c.json({ error: "Destination not found" }, 404);
+    if (dest.verified_at !== null) return c.json({ error: "Destination is already verified" }, 409);
+
+    const sesAccessKeyId = await getEnvWithOverride(c.env.DB, c.env, "ses_access_key_id");
+    const sesSecretAccessKey = await getEnvWithOverride(c.env.DB, c.env, "ses_secret_access_key");
+    const sesRegion = await getEnvWithOverride(c.env.DB, c.env, "ses_region");
+
+    if (!sesAccessKeyId || !sesSecretAccessKey || !sesRegion) {
+      return c.json({ error: "Email sending is not configured" }, 503);
+    }
+
+    const email = await decryptDestination(dest.email, c.env.DESTINATION_ENCRYPTION_KEY);
+    const verifyUrl = new URL(`/api/verify?token=${dest.token}`, c.req.url).toString();
+    const mainGlobalDomain = await getMainGlobalDomain(c.env.DB, c.env);
+    const rawBase64 = buildVerificationEmail(email, verifyUrl, mainGlobalDomain);
+    const cooldownKey = `destination-resend:${userId}:${id}`;
+    const now = Date.now();
+    const newReset = now + 60_000;
+    const claimed = await c.env.DB.prepare(
+      "INSERT INTO rate_limits (ip, attempts, reset_at) VALUES (?, 1, ?) " +
+      "ON CONFLICT(ip) DO UPDATE SET reset_at = excluded.reset_at " +
+      "WHERE rate_limits.reset_at <= ? RETURNING reset_at"
+    ).bind(cooldownKey, newReset, now).first<{ reset_at: number }>();
+    if (!claimed) {
+      return c.json({ error: "Please wait before resending verification email" }, 429);
+    }
+
+    const sesSend: typeof sendRaw = (c.env as any).__sesSend ?? sendRaw;
+    const startedAt = Date.now();
+    const sendTask = sesSend({
+        accessKeyId: sesAccessKeyId,
+        secretAccessKey: sesSecretAccessKey,
+        region: sesRegion
+      }, {
+        from: `HideMyEmail <noreply@${mainGlobalDomain}>`,
+        to: email,
+        rawBase64
+      }).then((messageId) => {
+        console.log("Verification email resent", { messageId, ms: Date.now() - startedAt });
+      }).catch((err) => {
+        console.error("Verification email resend failed", err);
+      });
+
+    try {
+      c.executionCtx.waitUntil(sendTask);
+    } catch {
+      void sendTask;
+    }
+
+    return c.json({ ok: true });
   });
 
   r.delete("/destinations/:id", async (c) => {
@@ -484,8 +546,6 @@ function renderErrorPage(): string {
 // ---------------------------------------------------------------------------
 
 function buildVerificationEmail(to: string, verifyUrl: string, mainGlobalDomain: string = "example.com"): string {
-  const boundary = `----=_Part_${Date.now().toString(36)}`;
-
   const htmlBody = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -592,32 +652,21 @@ This link expires in 24 hours. If you did not request this, you can safely ignor
 
 — HideMyEmail (https://${mainGlobalDomain})`;
 
-  // Build a MIME multipart/alternative message
-  const msgLines = [
-    `From: HideMyEmail <noreply@${mainGlobalDomain}>`,
-    `To: ${to}`,
-    `Subject: Verify your email address`,
-    `Date: ${new Date().toUTCString()}`,
-    `Message-ID: <${crypto.randomUUID()}@${mainGlobalDomain}>`,
-    `Reply-To: HideMyEmail <noreply@${mainGlobalDomain}>`,
-    `MIME-Version: 1.0`,
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
-    ``,
-    `--${boundary}`,
-    `Content-Type: text/plain; charset=UTF-8`,
-    `Content-Transfer-Encoding: quoted-printable`,
-    ``,
-    textBody,
-    ``,
-    `--${boundary}`,
-    `Content-Type: text/html; charset=UTF-8`,
-    `Content-Transfer-Encoding: base64`,
-    ``,
-    btoa(unescape(encodeURIComponent(htmlBody))),
-    ``,
-    `--${boundary}--`,
-  ];
-
-  const rawMsg = msgLines.join("\r\n");
-  return btoa(unescape(encodeURIComponent(rawMsg)));
+  const msg = createMimeMessage();
+  const sender = { name: "HideMyEmail", addr: `noreply@${mainGlobalDomain}` };
+  msg.setSender(sender);
+  msg.setTo(to);
+  msg.setSubject("Verify your email address");
+  msg.setHeader("Reply-To", new Mailbox(sender));
+  msg.addMessage({
+    contentType: "text/plain",
+    encoding: "base64",
+    data: toBase64Mime(new TextEncoder().encode(textBody)),
+  });
+  msg.addMessage({
+    contentType: "text/html",
+    encoding: "base64",
+    data: toBase64Mime(new TextEncoder().encode(htmlBody)),
+  });
+  return toBase64(new TextEncoder().encode(msg.asRaw()));
 }

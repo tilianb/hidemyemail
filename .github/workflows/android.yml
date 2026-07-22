@@ -44,9 +44,17 @@ jobs:
       - name: Build, lint & test
         run: ./gradlew assembleDebug lintDebug testDebugUnitTest
 
+      - name: Name debug APK
+        id: apk
+        run: |
+          version=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts)
+          name="HideMyEmail-v${version}-debug.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "app/build/outputs/apk/debug/$name"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v7
         with:
-          name: app-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: ${{ steps.apk.outputs.name }}
+          path: android/app/build/outputs/apk/debug/${{ steps.apk.outputs.name }}
           if-no-files-found: error

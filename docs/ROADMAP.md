@@ -16,10 +16,6 @@ removed when shipped; see CHANGELOG.md for what already landed.
 
 ## P1 — Now (highest leverage)
 
-- [ ] **Reserve previously used aliases and subdomains** _(privacy / security)_.
-  When a user deletes an alias or subdomain, retain a tombstone recording its
-  original owner so no other user can claim it later. Only the original user
-  may recreate or restore that alias or subdomain.
 - [ ] Request a listing in Bitwarden's forwarder docs now that the
   addy.io-compatible API surface has shipped (see docs/API.md).
 - [ ] **Hosted push relay for self-hosters** _(push / self-hosting)_. Let
@@ -83,9 +79,12 @@ order (the abstraction is the enabler; later items get cheaper once it lands):
 
 ## P2 — Next
 
-- [ ] **Show inherited setting values** _(dashboard UX)_. Rename each
-  `Inherit` option to `Inherit (current value)`, substituting the effective
-  inherited value so users know what selecting it will do.
+- [ ] **Operator-defined blocked subdomains** _(security / self-hosting)_. Add
+  an environment variable containing a comma-separated denylist of subdomain
+  names or patterns that users may not claim (for example reserved service,
+  brand, and infrastructure names). Normalize entries and requested names
+  before matching, validate malformed patterns at startup, and apply the check
+  before creating an ownership reservation.
 - [ ] **Browser extension** (or interim bookmarklet) _(product)_. Generate an
   alias in signup forms without opening the dashboard. The daily-driver feature
   of SimpleLogin/addy.

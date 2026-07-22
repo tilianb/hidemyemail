@@ -3,6 +3,7 @@ import type { AppEnv } from "../app";
 import { hashDestination, encryptDestination, decryptDestination } from "../../lib/crypto";
 import { isValidLocalPart, randomLocalPart, escapeLike } from "../../lib/alias-format";
 import { aliasQuotaExceeded, resolveDefaultDestination } from "../../db/aliases";
+import { canUseIdentifier, isIdentifierReservationError, reserveIdentifierAndRun } from "../../db/reservations";
 
 export function aliasRoutes() {
   const r = new Hono<AppEnv>();
@@ -71,18 +72,24 @@ export function aliasRoutes() {
     }
     
     const full = `${localPart}@${dom.domain}`;
+    if (!(await canUseIdentifier(c.env.DB, "alias", full, userId))) {
+      return c.json({ error: "Alias is already taken or not available" }, 409);
+    }
     
     try {
-      const row = await c.env.DB.prepare(
+      const row = await reserveIdentifierAndRun<any>(c.env.DB, "alias", full, userId, c.env.DB.prepare(
         "INSERT INTO aliases (domain_id, user_id, local_part, full_address, destination, destination_hash, label, active, source, created_at) " +
         "VALUES (?,?,?,?,?,?,?,1,'dashboard',?) RETURNING *"
-      ).bind(b.domain_id, userId, localPart, full, destEnc, destHash, b.label ?? null, Date.now()).first<any>();
+      ).bind(b.domain_id, userId, localPart, full, destEnc, destHash, b.label ?? null, Date.now()));
       
       if (row && row.destination) {
         row.destination = await decryptDestination(row.destination, c.env.DESTINATION_ENCRYPTION_KEY);
       }
       return c.json(row);
     } catch (err: any) {
+      if (isIdentifierReservationError(err)) {
+        return c.json({ error: "Alias is already taken or not available" }, 409);
+      }
       if (err.message && err.message.includes("UNIQUE constraint failed")) {
         return c.json({ error: "Alias already exists" }, 409);
       }
