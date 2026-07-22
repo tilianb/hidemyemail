@@ -9,6 +9,7 @@ export function Destinations() {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ email: "" });
   const [submitting, setSubmitting] = useState(false);
+  const [resending, setResending] = useState<Set<number>>(new Set());
 
   async function load() {
     setLoading(true);
@@ -49,6 +50,22 @@ export function Destinations() {
     }
   }
 
+  async function resend(d: Destination) {
+    setResending(ids => new Set(ids).add(d.id));
+    try {
+      await api.resendDestinationVerification(d.id);
+      toast(`Verification email resent to ${d.email}`, "success");
+    } catch (err: any) {
+      toast(err.message || "Failed to resend verification email", "error");
+    } finally {
+      setResending(ids => {
+        const next = new Set(ids);
+        next.delete(d.id);
+        return next;
+      });
+    }
+  }
+
   async function setDefault(id: number) {
     try {
       await api.setDefaultDestination(id);
@@ -80,11 +97,10 @@ export function Destinations() {
         </p>
       </div>
 
-      <div className="callout stagger-1 card-form-gap">
-        <strong>How destinations work —</strong> Aliases can forward mail to any verified destination.
-        Add your real email addresses below. Your oldest verified address is your default destination
-        and will be used for system notifications and account recovery.
-      </div>
+      <details className="callout help-callout stagger-1 card-form-gap">
+        <summary>How destinations work</summary>
+        <div>Aliases can forward mail to any verified destination. Add your real email addresses below. Your oldest verified address is your default destination and will be used for system notifications and account recovery.</div>
+      </details>
 
       <div className="card stagger-2 card-form-gap">
         <div className="card-header">
@@ -161,6 +177,11 @@ export function Destinations() {
                     </td>
                     <td>
                       <div className="table-actions">
+                        {d.verified_at === null && (
+                          <button className="btn btn-secondary btn-compact" onClick={() => resend(d)} disabled={resending.has(d.id)} title="Resend verification email">
+                            <Send size={14} /> {resending.has(d.id) ? "Sending..." : "Resend"}
+                          </button>
+                        )}
                         {d.suppressed_at && d.suppression_class === "soft" && (
                           <button className="btn btn-secondary btn-compact" onClick={() => unsuppress(d.id)} title="Resume forwarding">
                             <PlayCircle size={14} /> Resume
