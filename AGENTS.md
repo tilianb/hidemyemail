@@ -82,6 +82,19 @@ CI: `.github/workflows/docs.yml` builds and deploys to GitHub Pages on push to
   PRs to `dev` unless told otherwise. Never merge a PR before CI is green.
 - **Commits:** conventional commits (`feat(worker): …`, `fix(email): …`).
   Bodies explain *why*. No AI co-author trailers.
+- **Releases:** release PRs merge `dev` into `main`; patch releases must not
+  contain new features. Before tagging, update `CHANGELOG.md`, Worker and
+  dashboard package versions and lockfiles, Android `versionName` /
+  monotonically increasing `versionCode`, and the iOS baseline versions in
+  `project.yml`. Write GitHub release notes for users, not a raw commit list:
+  start with a short summary, group changes under descriptive headings, explain
+  user-visible behavior and security impact in plain language, include an
+  **Upgrade Notes** section covering migrations and config changes (or
+  explicitly say none), and end with the full comparison link. Use the detailed
+  v1.1.0 release notes as the quality baseline. Do not leave the auto-generated
+  notes as the published release description. After tagging, verify the GitHub
+  release notes, APK, TestFlight upload, and GHCR / Docker Hub images before
+  declaring the release complete.
 - **Migrations:** new numbered file in `worker/migrations/`; never edit an
   applied one. Keep columns nullable / defaulted so existing rows keep their
   behavior. Code does NOT tolerate missing tables (no try/catch migration
@@ -112,8 +125,8 @@ CI: `.github/workflows/docs.yml` builds and deploys to GitHub Pages on push to
   native bearer clients.
 - Reverse-alias replies are gated by SES SPF/DMARC verdicts AND a
   first-contact check (`hasPriorInbound`) — reverse addresses are guessable.
-  The events table is the source of truth for that gate; do not add events
-  retention without replacing it.
+  The `contacts` table is the source of truth for that gate; preserve contact
+  rows independently of event retention.
 - Inbound forwards respect SES spam/virus verdicts (`spam_verdict_action`,
   `virus_verdict_action`). Forwarded mail is DKIM-signed by the alias
   domain, so forwarding junk burns the operator's sender reputation.
