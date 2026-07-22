@@ -102,13 +102,18 @@ test("verifyBackupCode finds and returns index", async () => {
 
 test("MFA challenge sign and verify", async () => {
   const secret = "test-secret";
-  const token = await signMfaChallenge(secret, 42);
-  expect(token).toMatch(/^mfa\.\d+\.\d+\.[a-f0-9]+$/);
-  expect(await verifyMfaChallenge(secret, token)).toBe(42);
+  const token = await signMfaChallenge(secret, 42, 7);
+  expect(token).toMatch(/^mfa2\.42\.7\.\d+\.[a-f0-9]+$/);
+  expect(await verifyMfaChallenge(secret, token)).toEqual({ userId: 42, authVersion: 7 });
   expect(await verifyMfaChallenge("wrong-secret", token)).toBeNull();
 });
 
 test("MFA challenge with wrong secret returns null", async () => {
-  const token = await signMfaChallenge("secret", 1);
+  const token = await signMfaChallenge("secret", 1, 0);
   expect(await verifyMfaChallenge("other-secret", token)).toBeNull();
+});
+
+test("legacy MFA challenges are rejected", async () => {
+  const exp = Math.floor(Date.now() / 1000) + 300;
+  expect(await verifyMfaChallenge("secret", `mfa.1.${exp}.unused`)).toBeNull();
 });

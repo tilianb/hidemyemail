@@ -49,7 +49,7 @@ test("full handoff: code from web session, exchange yields a working bearer toke
   }, testEnv);
   expect(codeRes.status).toBe(200);
   const { code } = await codeRes.json() as { code: string };
-  expect(code.startsWith("appauth.")).toBe(true);
+  expect(code.startsWith("appauth2.")).toBe(true);
 
   const exchange = await app.request("/api/app-auth/exchange", {
     method: "POST",
@@ -66,6 +66,31 @@ test("full handoff: code from web session, exchange yields a working bearer toke
     headers: { Authorization: `Bearer ${token}` },
   }, testEnv);
   expect(authed.status).toBe(200);
+});
+
+test("exchange rejects a handoff code minted before auth version advances", async () => {
+  const app = createApp();
+  await (env.DB as D1Database).prepare("UPDATE users SET auth_version = 0 WHERE id = 1").run();
+  const cookie = await loginCookie(app);
+  const challenge = await sha256Base64url(VERIFIER);
+  const codeRes = await app.request("/api/app-auth/code", {
+    method: "POST",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ challenge }),
+  }, testEnv);
+  const { code } = await codeRes.json() as { code: string };
+
+  await (env.DB as D1Database).prepare("UPDATE users SET auth_version = auth_version + 1 WHERE id = 1").run();
+  const exchange = await app.request("/api/app-auth/exchange", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Auth-Mode": "token" },
+    body: JSON.stringify({ code, verifier: VERIFIER }),
+  }, testEnv);
+
+  expect(exchange.status).toBe(401);
+  const body = await exchange.json() as Record<string, unknown>;
+  expect(body.token).toBeUndefined();
+  expect(body.fresh_auth).toBeUndefined();
 });
 
 test("code requires a session", async () => {
@@ -156,7 +181,7 @@ test("exchange rejects a tampered code", async () => {
   const { code } = await codeRes.json() as { code: string };
 
   // Flip the embedded user id from 1 to 2 — the HMAC must catch it.
-  const tampered = code.replace("appauth.1.", "appauth.2.");
+  const tampered = code.replace("appauth2.1.", "appauth2.2.");
   expect(tampered).not.toBe(code);
 
   const exchange = await app.request("/api/app-auth/exchange", {

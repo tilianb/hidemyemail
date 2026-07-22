@@ -25,6 +25,7 @@ export type AppEnv = {
   Bindings: Env;
   Variables: {
     userId: number;
+    authVersion: number;
   };
 };
 
@@ -118,13 +119,15 @@ export function createApp() {
       if (authHeader?.startsWith("Bearer ")) token = authHeader.slice(7).trim();
     }
     if (!token) return c.json({ error: "Unauthorized" }, 401);
-    const userId = await verifySession(c.env.SESSION_SECRET, token);
-    if (userId === null) return c.json({ error: "Unauthorized" }, 401);
-    const user = await c.env.DB.prepare("SELECT active, deleted_at FROM users WHERE id = ?")
-      .bind(userId).first<{ active: number; deleted_at: number | null }>();
+    const principal = await verifySession(c.env.SESSION_SECRET, token);
+    if (principal === null) return c.json({ error: "Unauthorized" }, 401);
+    const user = await c.env.DB.prepare("SELECT active, deleted_at, auth_version FROM users WHERE id = ?")
+      .bind(principal.userId).first<{ active: number; deleted_at: number | null; auth_version: number }>();
+    if (user && user.auth_version !== principal.authVersion) return c.json({ error: "Unauthorized" }, 401);
     if (!user || user.active === 0) return c.json({ error: "Account is disabled" }, 403);
     if (user.deleted_at != null) return c.json({ error: "Account has been deleted" }, 403);
-    c.set("userId", userId);
+    c.set("userId", principal.userId);
+    c.set("authVersion", principal.authVersion);
     return next();
   });
 

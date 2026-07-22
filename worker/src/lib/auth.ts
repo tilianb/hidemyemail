@@ -43,20 +43,22 @@ async function hmac(secret: string, data: string): Promise<string> {
   return toHex(await crypto.subtle.sign("HMAC", key, enc.encode(data)));
 }
 
-export async function signMfaChallenge(secret: string, userId: number): Promise<string> {
+export async function signMfaChallenge(secret: string, userId: number, authVersion: number): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + 300; // 5 minutes
-  const payload = `mfa.${userId}.${exp}`;
+  const payload = `mfa2.${userId}.${authVersion}.${exp}`;
   return `${payload}.${await hmac(secret, payload)}`;
 }
 
-export async function verifyMfaChallenge(secret: string, token: string): Promise<number | null> {
+export async function verifyMfaChallenge(secret: string, token: string): Promise<{ userId: number; authVersion: number } | null> {
   const parts = token.split(".");
-  if (parts.length !== 4 || parts[0] !== "mfa") return null;
-  const [, userIdStr, expStr, sig] = parts;
-  const payload = `mfa.${userIdStr}.${expStr}`;
+  if (parts.length !== 5 || parts[0] !== "mfa2") return null;
+  const [, userIdStr, authVersionStr, expStr, sig] = parts;
+  const payload = `mfa2.${userIdStr}.${authVersionStr}.${expStr}`;
   const expected = await hmac(secret, payload);
   if (!timingSafeEqual(sig!, expected)) return null;
-  if (Number(expStr) > Math.floor(Date.now() / 1000)) return Number(userIdStr);
+  if (Number(expStr) > Math.floor(Date.now() / 1000)) {
+    return { userId: Number(userIdStr), authVersion: Number(authVersionStr) };
+  }
   return null;
 }
 
@@ -98,24 +100,28 @@ export async function verifyPasskeyRegChallenge(secret: string, token: string): 
   return null;
 }
 
-export async function signSession(secret: string, userId: number, ttlSeconds: number): Promise<string> {
+export async function signSession(secret: string, userId: number, ttlSeconds: number, authVersion = 0): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
-  const payload = `v2.${userId}.${exp}`;
+  const payload = `v3.${userId}.${authVersion}.${exp}`;
   return `${payload}.${await hmac(secret, payload)}`;
 }
 
-export async function signFreshAuth(secret: string, userId: number, ttlSeconds: number): Promise<string> {
+export async function signFreshAuth(secret: string, userId: number, ttlSeconds: number, authVersion = 0): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
-  const payload = `fresh.${userId}.${exp}`;
+  const payload = `fresh2.${userId}.${authVersion}.${exp}`;
   return `${payload}.${await hmac(secret, payload)}`;
 }
 
-export async function verifyFreshAuth(secret: string, token: string, userId: number): Promise<boolean> {
+export async function verifyFreshAuth(secret: string, token: string, userId: number, authVersion = 0): Promise<boolean> {
   const parts = token.split(".");
-  if (parts.length !== 4) return false;
-  const [v, userIdStr, expStr, sig] = parts;
-  if (v !== "fresh" || Number(userIdStr) !== userId) return false;
-  const payload = `${v}.${userIdStr}.${expStr}`;
+  const legacy = parts.length === 4 && parts[0] === "fresh";
+  if (!legacy && (parts.length !== 5 || parts[0] !== "fresh2")) return false;
+  const [v, userIdStr, versionOrExp, expOrSig, newSig] = parts;
+  const tokenVersion = legacy ? 0 : Number(versionOrExp);
+  const expStr = legacy ? versionOrExp : expOrSig;
+  const sig = legacy ? expOrSig : newSig;
+  if (Number(userIdStr) !== userId || tokenVersion !== authVersion) return false;
+  const payload = legacy ? `${v}.${userIdStr}.${expStr}` : `${v}.${userIdStr}.${versionOrExp}.${expStr}`;
   const expected = await hmac(secret, payload);
   if (!timingSafeEqual(sig!, expected)) return false;
   return Number(expStr) > Math.floor(Date.now() / 1000);
@@ -132,21 +138,21 @@ export async function verifyFreshAuth(secret: string, token: string, userId: num
 // without the verifier, which never leaves the app.
 const APP_AUTH_CODE_TTL = 120; // seconds
 
-export async function signAppAuthCode(secret: string, userId: number, challenge: string): Promise<string> {
+export async function signAppAuthCode(secret: string, userId: number, authVersion: number, challenge: string): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + APP_AUTH_CODE_TTL;
-  const payload = `appauth.${userId}.${exp}.${challenge}`;
+  const payload = `appauth2.${userId}.${authVersion}.${exp}.${challenge}`;
   return `${payload}.${await hmac(secret, payload)}`;
 }
 
-export async function verifyAppAuthCode(secret: string, code: string): Promise<{ userId: number; challenge: string } | null> {
+export async function verifyAppAuthCode(secret: string, code: string): Promise<{ userId: number; authVersion: number; challenge: string } | null> {
   const parts = code.split(".");
-  if (parts.length !== 5 || parts[0] !== "appauth") return null;
-  const [, userIdStr, expStr, challenge, sig] = parts;
-  const payload = `appauth.${userIdStr}.${expStr}.${challenge}`;
+  if (parts.length !== 6 || parts[0] !== "appauth2") return null;
+  const [, userIdStr, authVersionStr, expStr, challenge, sig] = parts;
+  const payload = `appauth2.${userIdStr}.${authVersionStr}.${expStr}.${challenge}`;
   const expected = await hmac(secret, payload);
   if (!timingSafeEqual(sig!, expected)) return null;
   if (Number(expStr) <= Math.floor(Date.now() / 1000)) return null;
-  return { userId: Number(userIdStr), challenge: challenge! };
+  return { userId: Number(userIdStr), authVersion: Number(authVersionStr), challenge: challenge! };
 }
 
 /// base64url (no padding) SHA-256 — the PKCE challenge derivation.
@@ -157,15 +163,18 @@ export async function sha256Base64url(input: string): Promise<string> {
   return btoa(s).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
-export async function verifySession(secret: string, token: string): Promise<number | null> {
+export async function verifySession(secret: string, token: string): Promise<{ userId: number; authVersion: number } | null> {
   const parts = token.split(".");
-  if (parts.length === 4) {
-    const [v, userIdStr, expStr, sig] = parts;
-    if (v !== "v2") return null;
-    const payload = `${v}.${userIdStr}.${expStr}`;
+  const legacy = parts.length === 4 && parts[0] === "v2";
+  if (legacy || (parts.length === 5 && parts[0] === "v3")) {
+    const [v, userIdStr, versionOrExp, expOrSig, newSig] = parts;
+    const authVersion = legacy ? 0 : Number(versionOrExp);
+    const expStr = legacy ? versionOrExp : expOrSig;
+    const sig = legacy ? expOrSig : newSig;
+    const payload = legacy ? `${v}.${userIdStr}.${expStr}` : `${v}.${userIdStr}.${versionOrExp}.${expStr}`;
     const expected = await hmac(secret, payload);
     if (!timingSafeEqual(sig!, expected)) return null;
-    if (Number(expStr) > Math.floor(Date.now() / 1000)) return Number(userIdStr);
+    if (Number(expStr) > Math.floor(Date.now() / 1000)) return { userId: Number(userIdStr), authVersion };
     return null;
   }
   return null;

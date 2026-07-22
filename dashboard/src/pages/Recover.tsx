@@ -136,7 +136,7 @@ export function Recover() {
               autoCapitalize="characters"
               autoCorrect="off"
               spellCheck={false}
-              placeholder="XXXX-XXXX"
+              placeholder="XXXX-XXXX-…"
             />
           </div>
           <button className="btn btn-primary recovery-button" type="submit" disabled={loading || !username.trim() || !recoveryCode.trim()}>
