@@ -1,9 +1,10 @@
 import { env } from "cloudflare:test";
-import { beforeAll, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import { createApp } from "../src/api/app";
-import { signFreshAuth, signSession, derivePassphraseHash } from "../src/lib/auth";
+import { signFreshAuth, signSession, verifyFreshAuth, verifySession, derivePassphraseHash } from "../src/lib/auth";
 import { encryptDestination } from "../src/lib/crypto";
 import { generatePassphrase } from "../src/lib/passphrase";
+import { hashBackupCode } from "../src/lib/totp";
 
 let testEnv: any;
 
@@ -32,6 +33,8 @@ beforeEach(async () => {
   await db.prepare("UPDATE users SET active = 1 WHERE id = 1").run();
   await db.prepare("DELETE FROM rate_limits").run();
 });
+
+afterEach(() => vi.restoreAllMocks());
 
 test("P1: DELETE /domains/:id returns 404 for another user's domain (no IDOR leak)", async () => {
   const app = createApp();
@@ -124,6 +127,123 @@ test("P2: recovery /recover/verify works for active users with valid token+code"
 
   const mfaAfter = await (env.DB as D1Database).prepare("SELECT totp_enabled FROM mfa WHERE user_id = ?").bind(userId).first<{ totp_enabled: number }>();
   expect(mfaAfter?.totp_enabled).toBe(0);
+});
+
+test("P2: admin-token recovery invalidates old credentials and returns the winning auth version", async () => {
+  const app = createApp();
+  const userId = await makeUser(1);
+  const oldSession = await signSession("sek", userId, 3600, 0);
+  const oldFresh = await signFreshAuth("sek", userId, 300, 0);
+  const token = "rec-tok-version-" + Math.random();
+  const code = "345678";
+  await (env.DB as D1Database).prepare(
+    "UPDATE users SET auth_version = 0, recovery_token = ?, recovery_mfa_code = ?, recovery_expires_at = ? WHERE id = ?"
+  ).bind(token, code, Date.now() + 60_000, userId).run();
+
+  const recovered = await app.request("/api/recover/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, code }),
+  }, testEnv);
+  expect(recovered.status).toBe(200);
+
+  const cookieHeader = recovered.headers.get("set-cookie") ?? "";
+  const sessionToken = cookieHeader.match(/__Host-session=([^;,]+)/)?.[1];
+  const freshToken = cookieHeader.match(/__Host-fresh-auth=([^;,]+)/)?.[1];
+  expect(sessionToken).toBeTruthy();
+  expect(freshToken).toBeTruthy();
+  expect(await verifySession("sek", sessionToken!)).toEqual({ userId, authVersion: 1 });
+  expect(await verifyFreshAuth("sek", freshToken!, userId, 1)).toBe(true);
+
+  const oldGuarded = await app.request("/api/stats", {
+    headers: { Authorization: `Bearer ${oldSession}` },
+  }, testEnv);
+  expect(oldGuarded.status).toBe(401);
+  const oldFreshGuarded = await app.request("/api/account/recovery-codes", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${sessionToken}`, "X-Fresh-Auth": oldFresh },
+  }, testEnv);
+  expect(oldFreshGuarded.status).toBe(401);
+  expect((await oldFreshGuarded.json() as { error: string }).error).toBe("Fresh authentication required");
+});
+
+test("P2: concurrent admin-token recovery has exactly one winner", async () => {
+  const app = createApp();
+  const userId = await makeUser(1);
+  const token = "rec-tok-race-" + Math.random();
+  const code = "456789";
+  const futureMs = Date.now() + 60_000;
+  await (env.DB as D1Database).prepare(
+    "UPDATE users SET recovery_token = ?, recovery_mfa_code = ?, recovery_expires_at = ? WHERE id = ?"
+  ).bind(token, code, futureMs, userId).run();
+  const request = () => app.request("/api/recover/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, code }),
+  }, testEnv);
+
+  const responses = await Promise.all([request(), request()]);
+  expect(responses.map((response) => response.status).sort()).toEqual([200, 400]);
+});
+
+test("P2: admin recovery rejects a token that expires after selection but before consumption", async () => {
+  const app = createApp();
+  const userId = await makeUser(1);
+  const token = "rec-tok-expiry-" + Math.random();
+  const code = "567890";
+  const expiry = 10_000;
+  await (env.DB as D1Database).prepare(
+    "UPDATE users SET recovery_token = ?, recovery_mfa_code = ?, recovery_expires_at = ? WHERE id = ?"
+  ).bind(token, code, expiry, userId).run();
+  let calls = 0;
+  vi.spyOn(Date, "now").mockImplementation(() => ++calls <= 2 ? expiry - 1 : expiry + 1);
+
+  const res = await app.request("/api/recover/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, code }),
+  }, testEnv);
+
+  expect(res.status).toBe(400);
+  expect(res.headers.get("set-cookie") ?? "").not.toContain("__Host-session=");
+  const after = await (env.DB as D1Database).prepare(
+    "SELECT recovery_token FROM users WHERE id = ?"
+  ).bind(userId).first<{ recovery_token: string | null }>();
+  expect(after?.recovery_token).toBe(token);
+});
+
+test("P2: stale MFA challenge cannot mint credentials after recovery advances auth version", async () => {
+  const app = createApp();
+  const password = "mfa-version-password";
+  const passphraseHash = await derivePassphraseHash(password, testEnv.AUTH_PASSWORD_SALT);
+  const userId = await makeUser(1);
+  const backupCode = "ABCD-EFGH";
+  const encryptedSecret = await encryptDestination("JBSWY3DPEHPK3PXP", testEnv.DESTINATION_ENCRYPTION_KEY);
+  await (env.DB as D1Database).prepare("UPDATE users SET passphrase_hash = ?, auth_version = 0 WHERE id = ?")
+    .bind(passphraseHash, userId).run();
+  await (env.DB as D1Database).prepare(
+    "INSERT INTO mfa (user_id, totp_secret, totp_enabled, totp_backup_codes) VALUES (?, ?, 1, ?)"
+  ).bind(userId, encryptedSecret, JSON.stringify([await hashBackupCode(backupCode)])).run();
+
+  const login = await app.request("/api/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Auth-Mode": "token" },
+    body: JSON.stringify({ password }),
+  }, testEnv);
+  const challenge = (await login.json() as { mfa_token: string }).mfa_token;
+  expect(challenge).toBeTruthy();
+  await (env.DB as D1Database).prepare("UPDATE users SET auth_version = 1 WHERE id = ?").bind(userId).run();
+
+  const completion = await app.request("/api/mfa/complete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Auth-Mode": "token" },
+    body: JSON.stringify({ code: backupCode, mfa_token: challenge }),
+  }, testEnv);
+
+  expect(completion.status).toBe(401);
+  const body = await completion.json() as Record<string, unknown>;
+  expect(body.token).toBeUndefined();
+  expect(body.fresh_auth).toBeUndefined();
 });
 
 test("P3: /api/settings/mfa/setup refuses to overwrite enabled MFA (re-enrol bypass)", async () => {
