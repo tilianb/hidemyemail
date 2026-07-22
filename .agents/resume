@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# This repository has no persistent local backing services. Toolchains and
+# dependencies are installed by .agents/setup and survive orb pause/resume.
+echo "HideMyEmail orb resumed; no services require repair."
