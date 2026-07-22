@@ -59,6 +59,8 @@ fun DomainsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
     var domains by remember { mutableStateOf<List<Domain>>(emptyList()) }
     var destinations by remember { mutableStateOf<List<Destination>>(emptyList()) }
     var maxSubdomains by remember { mutableStateOf(-1) }
+    var inheritedCatchAll by remember { mutableStateOf<Boolean?>(null) }
+    var inheritedInlineActions by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -89,9 +91,18 @@ fun DomainsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
                 val d = async { client.domains() }
                 val dest = async { client.destinations() }
                 val conf = async { client.config() }
+                val prefs = async { client.preferences() }
                 domains = d.await()
                 destinations = dest.await()
-                maxSubdomains = conf.await().maxSubdomains
+                val config = conf.await()
+                val preferences = prefs.await()
+                maxSubdomains = config.maxSubdomains
+                inheritedCatchAll = config.catchAllAutoCreate
+                inheritedInlineActions = when (preferences.inlineActionsPref) {
+                    "on" -> true
+                    "off" -> false
+                    else -> preferences.defaults.inlineActionsEnabled
+                }
             }
             val bases = domains.filter { it.canHostSubdomains }
             if (baseDomainId == null || bases.none { it.id == baseDomainId }) {
@@ -275,7 +286,11 @@ fun DomainsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
 
                 Text("CATCH-ALL", style = chipLabelStyle)
                 ChoiceChips(
-                    options = listOf("" to "Inherit", "1" to "On", "0" to "Off"),
+                    options = listOf(
+                        "" to (inheritedCatchAll?.let { "Inherit (${if (it) "On" else "Off"})" } ?: "Inherit"),
+                        "1" to "On",
+                        "0" to "Off",
+                    ),
                     selected = catchAll,
                     onSelect = { catchAll = it ?: "" },
                 )
@@ -286,7 +301,7 @@ fun DomainsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
 
                 Text("INLINE ACTIONS", style = chipLabelStyle)
                 ChoiceChips(
-                    options = listOf("" to "Inherit", "on" to "On", "off" to "Off"),
+                    options = listOf("" to "Inherit (${if (inheritedInlineActions) "On" else "Off"})", "on" to "On", "off" to "Off"),
                     selected = inlineActions,
                     onSelect = { inlineActions = it ?: "" },
                 )

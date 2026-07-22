@@ -15,10 +15,14 @@ export function Login() {
   const [mfaRequired, setMfaRequired] = useState(false);
   const [mfaCode, setMfaCode] = useState("");
   const [mainGlobalDomain, setMainGlobalDomain] = useState("");
+  const [registrationEnabled, setRegistrationEnabled] = useState<boolean | null>(null);
   const [showRestore, setShowRestore] = useState(false);
 
   useEffect(() => {
-    api.config().then(conf => setMainGlobalDomain(conf.main_global_domain)).catch(() => {});
+    api.config().then(conf => {
+      setMainGlobalDomain(conf.main_global_domain);
+      setRegistrationEnabled(conf.registration_enabled);
+    }).catch(() => {});
   }, []);
 
   async function submit(e: React.FormEvent) {
@@ -112,7 +116,7 @@ export function Login() {
       // We don't auto-login immediately so they have a chance to copy the password.
       // Or we can let them log in after they see it.
     } catch (e: any) {
-      setErr("Failed to generate account. Try again.");
+      setErr(e?.message || "Failed to generate account. Try again.");
     } finally {
       setLoading(false);
     }
@@ -187,7 +191,7 @@ export function Login() {
                 />
               </div>
               {err && (
-                <div className="auth-error">
+                <div className="auth-error" role="alert" aria-live="polite">
                   {err}
                 </div>
               )}
@@ -285,7 +289,7 @@ export function Login() {
               </div>
 
               {err && (
-                <div className="auth-error">
+                <div className="auth-error" role="alert" aria-live="polite">
                   {err}
                 </div>
               )}
@@ -314,15 +318,20 @@ export function Login() {
                     </span>
                   ) : "Gain access"}
                 </button>
-                <button
-                  type="button"
-                  onClick={generate}
-                  className="btn btn-soft flex-1 btn-center"
-                  disabled={loading}
-                >
-                  Generate New
-                </button>
+                {registrationEnabled !== false && (
+                  <button
+                    type="button"
+                    onClick={generate}
+                    className="btn btn-soft flex-1 btn-center"
+                    disabled={loading}
+                  >
+                    Create account
+                  </button>
+                )}
               </div>
+              {registrationEnabled === false && (
+                <p className="muted-copy">New account registration is currently disabled.</p>
+              )}
             </form>
             </div>
           )}

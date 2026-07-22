@@ -134,7 +134,15 @@ export interface SuppressionSummary {
 }
 
 export const api = {
-  config: () => req<{ main_global_domain: string; max_subdomains: number; max_total_aliases: number; alias_quota_buffer_enabled: boolean }>("/api/config"),
+  config: () => req<{
+    main_global_domain: string;
+    max_subdomains: number;
+    max_total_aliases: number;
+    registration_enabled: boolean;
+    alias_quota_buffer_enabled: boolean;
+    catch_all_auto_create: boolean;
+    inline_actions_default_enabled: boolean;
+  }>("/api/config"),
   login: (password: string) => req<{ ok: true; userId: number } | { mfa_required: true }>("/api/login", { method: "POST", body: JSON.stringify({ password }) }),
   // Native-app login handoff: trade the current web session for a short-lived
   // code bound to the app's PKCE challenge (see pages/AppAuth.tsx)
@@ -148,6 +156,7 @@ export const api = {
   
   destinations: () => req<Destination[]>("/api/destinations"),
   createDestination: (email: string) => req<{ ok: true }>("/api/destinations", { method: "POST", body: JSON.stringify({ email }) }),
+  resendDestinationVerification: (id: number) => req<{ ok: true }>(`/api/destinations/${id}/resend`, { method: "POST" }),
   deleteDestination: (id: number) => req<{ ok: true }>(`/api/destinations/${id}`, { method: "DELETE" }),
   setDefaultDestination: (id: number) => req<{ ok: true }>(`/api/destinations/${id}/default`, { method: "PATCH" }),
   unsuppressDestination: (id: number) => req<{ ok: true }>(`/api/destinations/${id}/unsuppress`, { method: "POST" }),

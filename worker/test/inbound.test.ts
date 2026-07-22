@@ -30,6 +30,18 @@ test("clean mail to new alias → SES re-inject with rewritten headers", async (
   expect((await q.getAlias(DB(), "shop@hidemyemail.dev"))?.fwd_count).toBe(1);
 });
 
+test("catch-all cannot recreate an alias reserved by another user", async () => {
+  await DB().prepare(
+    "INSERT INTO identifier_reservations (kind, value, user_id, created_at) VALUES ('alias', 'shop@hidemyemail.dev', 99, 123)"
+  ).run();
+  const sentinel = { sent: [] as any[] };
+
+  await handleInbound(mkMessage("alice@store.com", "shop@hidemyemail.dev", RAW), testEnv(sentinel));
+
+  expect(sentinel.sent).toHaveLength(0);
+  expect(await q.getAlias(DB(), "shop@hidemyemail.dev")).toBeNull();
+});
+
 test("clean inbound forwarding rewrites headers without touching MIME body bytes", async () => {
   const sentinel = { sent: [] as any[] };
   const raw = [

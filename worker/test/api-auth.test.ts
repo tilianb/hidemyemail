@@ -116,13 +116,21 @@ test("public defaults keep registration disabled until admin enables it", async 
   expect(SETTING_DEFAULTS.registration_enabled).toBe("false");
 });
 
-test("public config exposes alias quota buffer flag", async () => {
+test("public config exposes user-facing settings", async () => {
   const app = createApp();
+  await (env.DB as D1Database).prepare(
+    "UPDATE settings SET value = 'false' WHERE key = 'registration_enabled'"
+  ).run();
 
   const res = await app.request("/api/config", {}, testEnv);
 
   expect(res.status).toBe(200);
-  expect(await res.json()).toMatchObject({ alias_quota_buffer_enabled: true });
+  expect(await res.json()).toMatchObject({
+    registration_enabled: false,
+    alias_quota_buffer_enabled: true,
+    catch_all_auto_create: true,
+    inline_actions_default_enabled: false,
+  });
 });
 
 test("seeded per-alias rate limit matches fallback default", async () => {
