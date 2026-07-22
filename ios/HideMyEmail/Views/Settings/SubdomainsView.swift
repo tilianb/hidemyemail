@@ -9,6 +9,8 @@ struct SubdomainsView: View {
     @State private var domains: [Domain] = []
     @State private var destinations: [Destination] = []
     @State private var maxSubdomains = -1
+    @State private var inheritedCatchAll: Bool?
+    @State private var inheritedInlineActions = false
     @State private var loading = false
     @State private var error: String?
 
@@ -55,7 +57,12 @@ struct SubdomainsView: View {
             }
             .task { if domains.isEmpty { await reload() } }
             .sheet(item: $editing) { d in
-                EditSubdomainView(domain: d, destinations: verifiedDestinations) {
+                EditSubdomainView(
+                    domain: d,
+                    destinations: verifiedDestinations,
+                    inheritedCatchAll: inheritedCatchAll,
+                    inheritedInlineActions: inheritedInlineActions
+                ) {
                     await reload()
                 }
             }
@@ -185,9 +192,18 @@ struct SubdomainsView: View {
             async let d = client.domains()
             async let dest = client.destinations()
             async let conf = client.config()
+            async let prefs = client.preferences()
             domains = try await d
             destinations = try await dest
-            maxSubdomains = try await conf.maxSubdomains
+            let config = try await conf
+            let preferences = try await prefs
+            maxSubdomains = config.maxSubdomains
+            inheritedCatchAll = config.catchAllAutoCreate
+            inheritedInlineActions = switch preferences.inlineActionsPref {
+            case "on": true
+            case "off": false
+            default: preferences.defaults.inlineActionsEnabled
+            }
             if baseDomainId == nil || !baseDomains.contains(where: { $0.id == baseDomainId }) {
                 baseDomainId = baseDomains.first?.id
             }
@@ -235,6 +251,8 @@ private struct EditSubdomainView: View {
 
     let domain: Domain
     let destinations: [Destination]
+    let inheritedCatchAll: Bool?
+    let inheritedInlineActions: Bool
     let onSave: () async -> Void
 
     @State private var selection: String
@@ -244,9 +262,17 @@ private struct EditSubdomainView: View {
     @State private var saving = false
     @State private var error: String?
 
-    init(domain: Domain, destinations: [Destination], onSave: @escaping () async -> Void) {
+    init(
+        domain: Domain,
+        destinations: [Destination],
+        inheritedCatchAll: Bool?,
+        inheritedInlineActions: Bool,
+        onSave: @escaping () async -> Void
+    ) {
         self.domain = domain
         self.destinations = destinations
+        self.inheritedCatchAll = inheritedCatchAll
+        self.inheritedInlineActions = inheritedInlineActions
         self.onSave = onSave
         _selection = State(initialValue: domain.defaultDestination ?? "global")
         _catchAll = State(initialValue: domain.catchAll.map(String.init) ?? "")
@@ -277,7 +303,7 @@ private struct EditSubdomainView: View {
 
                 Section {
                     Picker("Catch-all", selection: $catchAll) {
-                        Text("Inherit").tag("")
+                        Text(inheritedCatchAll.map { "Inherit (\($0 ? "On" : "Off"))" } ?? "Inherit").tag("")
                         Text("On").tag("1")
                         Text("Off").tag("0")
                     }
@@ -287,7 +313,7 @@ private struct EditSubdomainView: View {
 
                 Section {
                     Picker("Inline actions", selection: $inlineActions) {
-                        Text("Inherit").tag("")
+                        Text("Inherit (\(inheritedInlineActions ? "On" : "Off"))").tag("")
                         Text("On").tag("on")
                         Text("Off").tag("off")
                     }
