@@ -6,5 +6,8 @@
   "description": "Miniflare host that runs the hidemyemail Worker in a container.",
   "dependencies": {
     "miniflare": "4.20260714.0"
+  },
+  "overrides": {
+    "sharp": "0.35.3"
   }
 }
