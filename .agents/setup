@@ -93,6 +93,65 @@ for project in dashboard worker docker website; do
   (cd "$repo_root/$project" && npm ci --no-audit --no-fund)
 done
 
+echo "==> Configuring local development credentials"
+dev_vars="$repo_root/worker/.dev.vars"
+credentials_file="$repo_root/.amp/dev-login.txt"
+mkdir -p "$repo_root/.amp"
+if [[ ! -f "$dev_vars" ]]; then
+  node --input-type=module - "$repo_root" "$dev_vars" "$credentials_file" <<'NODE'
+import { randomBytes } from "node:crypto";
+import { chmod, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+
+const [repoRoot, devVarsPath, credentialsPath] = process.argv.slice(2);
+const { hashPassphrase } = await import(
+  pathToFileURL(join(repoRoot, "worker/scripts/pbkdf2.mjs"))
+);
+
+let passphrase;
+try {
+  const existing = await readFile(credentialsPath, "utf8");
+  passphrase = existing.match(/^Passphrase: (.+)$/m)?.[1];
+} catch (error) {
+  if (error.code !== "ENOENT") throw error;
+}
+
+if (!passphrase) {
+  passphrase = randomBytes(18).toString("base64url");
+  await writeFile(
+    credentialsPath,
+    `HideMyEmail local development login\nPassphrase: ${passphrase}\n`,
+    { mode: 0o600 },
+  );
+}
+
+const { salt, hash } = await hashPassphrase(passphrase);
+const hex = (bytes) => bytes.toString("hex");
+const devVars = [
+  "ENVIRONMENT=local",
+  `AUTH_PASSWORD_SALT=${salt}`,
+  `AUTH_PASSWORD_HASH=${hash}`,
+  `SESSION_SECRET=${hex(randomBytes(32))}`,
+  `ACTION_SECRET=${hex(randomBytes(32))}`,
+  `DESTINATION_ENCRYPTION_KEY=${randomBytes(32).toString("base64")}`,
+  "",
+].join("\n");
+await writeFile(devVarsPath, devVars, { mode: 0o600 });
+await chmod(credentialsPath, 0o600);
+NODE
+else
+  echo "  -> preserving existing worker/.dev.vars"
+fi
+if [[ -f "$credentials_file" ]]; then
+  echo "  -> local login passphrase: .amp/dev-login.txt"
+else
+  echo "  -> worker/.dev.vars is externally managed; no orb passphrase was generated"
+fi
+
+echo "==> Applying local D1 migrations"
+(cd "$repo_root/worker" && npx wrangler d1 migrations apply DB --local)
+
 echo "==> Orb setup complete"
 node --version
 java -version 2>&1 | head -n 1
