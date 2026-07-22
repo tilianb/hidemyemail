@@ -1,0 +1,9 @@
+services:
+  worker:
+    command: npm --prefix dashboard run build && cd worker && npx wrangler dev --ip 0.0.0.0 --port "$PORT"
+    port: 8787
+  dashboard:
+    command: cd dashboard && npm run dev -- --host 0.0.0.0 --port "$PORT"
+    portal:
+      title: HideMyEmail
+      description: Dashboard with API requests proxied to the local Worker.
