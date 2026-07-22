@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+node_version="22.17.1"
+node_root="$HOME/.local/node-v$node_version"
+android_home="$HOME/.local/share/android-sdk"
+android_tools_version="11076708"
+
+echo "==> Installing required system packages"
+packages=(ca-certificates curl unzip openjdk-17-jdk-headless)
+missing_packages=()
+for package in "${packages[@]}"; do
+  if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -q 'install ok installed'; then
+    missing_packages+=("$package")
+  fi
+done
+if ((${#missing_packages[@]})); then
+  sudo apt-get update
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing_packages[@]}"
+fi
+
+echo "==> Installing Node.js $node_version"
+case "$(uname -m)" in
+  x86_64) node_arch="x64" ;;
+  aarch64|arm64) node_arch="arm64" ;;
+  *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+if [[ ! -x "$node_root/bin/node" ]]; then
+  node_archive="node-v${node_version}-linux-${node_arch}.tar.xz"
+  temp_dir="$(mktemp -d)"
+  trap 'rm -rf "$temp_dir"' EXIT
+  curl --fail --location --retry 3 \
+    "https://nodejs.org/dist/v${node_version}/${node_archive}" \
+    --output "$temp_dir/$node_archive"
+  curl --fail --location --retry 3 \
+    "https://nodejs.org/dist/v${node_version}/SHASUMS256.txt" \
+    --output "$temp_dir/SHASUMS256.txt"
+  (cd "$temp_dir" && grep "  $node_archive\$" SHASUMS256.txt | sha256sum --check)
+  mkdir -p "$node_root"
+  tar -xJf "$temp_dir/$node_archive" --strip-components=1 -C "$node_root"
+  rm -rf "$temp_dir"
+  trap - EXIT
+fi
+export PATH="$node_root/bin:$PATH"
+
+java_home="$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")"
+export JAVA_HOME="$java_home"
+
+echo "==> Installing Android SDK command-line tools and API 35"
+sdkmanager="$android_home/cmdline-tools/latest/bin/sdkmanager"
+if [[ ! -x "$sdkmanager" ]]; then
+  tools_archive="commandlinetools-linux-${android_tools_version}_latest.zip"
+  temp_dir="$(mktemp -d)"
+  trap 'rm -rf "$temp_dir"' EXIT
+  curl --fail --location --retry 3 \
+    "https://dl.google.com/android/repository/$tools_archive" \
+    --output "$temp_dir/$tools_archive"
+  unzip -q "$temp_dir/$tools_archive" -d "$temp_dir"
+  mkdir -p "$android_home/cmdline-tools/latest"
+  cp -a "$temp_dir/cmdline-tools/." "$android_home/cmdline-tools/latest/"
+  rm -rf "$temp_dir"
+  trap - EXIT
+fi
+export ANDROID_HOME="$android_home"
+export ANDROID_SDK_ROOT="$android_home"
+export PATH="$android_home/cmdline-tools/latest/bin:$android_home/platform-tools:$PATH"
+
+set +o pipefail
+yes | "$sdkmanager" --licenses >/dev/null
+set -o pipefail
+"$sdkmanager" --install \
+  "platform-tools" \
+  "platforms;android-35" \
+  "build-tools;35.0.0"
+
+echo "==> Persisting toolchain paths for login shells"
+profile_marker="# hidemyemail orb toolchain"
+if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
+  cat >> "$HOME/.bash_profile" <<EOF
+
+$profile_marker
+export JAVA_HOME="$java_home"
+export ANDROID_HOME="$android_home"
+export ANDROID_SDK_ROOT="$android_home"
+export PATH="$node_root/bin:$android_home/cmdline-tools/latest/bin:$android_home/platform-tools:\$PATH"
+EOF
+fi
+
+echo "==> Installing locked JavaScript dependencies"
+for project in dashboard worker docker website; do
+  echo "  -> $project"
+  (cd "$repo_root/$project" && npm ci --no-audit --no-fund)
+done
+
+echo "==> Orb setup complete"
+node --version
+java -version 2>&1 | head -n 1
