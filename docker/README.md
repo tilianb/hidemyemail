@@ -5,9 +5,8 @@ Runs the production Cloudflare Worker unchanged inside a container, using
 as the runtime. D1 is a local SQLite file; the dashboard SPA is served by
 Miniflare's built-in Assets binding. Same routing semantics as prod.
 
-Multi-arch images (`linux/amd64` + `linux/arm64`) are published to
-`docker.io/tilianb/hidemyemail` and `ghcr.io/tilianb/hidemyemail` on every push
-to `main` and every `v*.*.*` tag.
+Multi-arch images (`linux/amd64` + `linux/arm64`) are published to GHCR on
+`main`. Exact stable release tags publish version tags to GHCR and Docker Hub.
 
 ---
 
@@ -58,11 +57,14 @@ If you prefer to drop AWS entirely and run your own SMTP, this image is not the 
 | 3 | Add SPF + DMARC records SES shows you | Deliverability + anti-spoof |
 | 4 | Create S3 bucket (e.g. `hidemyemail-inbound-raw`) | Holds raw MIME |
 | 5 | Add SES receipt rule: store to S3 + publish to SNS | Triggers webhook |
-| 6 | Create SNS topic + HTTPS subscription → `https://<your-host>/api/ses/inbound` | Worker entry point |
+| 6 | Create separate inbound/outbound SNS topics and HTTPS subscriptions | Receipt and feedback entry points |
 | 7 | Create IAM user with `ses:SendRawEmail` + `s3:GetObject` on the bucket | Worker credentials |
 | 8 | (Optional) Request SES production access | Removes sandbox sending limits |
 
-Put the IAM key, region, bucket, and topic ARN into `.env`. The worker auto-confirms the SNS subscription on the first call. Watch `docker compose logs -f app`.
+Put the IAM key, region, bucket, and both exact topic ARNs into `.env`. The
+Worker verifies each AWS SNS signature and TopicArn before auto-confirming or
+processing a message. `SNS_SECRET` is not used. Watch
+`docker compose logs -f app`.
 
 ---
 
@@ -119,12 +121,19 @@ The container speaks plain HTTP on `:8787`, published to `127.0.0.1` by
 default. Do not change that binding to a public address. Put a reverse proxy
 on the same host in front for TLS.
 
+The supplied stack runs as non-root with all Linux capabilities dropped,
+`no-new-privileges`, a read-only root filesystem, a bounded `/tmp` tmpfs, and
+only `/data` writable. Preserve these controls. Do not add privileged mode,
+host networking, the Docker socket, or broad host mounts.
+
 Set `APP_ORIGIN` in `.env` to the canonical public dashboard origin seen by
-users, for example `https://mail.example.com`. It is required for passkey
+users, including any non-default port, for example `https://mail.example.com`.
+It is the single browser and WebAuthn RP origin and is required for passkey
 origin/RP validation and must be HTTPS in production, with no path, query,
 fragment, credentials, or trailing slash. Use `http://localhost:8787` only for
-local development without TLS. If omitted, the container still serves mail and
-ordinary authentication, but passkey routes return a configuration error.
+local development without TLS; `127.0.0.1` and `::1` are also accepted loopback
+hosts. If omitted, the container still serves mail and ordinary authentication,
+but passkey routes return a configuration error.
 
 The container ignores all caller-supplied forwarding headers. For correct
 rate-limit client addresses behind a proxy, set `TRUSTED_PROXY_IPS` to the
@@ -193,7 +202,13 @@ docker compose up -d
 Each migration and its tracking row are atomic, so a failed migration rolls
 back and is retried on the next start.
 
-When you upgrade the image, new migrations run automatically.
+Security migrations `0030` through `0033` add auth-artifact replay protection,
+durable SNS/SES delivery claims, atomic mail-quota reservations, and the
+in-flight SES send fence.
+
+Before upgrading, back up `/data` and stop every other app instance. Start one
+new container against the database so it can finish migrations before serving
+traffic. Do not roll back to an image that predates an applied migration.
 
 ---
 
@@ -205,6 +220,9 @@ When you upgrade the image, new migrations run automatically.
 docker compose pull
 docker compose up -d
 ```
+
+Back up the named volume first. The new container applies each pending
+migration and its tracking row in one transaction before opening its listener.
 
 **Built from source:**
 
