@@ -55,3 +55,20 @@ test("throws on non-OK S3 response", async () => {
     )
   ).rejects.toThrow("S3 404");
 });
+
+test("stops streaming an S3 object once the configured byte limit is exceeded", async () => {
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      controller.enqueue(new Uint8Array(6));
+    },
+    cancel() { cancelled = true; },
+  });
+  const mockFetch = async () => new Response(body);
+
+  await expect(fetchS3Object(
+    { accessKeyId: "AKIATEST", secretAccessKey: "testsecret", region: "ap-southeast-2" },
+    "hidemyemail-inbound-raw", "large", mockFetch as typeof fetch, 10,
+  )).rejects.toThrow("exceeds 10 bytes");
+  expect(cancelled).toBe(true);
+});

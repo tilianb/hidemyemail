@@ -1,4 +1,6 @@
 export interface Env {
+  // In self-hosted mode the deployment wrapper must overwrite
+  // X-HideMyEmail-Client-IP from its trusted socket/proxy boundary.
   ENVIRONMENT: string;
   DB: D1Database;
   SES_REGION: string;
@@ -14,7 +16,7 @@ export interface Env {
   DESTINATION_ENCRYPTION_KEY: string;
   ACTION_SECRET?: string;
   // Web origin of the dashboard, e.g. https://app.hidemyemail.dev. Used as the
-  // WebAuthn relying-party origin for native clients, which send no Origin header.
+  // Canonical WebAuthn relying-party origin. Must be HTTPS except localhost.
   APP_ORIGIN?: string;
   // Apple App ID ("<TeamID>.<bundleId>", e.g. ABCDE12345.dev.hidemyemail.app)
   // published in the apple-app-site-association file for passkey association.

@@ -29,6 +29,8 @@ beforeEach(async () => {
   await db.prepare("DELETE FROM blocks").run();
   await db.prepare("DELETE FROM aliases").run();
   await db.prepare("DELETE FROM domains").run();
+  await db.prepare("DELETE FROM passkey_credentials").run();
+  await db.prepare("DELETE FROM api_keys").run();
   await db.prepare("DELETE FROM users WHERE id > 1").run();
   await db.prepare("UPDATE users SET active = 1 WHERE id = 1").run();
   await db.prepare("DELETE FROM rate_limits").run();
@@ -139,6 +141,12 @@ test("P2: admin-token recovery invalidates old credentials and returns the winni
   await (env.DB as D1Database).prepare(
     "UPDATE users SET auth_version = 0, recovery_token = ?, recovery_mfa_code = ?, recovery_expires_at = ? WHERE id = ?"
   ).bind(token, code, Date.now() + 60_000, userId).run();
+  await (env.DB as D1Database).prepare(
+    "INSERT INTO passkey_credentials (id, user_id, public_key, sign_count, created_at) VALUES ('recovery-passkey', ?, 'key', 0, ?)"
+  ).bind(userId, Date.now()).run();
+  await (env.DB as D1Database).prepare(
+    "INSERT INTO api_keys (user_id, name, token_hash, token_prefix, created_at) VALUES (?, 'recovery-key', ?, 'hmek_test', ?)"
+  ).bind(userId, "a".repeat(64), Date.now()).run();
 
   const recovered = await app.request("/api/recover/verify", {
     method: "POST",
@@ -165,6 +173,8 @@ test("P2: admin-token recovery invalidates old credentials and returns the winni
   }, testEnv);
   expect(oldFreshGuarded.status).toBe(401);
   expect((await oldFreshGuarded.json() as { error: string }).error).toBe("Fresh authentication required");
+  expect(await (env.DB as D1Database).prepare("SELECT id FROM passkey_credentials WHERE user_id = ?").bind(userId).first()).toBeNull();
+  expect(await (env.DB as D1Database).prepare("SELECT id FROM api_keys WHERE user_id = ?").bind(userId).first()).toBeNull();
 });
 
 test("P2: concurrent admin-token recovery has exactly one winner", async () => {
@@ -387,4 +397,25 @@ test("P4: MFA disable failures are rate limited", async () => {
     body: JSON.stringify({ code: "000000" })
   }, testEnv);
   expect(limited.status).toBe(429);
+});
+
+test("P4: concurrent MFA disable with one backup code has exactly one winner", async () => {
+  const app = createApp();
+  const userId = await makeUser(1);
+  const cookie = "__Host-session=" + (await signSession("sek", userId, 3600));
+  const freshCookie = "__Host-fresh-auth=" + (await signFreshAuth("sek", userId, 300));
+  const secret = await encryptDestination("JBSWY3DPEHPK3PXP", testEnv.DESTINATION_ENCRYPTION_KEY);
+  const backupCode = "ABCD-EFGH";
+  await (env.DB as D1Database).prepare(
+    "INSERT INTO mfa (user_id, totp_secret, totp_enabled, totp_backup_codes) VALUES (?, ?, 1, ?)"
+  ).bind(userId, secret, JSON.stringify([await hashBackupCode(backupCode)])).run();
+
+  const disable = () => app.request("/api/settings/mfa/disable", {
+    method: "POST",
+    headers: { cookie: `${cookie}; ${freshCookie}`, "Content-Type": "application/json", "cf-connecting-ip": "203.0.113.8" },
+    body: JSON.stringify({ code: backupCode }),
+  }, testEnv);
+  const responses = await Promise.all([disable(), disable()]);
+
+  expect(responses.map((response) => response.status).sort()).toEqual([200, 401]);
 });

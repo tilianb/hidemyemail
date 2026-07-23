@@ -5,6 +5,7 @@ import dev.hidemyemail.app.AppViewModel
 import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
 import dev.hidemyemail.app.auth.TokenStore
+import dev.hidemyemail.app.auth.ServerOrigin
 import dev.hidemyemail.app.net.ApiClient
 import dev.hidemyemail.app.net.PushPrefs
 import kotlinx.coroutines.CoroutineScope
@@ -91,10 +92,13 @@ object PushManager {
         // server URL falls back to the default, because users on the default
         // server never persist `server_url` (AppViewModel only defaults it in
         // memory) — without this, a cold-process token rotation would be dropped.
-        val token = TokenStore(ctx).load() ?: return null
-        val serverUrl = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val configured = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
             .getString("server_url", null)?.takeIf { it.isNotEmpty() }
             ?: AppViewModel.DEFAULT_SERVER
+        val serverUrl = runCatching { ServerOrigin.parse(configured).value }.getOrNull() ?: return null
+        // TokenStore returns credentials only when their persisted canonical
+        // origin exactly matches this background request's destination.
+        val token = TokenStore(ctx).load(serverUrl) ?: return null
         return ApiClient(serverUrl, token)
     }
 

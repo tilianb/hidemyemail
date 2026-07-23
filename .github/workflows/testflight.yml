@@ -4,20 +4,47 @@ on:
   push:
     tags:
       - "v*.*.*"
-  workflow_dispatch:
+
+permissions: {}
 
 jobs:
+  publish-gate:
+    name: Verify publish ref
+    runs-on: ubuntu-latest
+    outputs:
+      stable-release: ${{ steps.ref.outputs.stable-release }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout protected history
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+      - name: Require a release tag from main
+        id: ref
+        run: |
+          tag="$GITHUB_REF_NAME"
+          [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || exit 1
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          echo "stable-release=true" >> "$GITHUB_OUTPUT"
+
   testflight:
     name: Upload to TestFlight
+    needs: publish-gate
+    if: needs.publish-gate.result == 'success' && needs.publish-gate.outputs.stable-release == 'true'
     runs-on: macos-15
+    environment: production
+    permissions:
+      contents: read
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Install Apple Certificate
-        uses: apple-actions/import-codesign-certs@v3
+        uses: apple-actions/import-codesign-certs@63fff01cd422d4b7b855d40ca1e9d34d2de9427d # v3
         with:
           p12-file-base64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
           p12-password: ${{ secrets.P12_PASSWORD }}
@@ -30,7 +57,7 @@ jobs:
           echo "$PROVISIONING_PROFILE_BASE64" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/Github.mobileprovision
 
       - name: Setup Xcode version
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: latest-stable
 

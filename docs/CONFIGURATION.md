@@ -19,11 +19,11 @@ These are deployment-specific, not secrets. Store them in the Cloudflare dashboa
 
 | Name | Required | Purpose |
 |------|----------|---------|
-| `ENVIRONMENT` | yes | `production`, `preview`, or `local`. |
+| `ENVIRONMENT` | yes | `production`, `preview`, `local`, or `self-hosted`. The Docker host sets `self-hosted` and supplies the Worker's private client-IP header after validating the socket peer. Do not expose a self-hosted Worker without that host boundary. |
 | `SES_REGION` | yes for mail | AWS SES/S3/SNS region, for example `ap-southeast-2`. |
 | `S3_INBOUND_BUCKET` | yes for inbound | Bucket where SES stores raw MIME. |
 | `SNS_INBOUND_TOPIC_ARN` | yes for inbound SNS | Exact SNS topic for SES receipt notifications. |
-| `APP_ORIGIN` | for native passkeys | Dashboard web origin, e.g. `https://app.hidemyemail.dev`. WebAuthn relying-party origin for native clients, which send no `Origin` header. Defaults to `https://app.hidemyemail.dev` if unset. |
+| `APP_ORIGIN` | required for passkeys | Canonical dashboard origin, e.g. `https://app.hidemyemail.dev`. WebAuthn always derives its RP ID and expected origin from this value, never request headers. Production origins must use HTTPS and contain no path, query, fragment, credentials, or trailing slash; HTTP is accepted only for localhost development. Docker deployments must set the externally visible origin explicitly in `docker/.env` to enable passkeys; ordinary authentication and mail continue to work when it is unset. |
 | `APPLE_APP_ID` | for iOS passkeys | Apple App ID `<TeamID>.<bundleId>` (e.g. `ABCDE12345.dev.hidemyemail.app`) published in `/.well-known/apple-app-site-association`. The AASA route 404s until this is set. |
 | `APNS_KEY_ID` | for iOS push | 10-char Key ID of the APNs `.p8` signing key. |
 | `APNS_TEAM_ID` | for iOS push | Apple Developer Team ID. Falls back to the `<TeamID>` prefix of `APPLE_APP_ID` if unset. |

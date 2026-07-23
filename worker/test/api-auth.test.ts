@@ -136,6 +136,11 @@ test("register and login with new passphrase", async () => {
 
   const login = await app.request("/api/login", { method: "POST", body: JSON.stringify({ password: passphrase }), headers: { "Content-Type": "application/json" } }, testEnv);
   expect(login.status).toBe(200);
+
+  const user = await (env.DB as D1Database).prepare(
+    "SELECT passphrase_verifier FROM users WHERE id = ?"
+  ).bind((await reg.clone().json() as { userId: number }).userId).first<{ passphrase_verifier: string | null }>();
+  expect(user?.passphrase_verifier).toMatch(/^v1\$[a-f0-9]{32}\$[a-f0-9]{64}$/);
 });
 
 test("public defaults keep registration disabled until admin enables it", async () => {
@@ -189,6 +194,25 @@ test("native passkey challenge echoes the challenge token; web does not", async 
   }, appEnv);
   expect(web.status).toBe(200);
   expect((await web.json() as any).passkey_token).toBeUndefined();
+});
+
+test("passkey challenge uses the configured custom-domain RP ID", async () => {
+  const res = await createApp().request("/api/passkey/challenge", { method: "POST" }, {
+    ...testEnv,
+    APP_ORIGIN: "https://mail.example.net",
+  });
+  expect(res.status).toBe(200);
+  expect((await res.json() as any).rpId).toBe("mail.example.net");
+});
+
+test("passkey challenge fails with a controlled configuration error when APP_ORIGIN is missing or invalid", async () => {
+  const app = createApp();
+  for (const appOrigin of [undefined, "http://mail.example.net", "not a URL"]) {
+    const requestEnv = { ...testEnv, APP_ORIGIN: appOrigin };
+    const res = await app.request("/api/passkey/challenge", { method: "POST" }, requestEnv);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "Passkey authentication is not configured" });
+  }
 });
 
 test("apple-app-site-association: 404 until APPLE_APP_ID is configured", async () => {

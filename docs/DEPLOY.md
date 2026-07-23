@@ -65,7 +65,10 @@ npx wrangler secret put SNS_ALLOWED_TOPIC_ARN
 
 </details>
 
-Set `SES_REGION`, `S3_INBOUND_BUCKET`, and `SNS_INBOUND_TOPIC_ARN` as normal Cloudflare environment variables.
+Set `SES_REGION`, `S3_INBOUND_BUCKET`, `SNS_INBOUND_TOPIC_ARN`, and the
+canonical dashboard `APP_ORIGIN` as normal Cloudflare environment variables.
+For Docker, set `APP_ORIGIN` in `docker/.env` to the externally visible HTTPS
+origin with no path, query, fragment, credentials, or trailing slash.
 
 `ACTION_SECRET` signs one-click unsubscribe addresses. Use a stable value; rotating it invalidates old unsubscribe links.
 

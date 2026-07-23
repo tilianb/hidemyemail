@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
-import { signPasskeyAuthChallenge, verifyPasskeyAuthChallenge, signPasskeyRegChallenge, verifyPasskeyRegChallenge } from "../src/lib/auth";
+import { env } from "cloudflare:test";
+import { signPasskeyAuthChallenge, updatePasskeySignCount, verifyPasskeyAuthChallenge, signPasskeyRegChallenge, verifyPasskeyRegChallenge } from "../src/lib/auth";
 import { toBase64url, fromBase64url, getRpFromOrigin } from "../src/lib/webauthn";
 
 // ── base64url helpers ──────────────────────────────────────────────────────
@@ -35,15 +36,33 @@ test("getRpFromOrigin handles preview URLs", () => {
   expect(rpID).toBe("hidemyemail-preview.tburg.workers.dev");
 });
 
-test("getRpFromOrigin falls back to a neutral example domain", () => {
-  const { rpID, expectedOrigin } = getRpFromOrigin(null);
-  expect(rpID).toBe("example.com");
-  expect(expectedOrigin).toBe("https://example.com");
+test("getRpFromOrigin requires a configured origin", () => {
+  expect(() => getRpFromOrigin(null)).toThrow();
 });
 
 test("getRpFromOrigin handles localhost", () => {
   const { rpID } = getRpFromOrigin("http://localhost:5173");
   expect(rpID).toBe("localhost");
+});
+
+test("getRpFromOrigin rejects insecure production and non-origin URLs", () => {
+  expect(() => getRpFromOrigin("http://example.com")).toThrow();
+  expect(() => getRpFromOrigin("https://example.com/path")).toThrow();
+});
+
+test("passkey sign counter updates are monotonic when assertions finish out of order", async () => {
+  const db = env.DB as D1Database;
+  await db.prepare("DELETE FROM passkey_credentials WHERE id = ?").bind("counter-test").run();
+  await db.prepare(
+    "INSERT INTO passkey_credentials (id, user_id, public_key, sign_count, created_at) VALUES (?, 1, ?, 0, ?)"
+  ).bind("counter-test", "key", Date.now()).run();
+
+  await updatePasskeySignCount(db, "counter-test", 12);
+  await updatePasskeySignCount(db, "counter-test", 7);
+
+  const row = await db.prepare("SELECT sign_count FROM passkey_credentials WHERE id = ?")
+    .bind("counter-test").first<{ sign_count: number }>();
+  expect(row?.sign_count).toBe(12);
 });
 
 // ── Passkey auth challenge ─────────────────────────────────────────────────

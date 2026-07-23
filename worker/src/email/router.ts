@@ -5,15 +5,18 @@ import { handleAction as defAction } from "./action";
 import { parseReverse } from "../lib/reverse";
 
 interface Deps {
-  handleInbound: (m: ForwardableEmailMessage, env: Env, auth?: ReplyAuth) => Promise<void>;
-  handleReply: (m: ForwardableEmailMessage, env: Env, parsed: ParsedReverse, auth?: ReplyAuth) => Promise<void>;
+  handleInbound: (m: ForwardableEmailMessage, env: Env, auth?: ReplyAuth, delivery?: DeliveryContext) => Promise<void>;
+  handleReply: (m: ForwardableEmailMessage, env: Env, parsed: ParsedReverse, auth?: ReplyAuth, delivery?: DeliveryContext) => Promise<void>;
   handleAction: (m: ForwardableEmailMessage, env: Env, actionType: string, payload: string) => Promise<void>;
 }
+
+export interface DeliveryContext { id: string; token: string }
 
 export async function routeEmail(
   message: ForwardableEmailMessage, env: Env,
   deps: Deps = { handleInbound: defInbound, handleReply: defReply, handleAction: defAction },
   auth?: ReplyAuth,
+  delivery?: DeliveryContext,
 ): Promise<void> {
   const localPart = message.to.slice(0, message.to.lastIndexOf("@"));
   
@@ -28,6 +31,6 @@ export async function routeEmail(
   }
 
   const parsed = parseReverse(localPart);
-  if (parsed) return deps.handleReply(message, env, parsed, auth);
-  return deps.handleInbound(message, env, auth);
+  if (parsed) return deps.handleReply(message, env, parsed, auth, delivery);
+  return deps.handleInbound(message, env, auth, delivery);
 }

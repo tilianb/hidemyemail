@@ -31,6 +31,23 @@ export async function derivePassphraseHash(passphrase: string, globalSaltHex: st
   return await pbkdf2(passphrase, fromHex(globalSaltHex));
 }
 
+export async function createPassphraseVerifier(passphrase: string): Promise<string> {
+  const { saltHex, hashHex } = await hashPassword(passphrase);
+  return `v1$${saltHex}$${hashHex}`;
+}
+
+export async function verifyPassphraseVerifier(passphrase: string, verifier: string): Promise<boolean> {
+  if (!/^v1\$[a-f0-9]{32}\$[a-f0-9]{64}$/.test(verifier)) return false;
+  const [version, saltHex, hashHex] = verifier.split("$");
+  return version === "v1" && !!saltHex && !!hashHex && await verifyPassword(passphrase, saltHex, hashHex);
+}
+
+export async function updatePasskeySignCount(db: D1Database, credentialId: string, newCounter: number): Promise<void> {
+  await db.prepare(
+    "UPDATE passkey_credentials SET sign_count = MAX(sign_count, ?) WHERE id = ?"
+  ).bind(newCounter, credentialId).run();
+}
+
 export async function verifyPassword(password: string, saltHex: string, hashHex: string): Promise<boolean> {
   // No configured credential → no match (fail closed, never throw).
   if (!saltHex || !hashHex) return false;
@@ -140,15 +157,16 @@ const APP_AUTH_CODE_TTL = 120; // seconds
 
 export async function signAppAuthCode(secret: string, userId: number, authVersion: number, challenge: string): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + APP_AUTH_CODE_TTL;
-  const payload = `appauth2.${userId}.${authVersion}.${exp}.${challenge}`;
+  const nonce = toHex(crypto.getRandomValues(new Uint8Array(16)).buffer);
+  const payload = `appauth2.${userId}.${authVersion}.${exp}.${challenge}.${nonce}`;
   return `${payload}.${await hmac(secret, payload)}`;
 }
 
 export async function verifyAppAuthCode(secret: string, code: string): Promise<{ userId: number; authVersion: number; challenge: string } | null> {
   const parts = code.split(".");
-  if (parts.length !== 6 || parts[0] !== "appauth2") return null;
-  const [, userIdStr, authVersionStr, expStr, challenge, sig] = parts;
-  const payload = `appauth2.${userIdStr}.${authVersionStr}.${expStr}.${challenge}`;
+  if (parts.length !== 7 || parts[0] !== "appauth2") return null;
+  const [, userIdStr, authVersionStr, expStr, challenge, nonce, sig] = parts;
+  const payload = `appauth2.${userIdStr}.${authVersionStr}.${expStr}.${challenge}.${nonce}`;
   const expected = await hmac(secret, payload);
   if (!timingSafeEqual(sig!, expected)) return null;
   if (Number(expStr) <= Math.floor(Date.now() / 1000)) return null;

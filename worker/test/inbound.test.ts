@@ -30,6 +30,22 @@ test("clean mail to new alias → SES re-inject with rewritten headers", async (
   expect((await q.getAlias(DB(), "shop@hidemyemail.dev"))?.fwd_count).toBe(1);
 });
 
+test("concurrent inbound forwards atomically reserve the final global quota slot", async () => {
+  await q.autoCreateAlias(DB(), 1, "shop", "shop@hidemyemail.dev");
+  await DB().prepare("UPDATE settings SET value='1' WHERE key='rate_limit_global'").run();
+  const sentinel = { sent: [] as any[] };
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const e = { ...testEnv(sentinel), __sesSend: async (_c: any, m: any) => { sentinel.sent.push(m); await gate; return "mid"; } } as any;
+  const first = handleInbound(mkMessage("alice@store.com", "shop@hidemyemail.dev", RAW), e);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const second = handleInbound(mkMessage("bob@store.com", "shop@hidemyemail.dev", RAW), e);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  release();
+  await Promise.all([first, second]);
+  expect(sentinel.sent).toHaveLength(1);
+});
+
 test("catch-all cannot recreate an alias reserved by another user", async () => {
   await DB().prepare(
     "INSERT INTO identifier_reservations (kind, value, user_id, created_at) VALUES ('alias', 'shop@hidemyemail.dev', 99, 123)"

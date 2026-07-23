@@ -18,7 +18,7 @@ git clone https://github.com/tilianb/hidemyemail.git
 cd hidemyemail/docker
 cp .env.example .env
 ./gen-secrets.sh >> .env       # see below — or generate by hand
-$EDITOR .env                   # paste your AWS SES creds
+$EDITOR .env                   # set APP_ORIGIN and paste your AWS SES creds
 docker compose up -d
 open http://localhost:8787
 ```
@@ -115,21 +115,48 @@ docker compose restart app
 
 ## TLS / reverse proxy
 
-The container speaks plain HTTP on `:8787`. Do not expose it directly to the internet. Put a reverse proxy in front for TLS.
+The container speaks plain HTTP on `:8787`, published to `127.0.0.1` by
+default. Do not change that binding to a public address. Put a reverse proxy
+on the same host in front for TLS.
+
+Set `APP_ORIGIN` in `.env` to the canonical public dashboard origin seen by
+users, for example `https://mail.example.com`. It is required for passkey
+origin/RP validation and must be HTTPS in production, with no path, query,
+fragment, credentials, or trailing slash. Use `http://localhost:8787` only for
+local development without TLS. If omitted, the container still serves mail and
+ordinary authentication, but passkey routes return a configuration error.
+
+The container ignores all caller-supplied forwarding headers. For correct
+rate-limit client addresses behind a proxy, set `TRUSTED_PROXY_IPS` to the
+proxy's **exact socket peer IP** and make the proxy overwrite (never append or
+pass through) `X-HideMyEmail-Client-IP`. Do not trust an entire subnet. Leave
+`TRUSTED_PROXY_IPS` unset when accessing the loopback publication directly.
 
 **Caddy** (one-liner, auto-renews Let's Encrypt):
 
 ```caddyfile
 hidemyemail.example.com {
-    reverse_proxy localhost:8787
+    reverse_proxy localhost:8787 {
+        header_up X-HideMyEmail-Client-IP {remote_host}
+    }
 }
 ```
+
+For that same-host Caddy example, set `TRUSTED_PROXY_IPS=127.0.0.1,::1`. If
+Caddy reaches the published port through a VM or container bridge, use the
+single peer address seen by the app instead. Requests from a trusted peer that
+omit the header, contain an invalid address, or append multiple addresses are
+rejected.
 
 **Cloudflare Tunnel** (no inbound port needed):
 
 ```bash
 cloudflared tunnel --url http://localhost:8787
 ```
+
+Configure the tunnel to overwrite `X-HideMyEmail-Client-IP` with the original
+client address and trust only cloudflared's socket peer. Do not forward an
+incoming value of this private header.
 
 Then point your SNS HTTPS subscription at `https://hidemyemail.example.com/api/ses/inbound`.
 
@@ -162,7 +189,9 @@ docker compose up -d
 ## Migrations
 
 `server.mjs` applies every `worker/migrations/*.sql` on boot, tracked in a
-`d1_migrations` table inside the SQLite file. Idempotent — restart is safe.
+`d1_migrations` table inside the SQLite file before accepting HTTP traffic.
+Each migration and its tracking row are atomic, so a failed migration rolls
+back and is retried on the next start.
 
 When you upgrade the image, new migrations run automatically.
 
