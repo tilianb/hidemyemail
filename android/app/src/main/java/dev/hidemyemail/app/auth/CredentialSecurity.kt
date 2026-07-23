@@ -10,7 +10,7 @@ data class ServerOrigin(val value: String) {
             val host = uri.host?.lowercase()
             require(host != null && uri.userInfo == null && uri.query == null && uri.fragment == null)
             require(uri.path.isNullOrEmpty() || uri.path == "/")
-            val local = host == "localhost" || host == "127.0.0.1" || host == "::1"
+            val local = host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]"
             require(scheme == "https" || (scheme == "http" && local))
             val port = when {
                 uri.port == -1 || scheme == "https" && uri.port == 443 || scheme == "http" && uri.port == 80 -> ""

@@ -17,6 +17,7 @@ class CredentialSecurityTest {
         assertThrows(IllegalArgumentException::class.java) { ServerOrigin.parse("http://example.com") }
         assertThrows(IllegalArgumentException::class.java) { ServerOrigin.parse("https://example.com/path") }
         assertEquals("http://localhost:8787", ServerOrigin.parse("http://localhost:8787").value)
+        assertEquals("http://[::1]:8787", ServerOrigin.parse("http://[::1]:8787").value)
     }
 
     @Test fun callbackRequiresExactContract() {
