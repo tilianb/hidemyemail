@@ -4,6 +4,7 @@ import { createApp } from "../src/api/app";
 import { resetDb } from "./helpers";
 import * as q from "../src/db/queries";
 import { makeSignedSnsBody } from "./sns-signature";
+import { fetchS3Object } from "../src/lib/s3";
 
 const INBOUND_ARN = "arn:aws:sns:ap-southeast-2:123456789012:hidemyemail-inbound-notifications";
 const RAW_EMAIL = [
@@ -169,6 +170,29 @@ test("terminal oversized S3 object is completed and immediately acknowledged", a
   const request = () => createApp().request("/api/ses/inbound", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(signed.body) }, { ...e, __snsCertFetch: async () => new Response(signed.certPem) });
   expect((await request()).status).toBe(200);
   expect((await request()).status).toBe(200);
+});
+
+test("oversized S3 error response stays retryable and a valid retry is processed", async () => {
+  const messageId = "oversized-s3-error";
+  const deliveryId = `ses:${messageId}`;
+  const signed = await snsNotification("shop@test.hidemyemail.dev", messageId);
+  let s3Response = () => new Response("x".repeat(4097), { status: 503 });
+  const e = {
+    ...testEnv(),
+    __s3Fetch: (creds: any, bucket: string, key: string, _fetch: undefined, maxBytes: number) =>
+      fetchS3Object(creds, bucket, key, async () => s3Response(), maxBytes),
+  } as any;
+  const request = () => createApp().request("/api/ses/inbound", {
+    method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(signed.body),
+  }, { ...e, __snsCertFetch: async () => new Response(signed.certPem) });
+
+  expect((await request()).status).toBe(500);
+  expect(await (env.DB as D1Database).prepare("SELECT state FROM mail_deliveries WHERE external_id=?").bind(deliveryId).first()).toBeNull();
+
+  s3Response = () => new Response(RAW_EMAIL);
+  expect((await request()).status).toBe(200);
+  expect(e._sesSent).toHaveLength(1);
+  expect((await (env.DB as D1Database).prepare("SELECT state FROM mail_deliveries WHERE external_id=?").bind(deliveryId).first<{ state: string }>())?.state).toBe("completed");
 });
 
 test("oversized public SNS body is rejected before certificate fetch", async () => {

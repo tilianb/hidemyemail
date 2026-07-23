@@ -1,6 +1,6 @@
 import { AwsClient } from "aws4fetch";
 import type { SesCreds } from "./ses";
-import { streamToBytes } from "./bytes";
+import { BodyTooLargeError, streamToBytes } from "./bytes";
 
 /**
  * Fetch a raw S3 object using SigV4.
@@ -25,7 +25,13 @@ export async function fetchS3Object(
   const doFetch = fetchImpl ?? fetch;
   const res = await doFetch(signed);
   if (!res.ok) {
-    const text = new TextDecoder().decode(await streamToBytes(res.body!, 4096)).slice(0, 4096);
+    let text: string;
+    try {
+      text = new TextDecoder().decode(await streamToBytes(res.body!, 4096));
+    } catch (error) {
+      if (!(error instanceof BodyTooLargeError)) throw error;
+      text = "response body exceeded 4096 bytes";
+    }
     throw new Error(`S3 ${res.status}: ${text}`);
   }
   if (!res.body) return new Uint8Array();
