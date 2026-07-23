@@ -11,10 +11,11 @@ import { getNumericSetting, getBoolSetting, getEnvWithOverride, getSetting, getM
 import { decryptDestination, hashDestination } from "../lib/crypto";
 import { extractDisplayName, sanitizeDisplay as sanitize, buildForwardedFromDisplay } from "../lib/from-format";
 import { pushBlocked, pushForward } from "../lib/push";
+import type { DeliveryContext } from "./router";
 
 type SesSend = typeof sendRaw;
 
-export async function handleInbound(message: ForwardableEmailMessage, env: Env, auth?: ReplyAuth): Promise<void> {
+export async function handleInbound(message: ForwardableEmailMessage, env: Env, auth?: ReplyAuth, delivery?: DeliveryContext): Promise<void> {
   const db = env.DB;
   const ses: SesSend = (env as any).__sesSend ?? sendRaw;
   const now = Date.now();
@@ -119,13 +120,6 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env, 
   // Read rate limits from DB settings (falls back to hardcoded defaults)
   const rateLimitAlias = await getNumericSetting(db, "rate_limit_per_alias");
   const rateLimitGlobal = await getNumericSetting(db, "rate_limit_global");
-  const aliasCount = await q.countEventsByTypeSince(db, alias.id, now - 3600_000, ["forward", "reply"]);
-  const globalCount = await q.countEventsByTypeSince(db, null, now - 3600_000, ["forward", "reply"]);
-  if ((rateLimitAlias >= 0 && aliasCount >= rateLimitAlias) || (rateLimitGlobal >= 0 && globalCount >= rateLimitGlobal)) {
-    await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "rate", ts: now });
-    return;
-  }
-
   const maxInboundBytes = await getNumericSetting(db, "max_inbound_bytes");
   if (message.rawSize > maxInboundBytes) {
     await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "too_large", ts: now });
@@ -161,6 +155,21 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env, 
     }
   }
 
+  // Reserve before either SES path. The atomic predicate includes completed
+  // forward/reply events and every active forward/reply reservation.
+  const reservationId = delivery?.id ?? crypto.randomUUID();
+  const reservationToken = crypto.randomUUID();
+  const reservation = await q.reserveMailQuota(db, {
+    id: reservationId, token: reservationToken, kind: "forward", aliasId: alias.id,
+    recipient: message.from, now, aliasCap: rateLimitAlias, globalCap: rateLimitGlobal, distinctCap: -1,
+    deliveryToken: delivery?.token,
+  });
+  if (reservation === "cap") {
+    await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: message.from, detail: "rate", ts: now });
+    return;
+  }
+  if (reservation === "sending") throw new Error("Mail send in flight");
+
   const reverseAddr = reverseAddress(localPart, message.from, domainName);
   // Suppress inline actions when alias is in over-quota grace: replies are
   // already blocked, mute is meaningless, disable defeats the recovery window.
@@ -186,7 +195,7 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env, 
     }
   }
 
-  const rawBytes = await streamToBytes(message.raw);
+  const rawBytes = await streamToBytes(message.raw, maxInboundBytes);
   if (alias.source !== "auto_over_quota" && !inlineActionsEnabled) {
     let mime = parseMime(rawBytes);
     const origFrom = getHeader(mime, "From") ?? message.from;
@@ -233,23 +242,31 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env, 
     }
 
     const rawBase64 = toBase64(serializeMime(mime));
+    let sesAccepted = reservation === "accepted";
     try {
       const sesAccessKeyId = await getEnvWithOverride(db, env, "ses_access_key_id");
       const sesSecretAccessKey = await getEnvWithOverride(db, env, "ses_secret_access_key");
       const sesRegion = await getEnvWithOverride(db, env, "ses_region");
-      await ses(
-        { accessKeyId: sesAccessKeyId, secretAccessKey: sesSecretAccessKey, region: sesRegion },
-        { from: fromHeader, to: dest, rawBase64 }
-      );
+      if (reservation !== "accepted") {
+        if (delivery && !(await q.renewDelivery(db, delivery.id, delivery.token, Date.now()))) throw new Error("Delivery lease lost");
+        if (!(await q.startMailSend(db, reservationId, reservationToken, Date.now()))) throw new Error("Reservation ownership lost");
+        await ses(
+          { accessKeyId: sesAccessKeyId, secretAccessKey: sesSecretAccessKey, region: sesRegion },
+          { from: fromHeader, to: dest, rawBase64 }
+        );
+        sesAccepted = true;
+        if (!(await q.markMailQuotaAccepted(db, reservationId, reservationToken))) throw new Error("Reservation ownership lost");
+      }
     } catch (err) {
       await q.insertEvent(db, { alias_id: alias.id, type: "error", external_sender: message.from, detail: String(err), ts: now });
+      if (err instanceof Error && (err.message === "Delivery lease lost" || err.message === "Reservation ownership lost")) throw err;
       if (err instanceof SesTransientError) throw err;
+      if (!sesAccepted) await q.releaseMailQuota(db, reservationId, reservationToken);
       return;
     }
 
-    await q.insertEvent(db, { alias_id: alias.id, type: "forward", external_sender: message.from, subject: getHeader(mime, "Subject"), bytes: message.rawSize, ts: now });
-    await q.recordContact(db, alias.id, message.from, now);
-    await q.incCounter(db, alias.id, "fwd_count");
+    if (!(await q.finishMailBookkeeping(db, { id: reservationId, token: reservationToken, aliasId: alias.id, kind: "forward", sender: message.from, subject: getHeader(mime, "Subject"), bytes: message.rawSize, now, deliveryToken: delivery?.token }))) throw new Error("Reservation ownership lost");
+    // Push is noncritical and internally catches provider failures.
     await pushForward(env, alias.user_id, alias.full_address, message.from, getHeader(mime, "Subject"));
     return;
   }
@@ -407,23 +424,31 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env, 
 
   const rawBase64 = toBase64(new TextEncoder().encode(msg.asRaw()));
 
+  let sesAccepted = reservation === "accepted";
   try {
     const sesAccessKeyId = await getEnvWithOverride(db, env, "ses_access_key_id");
     const sesSecretAccessKey = await getEnvWithOverride(db, env, "ses_secret_access_key");
     const sesRegion = await getEnvWithOverride(db, env, "ses_region");
-    await ses(
-      { accessKeyId: sesAccessKeyId, secretAccessKey: sesSecretAccessKey, region: sesRegion },
-      { from: fromHeader, to: dest, rawBase64 }
-    );
+    if (reservation !== "accepted") {
+      if (delivery && !(await q.renewDelivery(db, delivery.id, delivery.token, Date.now()))) throw new Error("Delivery lease lost");
+      if (!(await q.startMailSend(db, reservationId, reservationToken, Date.now()))) throw new Error("Reservation ownership lost");
+      await ses(
+        { accessKeyId: sesAccessKeyId, secretAccessKey: sesSecretAccessKey, region: sesRegion },
+        { from: fromHeader, to: dest, rawBase64 }
+      );
+      sesAccepted = true;
+      if (!(await q.markMailQuotaAccepted(db, reservationId, reservationToken))) throw new Error("Reservation ownership lost");
+    }
   } catch (err) {
     await q.insertEvent(db, { alias_id: alias.id, type: "error", external_sender: message.from, detail: String(err), ts: now });
+    if (err instanceof Error && (err.message === "Delivery lease lost" || err.message === "Reservation ownership lost")) throw err;
     if (err instanceof SesTransientError) throw err; // tempfail → sender retries
+    if (!sesAccepted) await q.releaseMailQuota(db, reservationId, reservationToken);
     return;
   }
 
-  await q.insertEvent(db, { alias_id: alias.id, type: "forward", external_sender: message.from, subject: parsedEmail.subject, bytes: message.rawSize, ts: now });
-  await q.recordContact(db, alias.id, message.from, now);
-  await q.incCounter(db, alias.id, "fwd_count");
+  if (!(await q.finishMailBookkeeping(db, { id: reservationId, token: reservationToken, aliasId: alias.id, kind: "forward", sender: message.from, subject: parsedEmail.subject, bytes: message.rawSize, now, deliveryToken: delivery?.token }))) throw new Error("Reservation ownership lost");
+  // Push is noncritical and internally catches provider failures.
   await pushForward(env, alias.user_id, alias.full_address, message.from, parsedEmail.subject);
 }
 
@@ -462,15 +487,6 @@ function splitAddress(addr: string): [string, string] {
   return [addr.slice(0, at).toLowerCase(), addr.slice(at + 1).toLowerCase()];
 }
 
-/**
- * unsubscribe_header_mode decides whether a forward gets our List-Unsubscribe
- * (which one-click-disables the alias):
- *  - "always":    every forward (pre-v1 behavior).
- *  - "bulk_only": only when the original already looked like bulk mail —
- *                 it carried List-Unsubscribe or Precedence: bulk/list.
- *                 Person-to-person forwards stay free of bulk-mail markers.
- *  - "never":     never; the original List-Unsubscribe (if any) is kept.
- */
 async function shouldAddUnsubscribe(
   db: D1Database,
   origListUnsubscribe: string | undefined,

@@ -18,6 +18,12 @@ Apply migrations:
 npx wrangler d1 migrations apply DB --remote
 ```
 
+Back up D1 before an upgrade and apply every pending migration before deploying
+the matching Worker. Do not run mixed old/new Worker versions during the
+migration. Migrations `0030` through `0033` add auth-artifact replay protection,
+durable mail delivery claims, atomic quota reservations, and the in-flight SES
+send fence.
+
 ## 2. Generate and set secrets
 
 One command does the whole pass — generates the random secrets, hashes your
@@ -60,12 +66,18 @@ npx wrangler secret put ACTION_SECRET
 npx wrangler secret put DESTINATION_ENCRYPTION_KEY
 npx wrangler secret put SES_ACCESS_KEY_ID
 npx wrangler secret put SES_SECRET_ACCESS_KEY
-npx wrangler secret put SNS_ALLOWED_TOPIC_ARN
 ```
 
 </details>
 
-Set `SES_REGION`, `S3_INBOUND_BUCKET`, and `SNS_INBOUND_TOPIC_ARN` as normal Cloudflare environment variables.
+Set `SES_REGION`, `S3_INBOUND_BUCKET`, `SNS_INBOUND_TOPIC_ARN`,
+`SNS_ALLOWED_TOPIC_ARN`, and the canonical dashboard `APP_ORIGIN` as normal
+Cloudflare environment variables. Both topic ARNs must exactly match their SNS
+topics; they are deployment identifiers, not secrets. Do not set
+`SNS_SECRET`: AWS signature verification and exact TopicArn authorization
+replace shared-secret webhook authentication.
+For Docker, set `APP_ORIGIN` in `docker/.env` to the externally visible HTTPS
+origin with no path, query, fragment, credentials, or trailing slash.
 
 `ACTION_SECRET` signs one-click unsubscribe addresses. Use a stable value; rotating it invalidates old unsubscribe links.
 
@@ -111,7 +123,10 @@ Example policy shape:
 7. Subscribe SNS inbound topic to:
    `https://YOUR-WORKER-HOST/api/ses/inbound`
 
-The inbound endpoint verifies SNS signatures, checks `SNS_INBOUND_TOPIC_ARN`, fetches the raw MIME from S3, then routes the message.
+The inbound endpoint verifies the AWS SNS signature and certificate before it
+checks `SNS_INBOUND_TOPIC_ARN`. It streams raw MIME from S3 under
+`max_inbound_bytes`; oversize messages are acknowledged without forwarding,
+while transient S3 or processing failures return 5xx so SNS retries.
 
 ## 5. Configure SES outbound notifications
 
@@ -120,6 +135,9 @@ The inbound endpoint verifies SNS signatures, checks `SNS_INBOUND_TOPIC_ARN`, fe
 3. Subscribe the topic to:
    `https://YOUR-WORKER-HOST/api/ses/notification`
 4. Set `SNS_ALLOWED_TOPIC_ARN` to this outbound topic ARN.
+
+The notification endpoint verifies the AWS SNS signature and certificate
+before requiring this exact TopicArn.
 
 ## 6. Configure DNS for each domain
 
@@ -209,6 +227,13 @@ Public registration starts disabled. Enable it in Admin if other users should re
 - Confirm the external sender sees the alias as the sender and your real inbox address is absent from headers.
 - Check `npx wrangler tail` for SNS signature, S3, or SES errors.
 - Use mail-tester.com or equivalent to verify SPF, DKIM, and DMARC.
+- Redeliver an SNS notification and confirm the completed delivery is
+  acknowledged without a second forward, reply, bounce, or complaint effect.
+
+SNS transport IDs and SES message IDs make redelivery and republishing
+idempotent. A concurrent duplicate receives 503 and retries. SES timeout or
+network ambiguity is fenced for five minutes; a process crash after SES accepts
+mail but before acceptance is recorded can still produce one delayed duplicate.
 
 ## Troubleshooting
 

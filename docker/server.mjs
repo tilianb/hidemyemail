@@ -5,15 +5,18 @@
 // secrets come from process.env so they can be supplied via docker-compose,
 // `--env-file`, or your secrets manager of choice.
 
-import { readdir, readFile, mkdir } from "node:fs/promises";
+import { readFile, mkdir } from "node:fs/promises";
+import { createServer } from "node:http";
 import path from "node:path";
 import process from "node:process";
 import { Miniflare } from "miniflare";
+import { trustedProxySet, workerHeaders } from "./client-ip.mjs";
+import { applyMigrations } from "./migrations.mjs";
 
 const env = process.env;
 
 // ─── Required config ────────────────────────────────────────────────────────
-const REQUIRED_SECRETS = [
+const REQUIRED_CONFIG = [
   "SESSION_SECRET",
   "AUTH_PASSWORD_HASH",
   "AUTH_PASSWORD_SALT",
@@ -21,7 +24,7 @@ const REQUIRED_SECRETS = [
   "SES_ACCESS_KEY_ID",
   "SES_SECRET_ACCESS_KEY",
 ];
-const missing = REQUIRED_SECRETS.filter((k) => !env[k]);
+const missing = REQUIRED_CONFIG.filter((k) => !env[k]);
 if (missing.length) {
   console.error(`[hidemyemail] Missing required env vars: ${missing.join(", ")}`);
   console.error(`[hidemyemail] See docker/.env.example for the full list.`);
@@ -34,6 +37,7 @@ const WORKER_SCRIPT = env.WORKER_SCRIPT ?? "/app/worker-dist/index.js";
 const MIGRATIONS_DIR = env.MIGRATIONS_DIR ?? "/app/migrations";
 const PORT = Number(env.PORT ?? 8787);
 const HOST = env.HOST ?? "0.0.0.0";
+const TRUSTED_PROXIES = trustedProxySet(env.TRUSTED_PROXY_IPS);
 
 const D1_PERSIST_DIR = path.join(DATA_DIR, "d1");
 await mkdir(D1_PERSIST_DIR, { recursive: true });
@@ -63,9 +67,6 @@ const mf = new Miniflare({
   compatibilityDate: env.COMPATIBILITY_DATE ?? "2026-05-01",
   compatibilityFlags: ["nodejs_compat"],
 
-  host: HOST,
-  port: PORT,
-
   // D1 — file-backed SQLite under DATA_DIR/d1
   d1Databases: { DB: "hidemyemail-db" },
   d1Persist: D1_PERSIST_DIR,
@@ -89,6 +90,7 @@ const mf = new Miniflare({
   // Plain vars (non-secret, mirror wrangler.jsonc top-level vars block)
   bindings: {
     ENVIRONMENT: env.ENVIRONMENT ?? "self-hosted",
+    APP_ORIGIN: env.APP_ORIGIN ?? "",
     SES_REGION: env.SES_REGION ?? "ap-southeast-2",
     S3_INBOUND_BUCKET: env.S3_INBOUND_BUCKET ?? "hidemyemail-inbound-raw",
     SNS_INBOUND_TOPIC_ARN: env.SNS_INBOUND_TOPIC_ARN ?? "",
@@ -114,7 +116,6 @@ const mf = new Miniflare({
     AUTH_PASSWORD_HASH: env.AUTH_PASSWORD_HASH,
     AUTH_PASSWORD_SALT: env.AUTH_PASSWORD_SALT,
     DESTINATION_ENCRYPTION_KEY: env.DESTINATION_ENCRYPTION_KEY,
-    SNS_SECRET: env.SNS_SECRET ?? "",
     ACTION_SECRET: env.ACTION_SECRET ?? "",
     APNS_AUTH_KEY: env.APNS_AUTH_KEY ?? "",
     FCM_SERVICE_ACCOUNT: env.FCM_SERVICE_ACCOUNT ?? "",
@@ -123,11 +124,42 @@ const mf = new Miniflare({
 
 await mf.ready;
 
-// ─── Migrations ─────────────────────────────────────────────────────────────
-// Apply on every boot. Each migration is idempotent SQL; D1 stores no
-// migration state of its own here, so we wrap in CREATE-IF-NOT-EXISTS via a
-// hand-rolled tracking table that mirrors wrangler's d1_migrations table.
-await applyMigrations();
+// Apply all pending migrations before accepting traffic. Each migration's SQL
+// and tracking row run in one D1 batch, so a failed migration can be retried.
+const db = await mf.getD1Database("DB");
+await applyMigrations(db, MIGRATIONS_DIR);
+
+// Terminate HTTP outside workerd so the socket peer is authoritative. Caller
+// forwarding headers are stripped before every request enters the Worker.
+const server = createServer(async (request, response) => {
+  try {
+    const headers = workerHeaders(
+      new Headers(request.headers),
+      request.socket.remoteAddress,
+      TRUSTED_PROXIES,
+    );
+    const origin = `http://${request.headers.host ?? `localhost:${PORT}`}`;
+    const body = request.method === "GET" || request.method === "HEAD" ? undefined : request;
+    const workerResponse = await mf.dispatchFetch(new URL(request.url ?? "/", origin), {
+      method: request.method,
+      headers,
+      body,
+      duplex: body ? "half" : undefined,
+    });
+    const responseHeaders = Object.fromEntries(workerResponse.headers);
+    const cookies = workerResponse.headers.getSetCookie();
+    if (cookies.length) responseHeaders["set-cookie"] = cookies;
+    response.writeHead(workerResponse.status, responseHeaders);
+    response.end(Buffer.from(await workerResponse.arrayBuffer()));
+  } catch (err) {
+    console.error("[hidemyemail] request rejected", err);
+    response.writeHead(400).end("Bad Request");
+  }
+});
+await new Promise((resolve, reject) => {
+  server.once("error", reject);
+  server.listen(PORT, HOST, resolve);
+});
 
 // ─── Scheduled purge ────────────────────────────────────────────────────────
 // Invoke the worker's scheduled handler on an interval so the same
@@ -157,6 +189,7 @@ console.log(`[hidemyemail] Static assets from ${ASSETS_DIR}`);
 const shutdown = async (signal) => {
   console.log(`[hidemyemail] Received ${signal}, shutting down…`);
   try {
+    await new Promise((resolve) => server.close(resolve));
     await mf.dispose();
   } finally {
     process.exit(0);
@@ -164,63 +197,3 @@ const shutdown = async (signal) => {
 };
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-async function applyMigrations() {
-  const db = await mf.getD1Database("DB");
-  await db.exec(
-    "CREATE TABLE IF NOT EXISTS d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
-  );
-  const applied = new Set(
-    (await db.prepare("SELECT name FROM d1_migrations").all()).results.map(
-      (r) => r.name
-    )
-  );
-
-  const files = (await readdir(MIGRATIONS_DIR))
-    .filter((f) => f.endsWith(".sql"))
-    .sort();
-
-  for (const file of files) {
-    if (applied.has(file)) continue;
-    const sql = await readFile(path.join(MIGRATIONS_DIR, file), "utf8");
-    console.log(`[hidemyemail] Applying migration ${file}`);
-
-    // D1's exec() runs statements separated by newlines; our migrations use
-    // semicolons. Split conservatively: respect string literals so the SPF/DMARC
-    // INSERTs (which may contain ";") aren't mangled. The migrations in this
-    // repo are simple DDL so a naive split is safe today, but keep this guard
-    // so future contributors don't get bitten.
-    const statements = splitSqlStatements(sql);
-    for (const stmt of statements) {
-      const trimmed = stmt.trim();
-      if (!trimmed) continue;
-      await db.prepare(trimmed).run();
-    }
-
-    await db
-      .prepare("INSERT INTO d1_migrations (name) VALUES (?)")
-      .bind(file)
-      .run();
-  }
-}
-
-function splitSqlStatements(sql) {
-  const out = [];
-  let buf = "";
-  let inSingle = false;
-  let inDouble = false;
-  for (let i = 0; i < sql.length; i++) {
-    const ch = sql[i];
-    if (ch === "'" && !inDouble) inSingle = !inSingle;
-    else if (ch === '"' && !inSingle) inDouble = !inDouble;
-    if (ch === ";" && !inSingle && !inDouble) {
-      out.push(buf);
-      buf = "";
-    } else {
-      buf += ch;
-    }
-  }
-  if (buf.trim()) out.push(buf);
-  return out;
-}

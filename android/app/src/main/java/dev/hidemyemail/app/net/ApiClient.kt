@@ -52,6 +52,12 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
     private val json = Json { ignoreUnknownKeys = true }
     private val jsonMedia = "application/json".toMediaType()
 
+    fun invalidate() {
+        token = null
+        freshAuth = null
+        http.dispatcher.cancelAll()
+    }
+
     // MARK: Auth
 
     /** Returns the raw login response so the caller can branch on MFA. */

@@ -1,10 +1,27 @@
 import { expect, test } from "vitest";
-import { hashPassword, verifyPassword, signFreshAuth, signSession, verifyFreshAuth, verifySession } from "../src/lib/auth";
+import { createPassphraseVerifier, hashPassword, verifyPassphraseVerifier, verifyPassword, signFreshAuth, signSession, verifyFreshAuth, verifySession } from "../src/lib/auth";
 
 test("password hash + verify", async () => {
   const { saltHex, hashHex } = await hashPassword("hunter2");
   expect(await verifyPassword("hunter2", saltHex, hashHex)).toBe(true);
   expect(await verifyPassword("wrong", saltHex, hashHex)).toBe(false);
+});
+
+test("passphrase verifier accepts only the exact lowercase v1 format", async () => {
+  const verifier = await createPassphraseVerifier("correct horse");
+  expect(await verifyPassphraseVerifier("correct horse", verifier)).toBe(true);
+
+  const malformed = [
+    verifier.toUpperCase(),
+    `${verifier}$extra`,
+    verifier.replace(/^v1/, "v2"),
+    verifier.replace(/\$[a-f0-9]{32}\$/, "$abc$"),
+    verifier.replace(/[a-f0-9]$/, "g"),
+    "v1$$",
+  ];
+  for (const value of malformed) {
+    expect(await verifyPassphraseVerifier("correct horse", value)).toBe(false);
+  }
 });
 
 test("session sign/verify round-trip and expiry", async () => {

@@ -1,7 +1,8 @@
 /**
  * Web-session → native-app login handoff (PKCE-style):
  *   app opens /app-auth?challenge=SHA256(verifier)
- *   → dashboard (session-authed) POSTs /api/app-auth/code { challenge }
+ *   → dashboard submits a top-level POST to /api/app-auth/authorize
+ *   → Worker redirects directly to hidemyemail://auth?code=...
  *   → app POSTs /api/app-auth/exchange { code, verifier } → bearer token.
  */
 
@@ -22,7 +23,7 @@ beforeEach(async () => {
 
 const VERIFIER = "test-verifier-test-verifier-test-verifier-12";
 
-// Returns BOTH login cookies (session + fresh-auth): /app-auth/code is
+// Returns BOTH login cookies (session + fresh-auth): /app-auth/authorize is
 // fresh-auth gated, so the dashboard sends the full cookie jar.
 async function loginCookie(app: ReturnType<typeof createApp>): Promise<string> {
   const ok = await app.request("/api/login", {
@@ -37,18 +38,30 @@ async function loginCookie(app: ReturnType<typeof createApp>): Promise<string> {
   return [...header.matchAll(/__Host-[\w-]+=[^;,]+/g)].map((m) => m[0]).join("; ");
 }
 
-test("full handoff: code from web session, exchange yields a working bearer token", async () => {
+async function authorize(app: ReturnType<typeof createApp>, cookie: string, challenge: string) {
+  return app.request("/api/app-auth/authorize", {
+    method: "POST",
+    headers: { cookie, "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ challenge }),
+  }, testEnv);
+}
+
+function codeFromRedirect(response: Response): string {
+  const location = response.headers.get("location");
+  expect(location).toMatch(/^hidemyemail:\/\/auth\?code=/);
+  return new URL(location!).searchParams.get("code")!;
+}
+
+test("authorization redirects to the fixed app callback without exposing code in a body", async () => {
   const app = createApp();
   const cookie = await loginCookie(app);
   const challenge = await sha256Base64url(VERIFIER);
 
-  const codeRes = await app.request("/api/app-auth/code", {
-    method: "POST",
-    headers: { cookie, "Content-Type": "application/json" },
-    body: JSON.stringify({ challenge }),
-  }, testEnv);
-  expect(codeRes.status).toBe(200);
-  const { code } = await codeRes.json() as { code: string };
+  const codeRes = await authorize(app, cookie, challenge);
+  expect(codeRes.status).toBe(303);
+  expect(codeRes.headers.get("content-type") ?? "").not.toContain("application/json");
+  expect(await codeRes.text()).toBe("");
+  const code = codeFromRedirect(codeRes);
   expect(code.startsWith("appauth2.")).toBe(true);
 
   const exchange = await app.request("/api/app-auth/exchange", {
@@ -68,17 +81,42 @@ test("full handoff: code from web session, exchange yields a working bearer toke
   expect(authed.status).toBe(200);
 });
 
+test("GET and the old JSON code API are not available", async () => {
+  const app = createApp();
+  const cookie = await loginCookie(app);
+  const challenge = await sha256Base64url(VERIFIER);
+
+  const get = await app.request(`/api/app-auth/authorize?challenge=${challenge}`, { headers: { cookie } }, testEnv);
+  expect(get.status).toBe(404);
+
+  const oldApi = await app.request("/api/app-auth/code", {
+    method: "POST",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ challenge }),
+  }, testEnv);
+  expect(oldApi.status).toBe(404);
+});
+
+test("handoff code can be exchanged only once", async () => {
+  const app = createApp();
+  const cookie = await loginCookie(app);
+  const challenge = await sha256Base64url(VERIFIER);
+  const code = codeFromRedirect(await authorize(app, cookie, challenge));
+  const exchange = () => app.request("/api/app-auth/exchange", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code, verifier: VERIFIER }),
+  }, testEnv);
+
+  const responses = await Promise.all([exchange(), exchange()]);
+  expect(responses.map((response) => response.status).sort()).toEqual([200, 401]);
+});
+
 test("exchange rejects a handoff code minted before auth version advances", async () => {
   const app = createApp();
   await (env.DB as D1Database).prepare("UPDATE users SET auth_version = 0 WHERE id = 1").run();
   const cookie = await loginCookie(app);
   const challenge = await sha256Base64url(VERIFIER);
-  const codeRes = await app.request("/api/app-auth/code", {
-    method: "POST",
-    headers: { cookie, "Content-Type": "application/json" },
-    body: JSON.stringify({ challenge }),
-  }, testEnv);
-  const { code } = await codeRes.json() as { code: string };
+  const code = codeFromRedirect(await authorize(app, cookie, challenge));
 
   await (env.DB as D1Database).prepare("UPDATE users SET auth_version = auth_version + 1 WHERE id = 1").run();
   const exchange = await app.request("/api/app-auth/exchange", {
@@ -95,24 +133,27 @@ test("exchange rejects a handoff code minted before auth version advances", asyn
 
 test("code requires a session", async () => {
   const app = createApp();
-  const res = await app.request("/api/app-auth/code", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ challenge: await sha256Base64url(VERIFIER) }),
-  }, testEnv);
+  const res = await authorize(app, "", await sha256Base64url(VERIFIER));
   expect(res.status).toBe(401);
 });
 
-test("code requires fresh auth, not just a session", async () => {
+test("session-only authorization reauthenticates without losing the challenge, then fresh authorization reaches the app", async () => {
   const app = createApp();
-  const sessionOnly = (await loginCookie(app)).split("; ").find((c) => c.startsWith("__Host-session="))!;
-  const res = await app.request("/api/app-auth/code", {
-    method: "POST",
-    headers: { cookie: sessionOnly, "Content-Type": "application/json" },
-    body: JSON.stringify({ challenge: await sha256Base64url(VERIFIER) }),
-  }, testEnv);
-  expect(res.status).toBe(401);
-  expect(((await res.json()) as any).error).toBe("Fresh authentication required");
+  const cookie = await loginCookie(app);
+  const sessionOnly = cookie.split("; ").find((c) => c.startsWith("__Host-session="))!;
+  const challenge = await sha256Base64url(VERIFIER);
+
+  const reauth = await authorize(app, sessionOnly, challenge);
+  expect(reauth.status).toBe(303);
+  expect(reauth.headers.get("location")).toBe(`/app-auth?challenge=${encodeURIComponent(challenge)}`);
+  const clearedCookies = reauth.headers.get("set-cookie") ?? "";
+  expect(clearedCookies).toContain("__Host-session=;");
+  expect(clearedCookies).toContain("__Host-fresh-auth=;");
+  expect(clearedCookies).not.toContain("code=");
+
+  const authorized = await authorize(app, cookie, challenge);
+  expect(authorized.status).toBe(303);
+  codeFromRedirect(authorized);
 });
 
 test("exchange refuses browser requests (Origin present)", async () => {
@@ -120,12 +161,7 @@ test("exchange refuses browser requests (Origin present)", async () => {
   const cookie = await loginCookie(app);
   const challenge = await sha256Base64url(VERIFIER);
 
-  const codeRes = await app.request("/api/app-auth/code", {
-    method: "POST",
-    headers: { cookie, "Content-Type": "application/json" },
-    body: JSON.stringify({ challenge }),
-  }, testEnv);
-  const { code } = await codeRes.json() as { code: string };
+  const code = codeFromRedirect(await authorize(app, cookie, challenge));
 
   // Same-origin JS holds code + verifier, but the browser pins Origin onto
   // the POST — the exchange must refuse to convert it into a bearer token.
@@ -139,13 +175,10 @@ test("exchange refuses browser requests (Origin present)", async () => {
 
 test("code rejects a malformed challenge", async () => {
   const app = createApp();
-  const cookie = await loginCookie(app);
-  const res = await app.request("/api/app-auth/code", {
-    method: "POST",
-    headers: { cookie, "Content-Type": "application/json" },
-    body: JSON.stringify({ challenge: "definitely.not/base64url!" }),
-  }, testEnv);
+  const sessionOnly = (await loginCookie(app)).split("; ").find((c) => c.startsWith("__Host-session="))!;
+  const res = await authorize(app, sessionOnly, "definitely.not/base64url!");
   expect(res.status).toBe(400);
+  expect(res.headers.get("location")).toBeNull();
 });
 
 test("exchange rejects the wrong verifier (stolen code is useless)", async () => {
@@ -153,12 +186,7 @@ test("exchange rejects the wrong verifier (stolen code is useless)", async () =>
   const cookie = await loginCookie(app);
   const challenge = await sha256Base64url(VERIFIER);
 
-  const codeRes = await app.request("/api/app-auth/code", {
-    method: "POST",
-    headers: { cookie, "Content-Type": "application/json" },
-    body: JSON.stringify({ challenge }),
-  }, testEnv);
-  const { code } = await codeRes.json() as { code: string };
+  const code = codeFromRedirect(await authorize(app, cookie, challenge));
 
   const exchange = await app.request("/api/app-auth/exchange", {
     method: "POST",
@@ -173,12 +201,7 @@ test("exchange rejects a tampered code", async () => {
   const cookie = await loginCookie(app);
   const challenge = await sha256Base64url(VERIFIER);
 
-  const codeRes = await app.request("/api/app-auth/code", {
-    method: "POST",
-    headers: { cookie, "Content-Type": "application/json" },
-    body: JSON.stringify({ challenge }),
-  }, testEnv);
-  const { code } = await codeRes.json() as { code: string };
+  const code = codeFromRedirect(await authorize(app, cookie, challenge));
 
   // Flip the embedded user id from 1 to 2 — the HMAC must catch it.
   const tampered = code.replace("appauth2.1.", "appauth2.2.");

@@ -4,6 +4,7 @@ import { getCookie } from "hono/cookie";
 import type { Env } from "../types";
 import { verifySession } from "../lib/auth";
 import { authRoutes } from "./routes/auth";
+import { appAuthRoutes } from "./routes/app-auth";
 import { domainRoutes } from "./routes/domains";
 import { aliasRoutes } from "./routes/aliases";
 import { blockRoutes } from "./routes/blocks";
@@ -82,6 +83,7 @@ export function createApp() {
 
   // public routes (no session)
   app.route("/api", authRoutes());
+  app.route("/api/app-auth", appAuthRoutes());
   app.route("/api", verificationRoute());
   app.route("/api", sesWebhookRoutes());
   app.route("/api", sesInboundRoutes());
@@ -106,10 +108,10 @@ export function createApp() {
       p === "/api/ses/notification" ||
       p === "/api/ses/inbound" ||
       p === "/api/unsubscribe" ||
-      // App-auth handoff: exchange is pre-auth by definition; code does its
-      // own session-cookie check inside the handler.
+      // App-auth handoff: exchange is pre-auth by definition; authorize does
+      // its own session + fresh-auth cookie checks inside the handler.
       p === "/api/app-auth/exchange" ||
-      p === "/api/app-auth/code"
+      p === "/api/app-auth/authorize"
     ) return next();
     // Web clients send the HttpOnly __Host-session cookie; native clients send
     // the same signed session token as `Authorization: Bearer <token>`.

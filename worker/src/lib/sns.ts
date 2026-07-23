@@ -1,8 +1,20 @@
-import { fromBase64, utf8 } from "./bytes";
+import { fromBase64, streamToBytes, utf8 } from "./bytes";
 
 type SnsBody = Record<string, string>;
 
 const SNS_TYPES = new Set(["Notification", "SubscriptionConfirmation", "UnsubscribeConfirmation"]);
+export const MAX_SNS_BODY_BYTES = 256 * 1024;
+const MAX_SNS_CERT_BYTES = 64 * 1024;
+
+export async function readSnsJson(request: Request): Promise<{ body?: unknown; tooLarge?: true }> {
+  try {
+    const bytes = await streamToBytes(request.body!, MAX_SNS_BODY_BYTES);
+    return { body: JSON.parse(new TextDecoder().decode(bytes)) };
+  } catch (error) {
+    if (error instanceof Error && error.name === "BodyTooLargeError") return { tooLarge: true };
+    return {};
+  }
+}
 
 function isSnsBody(body: unknown): body is SnsBody {
   if (!body || typeof body !== "object") return false;
@@ -121,9 +133,17 @@ export async function verifySnsMessage(
     }
 
     const certFetch = options.fetchCert ?? fetch;
-    const certRes = await certFetch(signingCertUrl);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    let certRes: Response;
+    try {
+      certRes = await certFetch(signingCertUrl, { signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
     if (!certRes.ok) return { ok: false, error: "sns cert fetch failed" };
-    const certPem = await certRes.text();
+    if (!certRes.body) return { ok: false, error: "sns cert fetch failed" };
+    const certPem = new TextDecoder().decode(await streamToBytes(certRes.body, MAX_SNS_CERT_BYTES));
     const hash = body.SignatureVersion === "2" ? "SHA-256" : "SHA-1";
     const key = await crypto.subtle.importKey(
       "spki",

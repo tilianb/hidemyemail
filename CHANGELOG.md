@@ -6,6 +6,33 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- Bound WebAuthn to canonical `APP_ORIGIN`, made authentication admission and
+  MFA backup-code use concurrency-safe, and added one-time consumption for
+  passkey challenges and native app-auth codes.
+- Account recovery now revokes sessions, fresh-auth credentials, MFA,
+  passkeys, and API keys. Existing password records transparently gain a
+  random per-user verifier after successful login.
+- Added durable SNS/SES delivery claims, bounded ingress, atomic mail-quota
+  reservations, ownership-fenced retries, and an in-flight SES send fence via
+  migrations `0030` through `0033`.
+- Bound iOS and Android bearer credentials to canonical server origins,
+  encrypted Android tokens with Android Keystore, and rejected stale auth or
+  API results after server changes and sign-out.
+- Hardened the Docker proxy boundary, transactional pre-listen migrations,
+  container confinement, release-secret gates, and GitHub Action pinning.
+
+### Changed
+
+- Native web sign-in now returns its one-time PKCE code through a fixed
+  `hidemyemail://auth` redirect instead of exposing the code to dashboard
+  JavaScript.
+- Docker publishes to loopback by default. Public deployments must use a TLS
+  reverse proxy that follows the documented trusted client-IP contract.
+- Users with legacy mobile credentials that lack a trustworthy server-origin
+  binding must sign in once after upgrading.
+
 ## [1.2.0] — 2026-07-22
 
 ### Added

@@ -69,7 +69,7 @@ fun AliasesScreen(app: AppViewModel, modifier: Modifier = Modifier) {
             aliases = client.aliases(search)
             error = null
         } catch (e: ApiException) {
-            if (e.isAuthFailure) app.handleAuthFailure() else error = e.message
+            if (e.isAuthFailure) app.handleAuthFailure(client) else error = e.message
         } catch (e: Exception) {
             error = e.message
         } finally {

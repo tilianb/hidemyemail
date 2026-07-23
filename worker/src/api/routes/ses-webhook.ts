@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import { getEnvWithOverride, getNumericSetting } from "../../lib/settings";
-import { verifySnsMessage } from "../../lib/sns";
+import { readSnsJson, verifySnsMessage } from "../../lib/sns";
 import { decryptDestination, hashDestination } from "../../lib/crypto";
 import { buildNotificationEmail } from "../../lib/emails";
 import { sendRaw } from "../../lib/ses";
@@ -13,7 +13,9 @@ import * as q from "../../db/queries";
 export function sesWebhookRoutes() {
   const r = new Hono<AppEnv>();
   r.post("/ses/notification", async (c) => {
-    const body = await c.req.json<any>().catch(() => null);
+    const parsedBody = await readSnsJson(c.req.raw);
+    if (parsedBody.tooLarge) return c.json({ error: "Body too large" }, 413);
+    const body = parsedBody.body as any;
     if (!body) return c.json({ error: "Bad body" }, 400);
 
     const sesRegion = await getEnvWithOverride(c.env.DB, c.env, "ses_region");
@@ -36,7 +38,8 @@ export function sesWebhookRoutes() {
       if (typeof subscribeUrl !== "string" || !/^https:\/\/sns\.[a-z0-9-]+\.amazonaws\.com\//i.test(subscribeUrl)) {
         return c.json({ error: "Invalid subscribe url" }, 400);
       }
-      console.log("SNS inbound SubscribeURL (auto-confirming):", subscribeUrl);
+      const safeUrl = new URL(subscribeUrl);
+      console.log("SNS subscription auto-confirming", `${safeUrl.origin}${safeUrl.pathname}`);
       
       // Auto-confirm the subscription so you don't have to check logs
       const confirmFetch: typeof fetch = (c.env as any).__snsConfirmFetch ?? fetch;
@@ -51,11 +54,17 @@ export function sesWebhookRoutes() {
     }
 
     if (body.Type === "Notification") {
+      const deliveryId = `sns:${body.MessageId}`;
       let msg: any;
       try {
         msg = JSON.parse(body.Message);
       } catch {
         return c.json({ error: "Invalid Message JSON" }, 400);
+      }
+      const semanticId = typeof msg.mail?.messageId === "string" ? `ses:${msg.mail.messageId}:${msg.notificationType ?? msg.eventType ?? "unknown"}` : undefined;
+      const claim = await q.claimDelivery(c.env.DB, deliveryId, "notification", Date.now(), semanticId);
+      if (claim.status !== "claimed") {
+        return claim.status === "completed" ? c.json({ ok: true }) : c.json({ error: "Already processing" }, 503);
       }
 
       const kind: string = msg.notificationType ?? msg.eventType ?? "unknown";
@@ -63,14 +72,29 @@ export function sesWebhookRoutes() {
       const now = Date.now();
       const encKey = c.env.DESTINATION_ENCRYPTION_KEY;
 
-      if (kind === "Bounce") {
-        await processBounce(c.env, msg, encKey, now);
-      } else if (kind === "Complaint") {
-        await processComplaint(c.env, msg, encKey, now);
-      } else {
-        // Unknown notification type: log it
-        await db.prepare("INSERT INTO events (alias_id, type, detail, ts) VALUES (NULL, 'error', ?, ?)")
-          .bind(`ses:${kind}`, now).run();
+      try {
+        const durable: D1PreparedStatement[] = [];
+        const notifications: Array<{ statement: number; dest: import("../../types").DestinationRow; reason: "complaint" | "hard_bounce" | "soft_bounce"; suppressionClass: "hard" | "soft" }> = [];
+        if (kind === "Bounce") {
+          await buildBounce(db, msg, encKey, now, durable, notifications);
+        } else if (kind === "Complaint") {
+          await buildComplaint(db, msg, encKey, now, durable, notifications);
+        } else {
+          durable.push(db.prepare("INSERT INTO events (alias_id, type, detail, ts) VALUES (NULL, 'error', ?, ?)").bind(`ses:${kind}`, now));
+        }
+        await (c.env as any).__beforeFeedbackCommit?.();
+        const results = await q.commitDeliveryBatch(db, deliveryId, claim.token, Date.now(), durable);
+        if (results.length === 0) {
+          return c.json({ error: "Delivery lease lost" }, 503);
+        }
+        for (const pending of notifications) {
+          if ((results[pending.statement]?.meta.changes ?? 0) === 0) continue;
+          await notifySuppression(c.env, pending.dest, pending.reason, pending.suppressionClass);
+          await pushSuppression(c.env, pending.dest.user_id, pending.reason);
+        }
+      } catch (error) {
+        await q.releaseDelivery(db, deliveryId, claim.token);
+        throw error;
       }
 
       return c.json({ ok: true });
@@ -84,15 +108,15 @@ export function sesWebhookRoutes() {
 // matching destinations, log a stable `*_unknown_destination` error when none
 // match, and hand every matched destination to `handle`. Shared by bounce and
 // complaint processing so the unknown-recipient logging and lookup never drift.
-async function processRecipients(
-  env: AppEnv["Bindings"],
+async function buildRecipients(
+  db: D1Database,
   recipients: any[],
   encKey: string,
   now: number,
   unknownDetail: string,
-  handle: (dest: import("../../types").DestinationRow) => Promise<void>,
+  statements: D1PreparedStatement[],
+  handle: (dest: import("../../types").DestinationRow) => void,
 ): Promise<void> {
-  const db = env.DB;
   for (const recipient of recipients) {
     const addr: string = recipient.emailAddress;
     if (!addr) continue;
@@ -104,17 +128,20 @@ async function processRecipients(
       // Destination emails are encrypted at rest and looked up by hash; never
       // persist (or log) the raw address — the hash is enough to correlate.
       console.log(`${unknownDetail}: hash:${emailHash}`);
-      await q.insertEvent(db, { alias_id: null, type: "error", external_sender: `hash:${emailHash}`, detail: unknownDetail, ts: now });
+      statements.push(db.prepare(
+        "INSERT INTO events (alias_id,type,external_sender,detail,ts) VALUES (NULL,'error',?,?,?)"
+      ).bind(`hash:${emailHash}`, unknownDetail, now));
     }
 
     for (const dest of destinations) {
-      await handle(dest);
+      handle(dest);
     }
   }
 }
 
-async function processBounce(env: AppEnv["Bindings"], msg: any, encKey: string, now: number): Promise<void> {
-  const db = env.DB;
+type PendingNotification = { statement: number; dest: import("../../types").DestinationRow; reason: "complaint" | "hard_bounce" | "soft_bounce"; suppressionClass: "hard" | "soft" };
+
+async function buildBounce(db: D1Database, msg: any, encKey: string, now: number, statements: D1PreparedStatement[], notifications: PendingNotification[]): Promise<void> {
   const bounce = msg.bounce;
   if (!bounce || !Array.isArray(bounce.bouncedRecipients)) {
     console.log("Bounce notification missing bounce.bouncedRecipients");
@@ -124,50 +151,46 @@ async function processBounce(env: AppEnv["Bindings"], msg: any, encKey: string, 
   const isHard = (bounce.bounceType ?? "") === "Permanent";
   const softThreshold = await getNumericSetting(db, "soft_bounce_threshold");
 
-  await processRecipients(env, bounce.bouncedRecipients, encKey, now, "ses:bounce_unknown_destination", async (dest) => {
+  await buildRecipients(db, bounce.bouncedRecipients, encKey, now, "ses:bounce_unknown_destination", statements, (dest) => {
     if (isHard) {
       // Hard bounce: record and suppress immediately. `dest:<id>` is the only
       // reference stored — the plaintext address must never land in events.
-      await q.insertEvent(db, { alias_id: null, type: "bounce", detail: `dest:${dest.id}`, ts: now });
-      const changed = await q.suppressDestination(db, dest.id, "hard_bounce", "hard", now);
-      if (changed) {
-        await notifySuppression(env, dest, "hard_bounce", "hard");
-        await pushSuppression(env, dest.user_id, "hard_bounce");
-      }
+      statements.push(db.prepare("INSERT INTO events (alias_id,type,detail,ts) VALUES (NULL,'bounce',?,?)").bind(`dest:${dest.id}`, now));
+      const statement = statements.push(db.prepare(
+        "UPDATE destinations SET suppressed_at=?,suppression_reason='hard_bounce',suppression_class='hard' WHERE id=? AND (suppressed_at IS NULL OR suppression_class='soft')"
+      ).bind(now, dest.id)) - 1;
+      notifications.push({ statement, dest, reason: "hard_bounce", suppressionClass: "hard" });
     } else {
       // Soft/transient bounce: record as soft_bounce so the threshold counts
       // ONLY soft bounces (a prior hard bounce must never inflate the count).
       // The event we just inserted is included in the count.
-      await q.insertEvent(db, { alias_id: null, type: "soft_bounce", detail: `dest:${dest.id}`, ts: now });
+      statements.push(db.prepare("INSERT INTO events (alias_id,type,detail,ts) VALUES (NULL,'soft_bounce',?,?)").bind(`dest:${dest.id}`, now));
       const since = now - 24 * 3600_000;
-      const softCount = await q.countEventsForDestinationSince(db, dest.id, "soft_bounce", since);
-      if (softThreshold > 0 && softCount >= softThreshold) {
-        const changed = await q.suppressDestination(db, dest.id, "soft_bounce", "soft", now);
-        if (changed) {
-          await notifySuppression(env, dest, "soft_bounce", "soft");
-          await pushSuppression(env, dest.user_id, "soft_bounce");
-        }
+      if (softThreshold > 0) {
+        const statement = statements.push(db.prepare(
+          "UPDATE destinations SET suppressed_at=?,suppression_reason='soft_bounce',suppression_class='soft' WHERE id=? AND suppressed_at IS NULL AND " +
+          "(SELECT COUNT(*) FROM events WHERE type='soft_bounce' AND detail=? AND ts>=?)>=?"
+        ).bind(now, dest.id, `dest:${dest.id}`, since, softThreshold)) - 1;
+        notifications.push({ statement, dest, reason: "soft_bounce", suppressionClass: "soft" });
       }
     }
   });
 }
 
-async function processComplaint(env: AppEnv["Bindings"], msg: any, encKey: string, now: number): Promise<void> {
-  const db = env.DB;
+async function buildComplaint(db: D1Database, msg: any, encKey: string, now: number, statements: D1PreparedStatement[], notifications: PendingNotification[]): Promise<void> {
   const complaint = msg.complaint;
   if (!complaint || !Array.isArray(complaint.complainedRecipients)) {
     console.log("Complaint notification missing complaint.complainedRecipients");
     return;
   }
 
-  await processRecipients(env, complaint.complainedRecipients, encKey, now, "ses:complaint_unknown_destination", async (dest) => {
-    await q.insertEvent(db, { alias_id: null, type: "complaint", detail: `dest:${dest.id}`, ts: now });
+  await buildRecipients(db, complaint.complainedRecipients, encKey, now, "ses:complaint_unknown_destination", statements, (dest) => {
+    statements.push(db.prepare("INSERT INTO events (alias_id,type,detail,ts) VALUES (NULL,'complaint',?,?)").bind(`dest:${dest.id}`, now));
     // Always hard-suppress on complaint.
-    const changed = await q.suppressDestination(db, dest.id, "complaint", "hard", now);
-    if (changed) {
-      await notifySuppression(env, dest, "complaint", "hard");
-      await pushSuppression(env, dest.user_id, "complaint");
-    }
+    const statement = statements.push(db.prepare(
+      "UPDATE destinations SET suppressed_at=?,suppression_reason='complaint',suppression_class='hard' WHERE id=? AND (suppressed_at IS NULL OR suppression_class='soft')"
+    ).bind(now, dest.id)) - 1;
+    notifications.push({ statement, dest, reason: "complaint", suppressionClass: "hard" });
   });
 }
 

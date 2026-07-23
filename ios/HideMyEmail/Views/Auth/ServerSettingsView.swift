@@ -36,8 +36,7 @@ struct ServerSettingsView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        app.serverURLString = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-                        Task { await app.bootstrap() }
+                        Task { await app.setServerURL(draft) }
                         dismiss()
                     }
                     .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)

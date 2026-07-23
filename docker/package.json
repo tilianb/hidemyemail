@@ -4,8 +4,11 @@
   "private": true,
   "type": "module",
   "description": "Miniflare host that runs the hidemyemail Worker in a container.",
+  "scripts": {
+    "test": "node --test *.test.mjs"
+  },
   "dependencies": {
-    "miniflare": "4.20260714.0"
+    "miniflare": "4.20260721.0"
   },
   "overrides": {
     "sharp": "0.35.3"

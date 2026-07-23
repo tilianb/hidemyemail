@@ -71,8 +71,8 @@ fun RulesScreen(app: AppViewModel, modifier: Modifier = Modifier) {
     val subdomainRules = blocks.filter { it.domainId != null }
     val aliasRules = blocks.filter { it.aliasId != null }
 
-    fun handle(e: Exception) {
-        if (e is ApiException && e.isAuthFailure) app.handleAuthFailure() else error = e.message
+    fun handle(e: Exception, client: dev.hidemyemail.app.net.ApiClient) {
+        if (e is ApiException && e.isAuthFailure) app.handleAuthFailure(client) else error = e.message
     }
 
     fun scopeText(b: Block): String {
@@ -93,7 +93,7 @@ fun RulesScreen(app: AppViewModel, modifier: Modifier = Modifier) {
             }
             error = null
         } catch (e: Exception) {
-            handle(e)
+            handle(e, client)
         } finally {
             loading = false
         }
@@ -132,10 +132,11 @@ fun RulesScreen(app: AppViewModel, modifier: Modifier = Modifier) {
                                 DeletableRuleRow(b, scopeText(b)) {
                                     blocks = blocks - b
                                     scope.launch {
+                                        val client = app.api() ?: return@launch
                                         try {
-                                            app.api()?.deleteBlock(b.id)
+                                            client.deleteBlock(b.id)
                                         } catch (e: Exception) {
-                                            handle(e)
+                                            handle(e, client)
                                         }
                                         reload()
                                     }

@@ -185,7 +185,7 @@ struct AliasDetailView: View {
         loadingBlocks = true
         defer { loadingBlocks = false }
         do { blocks = try await client.blocks() }
-        catch { handle(error) }
+        catch { handle(error, from: client) }
     }
 
     private func loadEvents() async {
@@ -193,7 +193,7 @@ struct AliasDetailView: View {
         loadingEvents = true
         defer { loadingEvents = false }
         do { events = try await client.events(aliasId: alias.id) }
-        catch { handle(error) }
+        catch { handle(error, from: client) }
     }
 
     private func eventRow(_ e: EmailEvent) -> some View {
@@ -245,7 +245,7 @@ struct AliasDetailView: View {
     private func setActive(_ value: Bool) async {
         guard let client = app.api() else { return }
         do { try await client.setAliasActive(id: alias.id, active: value); await onChange() }
-        catch { isActive = !value; handle(error) }
+        catch { isActive = !value; handle(error, from: client) }
     }
 
     private func saveDestination(_ value: String, revertTo old: String) async {
@@ -255,7 +255,7 @@ struct AliasDetailView: View {
             await onChange()
         } catch {
             destinationSelection = old
-            handle(error)
+            handle(error, from: client)
         }
     }
 
@@ -264,18 +264,18 @@ struct AliasDetailView: View {
         do {
             try await client.updateAliasLabel(id: alias.id, label: label.isEmpty ? nil : label)
             await onChange()
-        } catch { handle(error) }
+        } catch { handle(error, from: client) }
     }
 
     private func deleteAlias() async {
         guard let client = app.api() else { return }
         do { try await client.deleteAlias(id: alias.id); await onChange(); dismiss() }
-        catch { handle(error) }
+        catch { handle(error, from: client) }
     }
 
-    private func handle(_ error: Error) {
+    private func handle(_ error: Error, from client: APIClient) {
         if let err = error as? APIError, err.isAuthFailure {
-            Task { await app.handleAuthFailure() }
+            Task { await app.handleAuthFailure(from: client) }
         } else {
             self.error = error.localizedDescription
         }

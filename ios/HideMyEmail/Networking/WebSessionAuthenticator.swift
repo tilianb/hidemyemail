@@ -15,7 +15,7 @@ import UIKit
 /// for a bearer token.
 @MainActor
 final class WebSessionAuthenticator: NSObject, ASWebAuthenticationPresentationContextProviding {
-    static let callbackScheme = "hidemyemail"
+    nonisolated static let callbackScheme = "hidemyemail"
 
     struct Handoff {
         let code: String
@@ -28,6 +28,20 @@ final class WebSessionAuthenticator: NSObject, ASWebAuthenticationPresentationCo
     /// retained by the suspended `authenticate(server:)` frame, which keeps
     /// this reference valid until the completion handler clears it.
     private var activeSession: ASWebAuthenticationSession?
+
+    func cancel() {
+        activeSession?.cancel()
+        activeSession = nil
+    }
+
+    nonisolated static func isValidCallback(_ url: URL) -> Bool {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
+        return components.scheme == callbackScheme && components.host == "auth" &&
+            components.path.isEmpty && components.user == nil &&
+            components.password == nil && components.port == nil && components.fragment == nil &&
+            components.queryItems?.filter { $0.name == "code" }.count == 1 &&
+            components.queryItems?.first(where: { $0.name == "code" })?.value?.isEmpty == false
+    }
 
     func authenticate(server: URL) async throws -> Handoff {
         let verifier = Self.randomVerifier()
@@ -58,7 +72,8 @@ final class WebSessionAuthenticator: NSObject, ASWebAuthenticationPresentationCo
             session.start()
         }
 
-        guard let items = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?.queryItems,
+        guard Self.isValidCallback(callbackURL),
+              let items = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?.queryItems,
               let code = items.first(where: { $0.name == "code" })?.value, !code.isEmpty else {
             throw APIError.server(status: -1, message: "The server returned no sign-in code")
         }
