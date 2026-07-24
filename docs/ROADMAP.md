@@ -16,6 +16,33 @@ removed when shipped; see CHANGELOG.md for what already landed.
 
 ## P1 — Now (highest leverage)
 
+- [ ] **SNS delivery idempotency** _(security / reliability)_. Persist and
+  atomically deduplicate SNS `MessageId` values before processing inbound mail,
+  bounces, or complaints. Duplicate delivery must not forward a message twice,
+  increment counters twice, or let one transient bounce reach the destination
+  suppression threshold. Add replay tests for both SNS endpoints and define a
+  bounded retention period for deduplication records.
+- [ ] **Fail closed when destination encryption is unavailable** _(security)_.
+  Reject startup or destination operations when `DESTINATION_ENCRYPTION_KEY` is
+  absent, empty, malformed, or not exactly 32 bytes; never fall back to storing
+  plaintext email or a plaintext lookup value. Preserve read compatibility for
+  intentionally migrated legacy rows without allowing new plaintext writes.
+- [ ] **Revoke existing sessions during account recovery** _(security)_. Add a
+  per-user session version or revocation timestamp to signed sessions and fresh-
+  auth tokens. Both email-token and username/recovery-code resets must invalidate
+  every previously issued browser and native bearer token before issuing the new
+  recovery session.
+- [ ] **Migration-safe manual production deploys** _(deployment)_. Ensure the
+  supported manual deploy command applies D1 migrations before publishing code,
+  and update README/setup/deploy instructions to use that command. Keep the
+  Cloudflare automatic-build path aligned and document recovery behavior when a
+  migration or deploy fails halfway through.
+- [ ] **Fix Docker authentication and platform routing parity** _(security /
+  self-hosting)_. Forward `APP_ORIGIN` into Miniflare so native passkeys use the
+  self-hosted relying party; route `/.well-known/apple-app-site-association`
+  through the Worker; and derive rate-limit IPs from a deliberately configured,
+  trusted proxy path instead of putting every Docker client in the shared
+  `unknown` bucket. Add focused Docker integration checks for all three.
 - [ ] Request a listing in Bitwarden's forwarder docs now that the
   addy.io-compatible API surface has shipped (see docs/API.md).
 - [ ] **Hosted push relay for self-hosters** _(push / self-hosting)_. Let
@@ -79,6 +106,24 @@ order (the abstraction is the enabler; later items get cheaper once it lands):
 
 ## P2 — Next
 
+- [ ] **Require transport-safe native server URLs** _(security / native apps)_.
+  Restrict iOS and Android server configuration to HTTPS for non-development
+  use, reject arbitrary URL schemes, and make any explicit local-development
+  HTTP exception narrow and visibly unsafe. Bearer and fresh-auth credentials
+  must never be sent over accidental cleartext transport.
+- [ ] **Harden Android bearer-token storage** _(security / Android)_. Store the
+  seven-day session token with Android Keystore-backed protection rather than
+  ordinary plaintext `SharedPreferences`, while preserving backup exclusion,
+  logout deletion, and upgrade behavior for existing installs.
+- [ ] **Gate releases on versions and artifacts** _(release engineering)_. Check
+  that the tag matches Worker, dashboard, Android, and iOS versions before
+  publishing; create the public GitHub release only after APK, TestFlight, and
+  container workflows succeed; and publish the curated release notes required
+  by the release policy instead of leaving generated notes in place.
+- [ ] **Make Docker migrations interruption-safe** _(reliability /
+  self-hosting)_. Apply each migration and its tracking row atomically where the
+  runtime permits, or make recovery from a partially applied migration explicit
+  and tested so a container restart cannot become stuck on duplicate DDL.
 - [ ] **Operator-defined blocked subdomains** _(security / self-hosting)_. Add
   an environment variable containing a comma-separated denylist of subdomain
   names or patterns that users may not claim (for example reserved service,
