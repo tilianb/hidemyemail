@@ -15,10 +15,11 @@ afterEach(() => {
 function fixture(version = '2.0.0', changelog = `## [2.0.0] - 2026-07-26\n\nCurrent notes.\n\n### Upgrade Notes\n\nNone.\n`) {
   const root = mkdtempSync(join(tmpdir(), 'release-validator-'))
   roots.push(root)
-  for (const path of ['worker', 'dashboard', 'android/app', 'ios']) mkdirSync(join(root, path), { recursive: true })
-  for (const path of ['worker/package.json', 'worker/package-lock.json', 'dashboard/package.json', 'dashboard/package-lock.json']) {
+  for (const path of ['worker', 'dashboard', 'extension', 'android/app', 'ios']) mkdirSync(join(root, path), { recursive: true })
+  for (const path of ['worker/package.json', 'worker/package-lock.json', 'dashboard/package.json', 'dashboard/package-lock.json', 'extension/package.json', 'extension/package-lock.json']) {
     writeFileSync(join(root, path), JSON.stringify({ version }))
   }
+  writeFileSync(join(root, 'extension/manifest.json'), JSON.stringify({ version }))
   writeFileSync(join(root, 'android/app/build.gradle.kts'), `versionCode = 20\nversionName = "${version}"\n`)
   writeFileSync(join(root, 'ios/project.yml'), `MARKETING_VERSION: "${version}"\n`)
   writeFileSync(join(root, 'CHANGELOG.md'), changelog)
@@ -74,9 +75,11 @@ test('validates the exact remote tag before release jobs fan out', () => {
   expect(workflow.slice(earlyCheck, fanOut)).toContain('refs/tags/$GITHUB_REF_NAME:$remote_ref')
   expect(workflow.slice(earlyCheck, fanOut)).toContain('remote_tag_commit')
   expect(workflow.slice(earlyCheck, fanOut)).toContain('GITHUB_SHA')
-  for (const job of ['android', 'testflight', 'containers']) {
+  for (const job of ['android', 'extension', 'testflight', 'containers']) {
     expect(workflow).toMatch(new RegExp(`  ${job}:[\\s\\S]*?needs: validate`))
   }
+  expect(workflow).toContain('needs: [validate, android, extension, testflight, containers]')
+  expect(workflow).toContain('release-extension-${{ github.run_id }}-chromium')
 })
 
 test('retains reference definitions inside notes and stops at the next version', () => {
@@ -110,4 +113,12 @@ test('rejects manifest and tag version mismatches', () => {
   const result = run(root, 'v2.0.1', ['--previous-tag='])
   expect(result.status).toBe(1)
   expect(result.stderr).toContain('expected 2.0.1')
+})
+
+test.each(['extension/package.json', 'extension/package-lock.json', 'extension/manifest.json'])('rejects extension version mismatch in %s', (path) => {
+  const root = fixture('2.0.0')
+  writeFileSync(join(root, path), JSON.stringify({ version: '1.9.9' }))
+  const result = run(root, 'v2.0.0', ['--previous-tag='])
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain(`${path} is 1.9.9`)
 })

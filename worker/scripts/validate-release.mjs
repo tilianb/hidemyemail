@@ -46,6 +46,9 @@ const versions = {
   'worker/package-lock.json': readJson('worker/package-lock.json').version,
   'dashboard/package.json': readJson('dashboard/package.json').version,
   'dashboard/package-lock.json': readJson('dashboard/package-lock.json').version,
+  'extension/package.json': readJson('extension/package.json').version,
+  'extension/package-lock.json': readJson('extension/package-lock.json').version,
+  'extension/manifest.json': readJson('extension/manifest.json').version,
   'Android versionName': match('android/app/build.gradle.kts', /versionName\s*=\s*"([^"]+)"/, 'versionName'),
   'iOS MARKETING_VERSION': match('ios/project.yml', /^\s*MARKETING_VERSION:\s*"([^"]+)"/m, 'MARKETING_VERSION'),
 }

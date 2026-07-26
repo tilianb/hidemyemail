@@ -26,6 +26,7 @@ built dashboard assets.
 | `worker/migrations/` | D1 migrations, numbered `00NN_name.sql`, append-only |
 | `worker/test/` | Vitest + `@cloudflare/vitest-pool-workers` (`cloudflare:test` env) |
 | `dashboard/` | React 19 + Vite SPA (TypeScript), no UI framework — hand-rolled CSS in `src/index.css` |
+| `extension/` | Chromium Manifest V3 popup — vanilla TypeScript, local-only credentials, optional per-origin access |
 | `docker/` | Self-host runtime: Node server wrapping the Worker via Miniflare |
 | `docs/` | Setup/deploy/config docs + `ROADMAP.md` (tracked backlog) |
 | `ios/` | Native SwiftUI app (XcodeGen `project.yml`) |
@@ -61,9 +62,12 @@ cd worker && npm ci && npm test && npx tsc --noEmit
 
 # Dashboard — tsc is part of the build
 cd dashboard && npm ci && npm run build
+
+# Chromium extension — tests + reproducible dist/ and ZIP
+cd extension && npm ci && npm test && npm run build && npm run zip
 ```
 
-Always run both before committing; CI (`.github/workflows`) runs them too.
+Always run all three before committing; CI (`.github/workflows`) runs them too.
 There is no lint step beyond tsc. Local dev: `npx wrangler dev` in `worker/`
 plus `npm run dev` in `dashboard/` (Vite proxies to the Worker).
 
@@ -94,8 +98,8 @@ CI: `.github/workflows/docs.yml` builds and deploys to GitHub Pages on push to
   explicitly say none), and end with the full comparison link. Use the detailed
   v1.1.0 release notes as the quality baseline. Do not leave the auto-generated
   notes as the published release description. After tagging, verify the GitHub
-  release notes, APK, TestFlight upload, and GHCR / Docker Hub images before
-  declaring the release complete.
+  release notes, APK, Chromium extension ZIP, TestFlight upload, and GHCR /
+  Docker Hub images before declaring the release complete.
 - **Migrations:** new numbered file in `worker/migrations/`; never edit an
   applied one. Keep columns nullable / defaulted so existing rows keep their
   behavior. Code does NOT tolerate missing tables (no try/catch migration
