@@ -6,6 +6,58 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.1] — 2026-07-26
+
+### Security
+
+- Bound WebAuthn to canonical `APP_ORIGIN`, made authentication admission and
+  MFA backup-code use concurrency-safe, and added one-time consumption for
+  passkey challenges and native app-auth codes.
+- Account recovery now revokes sessions, fresh-auth credentials, MFA,
+  passkeys, and API keys. Existing password records transparently gain a
+  random per-user verifier after successful login.
+- Added durable SNS/SES delivery claims, bounded ingress, atomic mail-quota
+  reservations, ownership-fenced retries, and an in-flight SES send fence via
+  migrations `0031` through `0033`.
+- Bound iOS and Android bearer credentials to canonical server origins,
+  encrypted Android tokens with Android Keystore, and rejected stale auth or
+  API results after server changes and sign-out.
+- Hardened the Docker proxy boundary, transactional pre-listen migrations,
+  container confinement, release-secret gates, and GitHub Action pinning.
+
+### Changed
+
+- Native web sign-in now returns its one-time PKCE code through a fixed
+  `hidemyemail://auth` redirect instead of exposing the code to dashboard
+  JavaScript.
+- Docker publishes to loopback by default. Public deployments must use a TLS
+  reverse proxy that follows the documented trusted client-IP contract.
+- Users with legacy mobile credentials that lack a trustworthy server-origin
+  binding must sign in once after upgrading.
+
+### Fixed
+
+- Retained retryability when an S3 error response exceeds the bounded response
+  body limit.
+- Accepted canonical IPv6 loopback origins in the Android app.
+
+### Upgrade Notes
+
+- Back up the database before upgrading. Cloudflare deployments must apply
+  migrations `0029` through `0033` before deploying the new Worker. Docker
+  applies them transactionally before listening for traffic.
+- Migration `0029` invalidates legacy low-entropy recovery codes. Users who are
+  already locked out must recover before the migration; signed-in users should
+  generate and securely store a new recovery-code set after upgrading.
+- Set `APP_ORIGIN` to the exact browser-visible HTTPS origin before using
+  passkeys. Configure exact `SNS_INBOUND_TOPIC_ARN` and
+  `SNS_ALLOWED_TOPIC_ARN` values; the obsolete `SNS_SECRET` is not used.
+- Docker now publishes on loopback. Public deployments require a TLS reverse
+  proxy that overwrites `X-HideMyEmail-Client-IP`; list only that proxy's exact
+  peer addresses in `TRUSTED_PROXY_IPS`.
+- Legacy iOS and Android sessions without a trustworthy origin binding are
+  discarded, so affected users must sign in again once after upgrading.
+
 ## [1.2.0] — 2026-07-22
 
 ### Added
@@ -242,7 +294,8 @@ All notable changes to this project are documented here. The format follows
 Pre-v1 baseline: core alias forwarding, reply-from-alias, MFA + passkeys,
 admin settings, Docker self-host, Cloudflare Workers deploy.
 
-[Unreleased]: https://github.com/tilianb/hidemyemail/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/tilianb/hidemyemail/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/tilianb/hidemyemail/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/tilianb/hidemyemail/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/tilianb/hidemyemail/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/tilianb/hidemyemail/compare/v1.0.2...v1.1.0

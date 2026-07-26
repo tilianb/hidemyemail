@@ -75,7 +75,7 @@ struct AliasListView: View {
             aliases = try await client.aliases(query: search)
             error = nil
         } catch let err as APIError {
-            if err.isAuthFailure { await app.handleAuthFailure() } else { error = err.localizedDescription }
+            if err.isAuthFailure { await app.handleAuthFailure(from: client) } else { error = err.localizedDescription }
         } catch {
             self.error = error.localizedDescription
         }

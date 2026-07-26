@@ -123,6 +123,12 @@ CI: `.github/workflows/docs.yml` builds and deploys to GitHub Pages on push to
   not just a session: the `__Host-fresh-auth` cookie for web clients, or the
   `X-Fresh-Auth` header (issued only in token-mode login responses) for
   native bearer clients.
+- WebAuthn derives its RP ID and expected origin only from canonical
+  `APP_ORIGIN`, never request headers. Passkey challenges and native app-auth
+  codes are one-time artifacts; preserve atomic consumption before admission.
+- Account recovery rotates `auth_version` and revokes every credential class:
+  sessions, fresh-auth credentials, MFA, passkeys, and API keys. Native bearer
+  credentials are bound to a canonical server origin in both mobile clients.
 - Reverse-alias replies are gated by SES SPF/DMARC verdicts AND a
   first-contact check (`hasPriorInbound`) — reverse addresses are guessable.
   The `contacts` table is the source of truth for that gate; preserve contact
@@ -131,6 +137,11 @@ CI: `.github/workflows/docs.yml` builds and deploys to GitHub Pages on push to
   `virus_verdict_action`). Forwarded mail is DKIM-signed by the alias
   domain, so forwarding junk burns the operator's sender reputation.
 - SNS webhooks verify signatures and TopicArn before acting.
+- SNS/SES processing uses durable delivery claims and quota reservations to
+  fence retries and concurrent sends; do not replace them with read-then-write
+  checks or acknowledge retryable failures as completed.
+- Docker trusts `X-HideMyEmail-Client-IP` only from an exact socket peer listed
+  in `TRUSTED_PROXY_IPS`; the proxy must overwrite, never append, that header.
 - State-changing public endpoints must be POST (e.g. unsubscribe: GET only
   renders a confirm form — mail scanners prefetch GET links).
 - Unauthenticated auth-adjacent endpoints (`/login`, `/register`,

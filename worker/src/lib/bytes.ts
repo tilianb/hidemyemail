@@ -5,14 +5,23 @@ export function toHex(buf: ArrayBuffer | Uint8Array): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export async function streamToBytes(stream: ReadableStream): Promise<Uint8Array> {
+export class BodyTooLargeError extends Error {
+  constructor(message: string) { super(message); this.name = "BodyTooLargeError"; }
+}
+
+export async function streamToBytes(stream: ReadableStream, maxBytes = Number.MAX_SAFE_INTEGER): Promise<Uint8Array> {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    chunks.push(value); total += value.length;
+    total += value.length;
+    if (total > maxBytes) {
+      await reader.cancel("body too large");
+      throw new BodyTooLargeError(`Body exceeds ${maxBytes} bytes`);
+    }
+    chunks.push(value);
   }
   const out = new Uint8Array(total);
   let off = 0;

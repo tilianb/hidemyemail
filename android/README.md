@@ -37,7 +37,10 @@ the store password, key alias, and key password are read from the
 
 The app defaults to `https://app.hidemyemail.dev`. Self-hosters can change the
 server URL from the **Server** button on the login screen (or Settings → Server
-once signed in). It must be the full origin of your Worker, including `https://`.
+once signed in). Remote servers must be a canonical HTTPS origin with no path,
+query, fragment, or credentials. HTTP is accepted only for loopback development.
+Changing origin clears credentials and pending authentication before a client
+for the replacement server is used.
 
 ## Architecture
 
@@ -59,10 +62,13 @@ app/src/main/java/dev/hidemyemail/app/
 
 - On login the app sends `X-Auth-Mode: token`; the Worker returns the signed
   session token in the JSON body instead of relying on the HttpOnly cookie.
-- The token is stored in app-private **SharedPreferences**. The manifest sets
-  `android:allowBackup="false"` so the token is excluded from Auto Backup and
-  device-to-device transfers — mirroring the iOS `ThisDeviceOnly` keychain stance.
-- A `401` anywhere drops the stored token and returns to the login screen.
+- The token is encrypted with AES-GCM under a non-exportable Android Keystore
+  key. App-private **SharedPreferences** stores only ciphertext and its canonical
+  server origin; `android:allowBackup="false"` excludes it from backup/transfer.
+- A `401` signs out only when it came from the current API client. A stale
+  response from an old server or session cannot delete replacement credentials.
+- Legacy plaintext or origin-less token records are deleted and require one
+  login. Account recovery also revokes sessions, MFA, passkeys, and API keys.
 - The web app is unaffected: without the `X-Auth-Mode` header it keeps using
   cookies, and the token is never exposed to page JavaScript.
 
@@ -76,8 +82,9 @@ native credential API:
    **Custom Tab** with a PKCE challenge. Passkeys, passphrase + TOTP, and any
    other web auth method all work there because the ceremony runs against the
    server's domain.
-2. The dashboard hands back a short-lived code over the `hidemyemail://auth`
-   deep link (declared in `AndroidManifest.xml`).
+2. A top-level form authorization returns a short-lived, one-time code over the
+   fixed `hidemyemail://auth` deep link (declared in `AndroidManifest.xml`). The
+   code is not exposed to dashboard JavaScript.
 3. The app exchanges that code — with the PKCE verifier that never left the
    device — for a bearer token.
 

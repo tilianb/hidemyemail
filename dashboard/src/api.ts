@@ -144,9 +144,6 @@ export const api = {
     inline_actions_default_enabled: boolean;
   }>("/api/config"),
   login: (password: string) => req<{ ok: true; userId: number } | { mfa_required: true }>("/api/login", { method: "POST", body: JSON.stringify({ password }) }),
-  // Native-app login handoff: trade the current web session for a short-lived
-  // code bound to the app's PKCE challenge (see pages/AppAuth.tsx)
-  appAuthCode: (challenge: string) => req<{ code: string }>("/api/app-auth/code", { method: "POST", body: JSON.stringify({ challenge }) }),
   completeMfa: (code: string) => req<{ ok: true; userId: number }>("/api/mfa/complete", { method: "POST", body: JSON.stringify({ code }) }),
   register: (password: string) => req<{ ok: true, userId: number; recovery_codes: string[] }>("/api/register", { method: "POST", body: JSON.stringify({ password }) }),
   // Cancel a pending account deletion during the 7-day grace window

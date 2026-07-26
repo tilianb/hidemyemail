@@ -6,8 +6,14 @@ export class SesPermanentError extends Error {}
 export interface SesCreds { accessKeyId: string; secretAccessKey: string; region: string; }
 export interface SesRawMessage { from: string; to: string; rawBase64: string; feedbackForwarding?: string; }
 
+// Keep the request bound below mail.ts's five-minute in-flight deadline. If a
+// process dies after remote acceptance but before persisting it, no API can
+// prove acceptance; deadline takeover may then duplicate that one message.
+const SES_REQUEST_TIMEOUT_MS = 4 * 60_000;
+
 export async function sendRaw(
-  creds: SesCreds, msg: SesRawMessage, fetchImpl?: typeof fetch
+  creds: SesCreds, msg: SesRawMessage, fetchImpl?: typeof fetch,
+  options: { timeoutMs?: number } = {},
 ): Promise<string> {
   const aws = new AwsClient({
     accessKeyId: creds.accessKeyId,
@@ -24,7 +30,15 @@ export async function sendRaw(
   });
   const signed = await aws.sign(url, { method: "POST", headers: { "Content-Type": "application/json" }, body });
   const doFetch = fetchImpl ?? fetch;
-  const res = await doFetch(signed.url, { method: "POST", headers: signed.headers, body });
+  let res: Response;
+  try {
+    res = await doFetch(signed.url, {
+      method: "POST", headers: signed.headers, body,
+      signal: AbortSignal.timeout(options.timeoutMs ?? SES_REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    throw new SesTransientError(`SES request failed: ${String(error)}`);
+  }
   if (res.ok) {
     const json = await res.json<{ MessageId: string }>();
     return json.MessageId;

@@ -59,8 +59,10 @@ COPY --from=builder --chown=nonroot:nonroot /src/worker/dist ./worker-dist
 COPY --from=builder --chown=nonroot:nonroot /src/dashboard/dist ./public
 COPY --from=builder --chown=nonroot:nonroot /src/worker/migrations ./migrations
 
-# Server entrypoint
+# Server entrypoint and its local modules
 COPY --chown=nonroot:nonroot docker/server.mjs ./server.mjs
+COPY --chown=nonroot:nonroot docker/client-ip.mjs ./client-ip.mjs
+COPY --chown=nonroot:nonroot docker/migrations.mjs ./migrations.mjs
 
 # D1 sqlite file lives here — mount a volume to persist
 COPY --from=runtime-deps --chown=nonroot:nonroot /data /data

@@ -75,6 +75,12 @@ For preview:
 npx wrangler d1 migrations apply DB --remote --env preview
 ```
 
+Back up an existing D1 database before upgrading. Apply all migrations before
+deploying code that depends on them, and do not run mixed old/new Worker
+versions during the migration. Security migrations `0030` through `0033` add
+auth-artifact replay protection, delivery idempotency, mail-quota reservations,
+and the in-flight SES send fence.
+
 ## 4. Generate secrets
 
 From `worker/`, one interactive pass generates and pushes everything
@@ -96,8 +102,14 @@ These are not secrets, but they are deployment-specific:
 - `SES_REGION`
 - `S3_INBOUND_BUCKET`
 - `SNS_INBOUND_TOPIC_ARN`
+- `SNS_ALLOWED_TOPIC_ARN`
+- `APP_ORIGIN` if passkeys are enabled
 
 Set them in the Cloudflare dashboard or via Wrangler deploy flags. The Wrangler config sets `keep_vars: true` to preserve Cloudflare-managed vars.
+
+`APP_ORIGIN` must exactly match the browser-visible HTTPS origin. iOS native
+passkeys also require `APPLE_APP_ID` and a matching AASA response; see
+[Configuration](CONFIGURATION.md).
 
 ## 6. Configure AWS and DNS
 

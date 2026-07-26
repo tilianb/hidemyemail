@@ -69,7 +69,7 @@ struct StatsView: View {
         defer { loading = false }
         do { stats = try await client.stats(); error = nil }
         catch let err as APIError {
-            if err.isAuthFailure { await app.handleAuthFailure() } else { error = err.localizedDescription }
+            if err.isAuthFailure { await app.handleAuthFailure(from: client) } else { error = err.localizedDescription }
         } catch {
             self.error = error.localizedDescription
         }

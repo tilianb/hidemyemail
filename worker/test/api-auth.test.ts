@@ -5,6 +5,14 @@ import { hashPassword } from "../src/lib/auth";
 import { SETTING_DEFAULTS } from "../src/config";
 
 let testEnv: any;
+
+async function signLegacyToken(prefix: "v2" | "fresh", userId: number, ttlSeconds: number): Promise<string> {
+  const payload = `${prefix}.${userId}.${Math.floor(Date.now() / 1000) + ttlSeconds}`;
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode("sek"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload)))]
+    .map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${payload}.${sig}`;
+}
 beforeAll(async () => {
   const { saltHex, hashHex } = await hashPassword("hunter2");
   testEnv = { ...env, SESSION_SECRET: "sek", AUTH_PASSWORD_SALT: saltHex, AUTH_PASSWORD_HASH: hashHex };
@@ -41,7 +49,7 @@ test("native bearer flow: login returns token, guarded route accepts it", async 
   expect(login.status).toBe(200);
   const token = (await login.json() as any).token as string;
   expect(typeof token).toBe("string");
-  expect(token.split(".")[0]).toBe("v2");
+  expect(token.split(".")[0]).toBe("v3");
 
   // Guarded route accepts the bearer token without any cookie.
   const authed = await app.request("/api/stats", { headers: { Authorization: `Bearer ${token}` } }, testEnv);
@@ -80,6 +88,24 @@ test("native bearer flow: fresh_auth token unlocks fresh-auth-gated routes", asy
   expect(forged.status).toBe(401);
 });
 
+test("legacy v2 session and fresh credentials work only while auth version is zero", async () => {
+  const app = createApp();
+  await (env.DB as D1Database).prepare("UPDATE users SET auth_version = 0 WHERE id = 1").run();
+  const token = await signLegacyToken("v2", 1, 3600);
+  const fresh = await signLegacyToken("fresh", 1, 300);
+
+  const accepted = await app.request("/api/account/export", {
+    headers: { Authorization: `Bearer ${token}`, "X-Fresh-Auth": fresh },
+  }, testEnv);
+  expect(accepted.status).toBe(200);
+
+  await (env.DB as D1Database).prepare("UPDATE users SET auth_version = 1 WHERE id = 1").run();
+  const rejected = await app.request("/api/account/export", {
+    headers: { Authorization: `Bearer ${token}`, "X-Fresh-Auth": fresh },
+  }, testEnv);
+  expect(rejected.status).toBe(401);
+});
+
 test("token mode is refused when a browser Origin is present (XSS guard)", async () => {
   const app = createApp();
   await (env.DB as D1Database).prepare("DELETE FROM rate_limits").run();
@@ -110,6 +136,11 @@ test("register and login with new passphrase", async () => {
 
   const login = await app.request("/api/login", { method: "POST", body: JSON.stringify({ password: passphrase }), headers: { "Content-Type": "application/json" } }, testEnv);
   expect(login.status).toBe(200);
+
+  const user = await (env.DB as D1Database).prepare(
+    "SELECT passphrase_verifier FROM users WHERE id = ?"
+  ).bind((await reg.clone().json() as { userId: number }).userId).first<{ passphrase_verifier: string | null }>();
+  expect(user?.passphrase_verifier).toMatch(/^v1\$[a-f0-9]{32}\$[a-f0-9]{64}$/);
 });
 
 test("public defaults keep registration disabled until admin enables it", async () => {
@@ -163,6 +194,25 @@ test("native passkey challenge echoes the challenge token; web does not", async 
   }, appEnv);
   expect(web.status).toBe(200);
   expect((await web.json() as any).passkey_token).toBeUndefined();
+});
+
+test("passkey challenge uses the configured custom-domain RP ID", async () => {
+  const res = await createApp().request("/api/passkey/challenge", { method: "POST" }, {
+    ...testEnv,
+    APP_ORIGIN: "https://mail.example.net",
+  });
+  expect(res.status).toBe(200);
+  expect((await res.json() as any).rpId).toBe("mail.example.net");
+});
+
+test("passkey challenge fails with a controlled configuration error when APP_ORIGIN is missing or invalid", async () => {
+  const app = createApp();
+  for (const appOrigin of [undefined, "http://mail.example.net", "not a URL"]) {
+    const requestEnv = { ...testEnv, APP_ORIGIN: appOrigin };
+    const res = await app.request("/api/passkey/challenge", { method: "POST" }, requestEnv);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "Passkey authentication is not configured" });
+  }
 });
 
 test("apple-app-site-association: 404 until APPLE_APP_ID is configured", async () => {

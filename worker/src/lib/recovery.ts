@@ -10,14 +10,15 @@ const CODE_COUNT = 10;
 /**
  * Generate `count` recovery codes. Returns the plaintext (display once) and the
  * SHA-256 hashes (store as a JSON array in users.recovery_codes).
- * Format: XXXX-XXXX base32 (40 bits each), matching the MFA backup-code look.
+ * Format: eight XXXX base32 groups (160 bits each). MFA backup codes use their
+ * existing shorter format independently.
  */
 export async function generateRecoveryCodes(count = CODE_COUNT): Promise<{ plain: string[]; hashed: string[] }> {
   const plain: string[] = [];
   for (let i = 0; i < count; i++) {
-    const bytes = crypto.getRandomValues(new Uint8Array(5));
+    const bytes = crypto.getRandomValues(new Uint8Array(20));
     const encoded = base32Encode(bytes);
-    plain.push(`${encoded.slice(0, 4)}-${encoded.slice(4, 8)}`);
+    plain.push(encoded.match(/.{4}/g)!.join("-"));
   }
   const hashed = await Promise.all(plain.map(hashBackupCode));
   return { plain, hashed };

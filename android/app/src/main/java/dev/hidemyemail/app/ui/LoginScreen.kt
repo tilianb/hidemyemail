@@ -254,7 +254,7 @@ private fun RecoverWithCodeSheet(app: AppViewModel, onDone: () -> Unit) {
             OutlinedTextField(
                 value = code,
                 onValueChange = { code = it },
-                label = { Text("XXXX-XXXX") },
+                label = { Text("XXXX-XXXX-…") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(10.dp),

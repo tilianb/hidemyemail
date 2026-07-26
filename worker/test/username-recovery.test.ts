@@ -26,12 +26,12 @@ async function register(app: ReturnType<typeof createApp>, passphrase: string) {
   return { token: body.token as string, fresh: body.fresh_auth as string, codes: body.recovery_codes as string[], userId: body.userId as number };
 }
 
-test("register returns 10 recovery codes in XXXX-XXXX format", async () => {
+test("register returns 10 readable recovery codes with at least 128 bits of entropy", async () => {
   const app = createApp();
   const { codes } = await register(app, "horse-staple-battery-one");
   expect(Array.isArray(codes)).toBe(true);
   expect(codes.length).toBe(10);
-  for (const c of codes) expect(c).toMatch(/^[A-Z2-7]{4}-[A-Z2-7]{4}$/);
+  for (const c of codes) expect(c).toMatch(/^(?:[A-Z2-7]{4}-){7}[A-Z2-7]{4}$/);
 });
 
 test("set username, it shows in stats display, and is case-insensitively unique", async () => {
@@ -107,6 +107,30 @@ test("recover with username + recovery code resets passphrase and consumes the c
   // The used code can't be replayed.
   const replay = await app.request("/api/recover/code", { method: "POST", body: JSON.stringify({ username: "recoverme", code }), headers: TOKEN }, testEnv);
   expect(replay.status).toBe(400);
+});
+
+test("recovery invalidates old session and fresh-auth credentials", async () => {
+  const app = createApp();
+  const a = await register(app, "horse-staple-battery-invalidate");
+  await app.request("/api/account/username", { method: "PATCH", body: JSON.stringify({ username: "invalidate-me" }), headers: { ...J, Authorization: `Bearer ${a.token}` } }, testEnv);
+
+  const recovered = await app.request("/api/recover/code", { method: "POST", body: JSON.stringify({ username: "invalidate-me", code: a.codes[0] }), headers: TOKEN }, testEnv);
+  expect(recovered.status).toBe(200);
+
+  const oldSession = await app.request("/api/stats", { headers: { Authorization: `Bearer ${a.token}` } }, testEnv);
+  expect(oldSession.status).toBe(401);
+  const oldFresh = await app.request("/api/account/recovery-codes", { method: "POST", headers: { Authorization: `Bearer ${a.token}`, "X-Fresh-Auth": a.fresh } }, testEnv);
+  expect(oldFresh.status).toBe(401);
+});
+
+test("concurrent recovery-code redemption has exactly one winner", async () => {
+  const app = createApp();
+  const a = await register(app, "horse-staple-battery-race");
+  await app.request("/api/account/username", { method: "PATCH", body: JSON.stringify({ username: "race-recover" }), headers: { ...J, Authorization: `Bearer ${a.token}` } }, testEnv);
+  const request = () => app.request("/api/recover/code", { method: "POST", body: JSON.stringify({ username: "race-recover", code: a.codes[0] }), headers: TOKEN }, testEnv);
+
+  const responses = await Promise.all([request(), request()]);
+  expect(responses.map((response) => response.status).sort()).toEqual([200, 400]);
 });
 
 test("recover/code on unknown username returns the same generic error", async () => {

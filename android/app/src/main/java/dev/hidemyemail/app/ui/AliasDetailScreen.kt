@@ -84,8 +84,8 @@ fun AliasDetailScreen(
     var destinations by remember { mutableStateOf<List<dev.hidemyemail.app.net.Destination>>(emptyList()) }
     var destinationSelection by remember { mutableStateOf(alias.destination ?: "") }
 
-    fun handle(e: Exception) {
-        if (e is ApiException && e.isAuthFailure) app.handleAuthFailure() else error = e.message
+    fun handle(e: Exception, client: dev.hidemyemail.app.net.ApiClient) {
+        if (e is ApiException && e.isAuthFailure) app.handleAuthFailure(client) else error = e.message
     }
 
     // Rules that apply to this alias, in the Worker's resolution order:
@@ -97,20 +97,22 @@ fun AliasDetailScreen(
     }
 
     LaunchedEffect(alias.id) {
+        val client = app.api() ?: return@LaunchedEffect
         loadingEvents = true
         try {
-            events = app.api()?.events(alias.id) ?: emptyList()
+            events = client.events(alias.id)
         } catch (e: Exception) {
-            handle(e)
+            handle(e, client)
         } finally {
             loadingEvents = false
         }
     }
     LaunchedEffect(alias.id) {
+        val client = app.api() ?: return@LaunchedEffect
         try {
-            blocks = app.api()?.blocks() ?: emptyList()
+            blocks = client.blocks()
         } catch (e: Exception) {
-            handle(e)
+            handle(e, client)
         }
     }
     LaunchedEffect(alias.id) {
@@ -120,11 +122,12 @@ fun AliasDetailScreen(
     fun saveLabelIfChanged() {
         if (label != (alias.label ?: "")) {
             scope.launch {
+                val client = app.api() ?: return@launch
                 try {
-                    app.api()?.updateAliasLabel(alias.id, label.ifEmpty { null })
+                    client.updateAliasLabel(alias.id, label.ifEmpty { null })
                     onChange()
                 } catch (e: Exception) {
-                    if (e is ApiException) handle(e)
+                    if (e is ApiException) handle(e, client)
                 }
             }
         }
@@ -188,12 +191,13 @@ fun AliasDetailScreen(
                         onCheckedChange = { value ->
                             isActive = value
                             scope.launch {
+                                val client = app.api() ?: return@launch
                                 try {
-                                    app.api()?.setAliasActive(alias.id, value)
+                                    client.setAliasActive(alias.id, value)
                                     onChange()
                                 } catch (e: Exception) {
                                     isActive = !value
-                                    if (e is ApiException) handle(e)
+                                    if (e is ApiException) handle(e, client)
                                 }
                             }
                         },
@@ -234,12 +238,13 @@ fun AliasDetailScreen(
                             val previous = destinationSelection
                             destinationSelection = value
                             scope.launch {
+                                val client = app.api() ?: return@launch
                                 try {
-                                    app.api()?.updateAliasDestination(alias.id, value.ifEmpty { null })
+                                    client.updateAliasDestination(alias.id, value.ifEmpty { null })
                                     onChange()
                                 } catch (e: Exception) {
                                     destinationSelection = previous
-                                    handle(e)
+                                    handle(e, client)
                                 }
                             }
                         },
@@ -325,12 +330,13 @@ fun AliasDetailScreen(
                 TextButton(onClick = {
                     showDeleteConfirm = false
                     scope.launch {
+                        val client = app.api() ?: return@launch
                         try {
-                            app.api()?.deleteAlias(alias.id)
+                            client.deleteAlias(alias.id)
                             onChange()
                             onBack()
                         } catch (e: Exception) {
-                            if (e is ApiException) handle(e)
+                            if (e is ApiException) handle(e, client)
                         }
                     }
                 }) { Text("Delete", color = Theme.red) }

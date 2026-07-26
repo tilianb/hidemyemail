@@ -34,7 +34,10 @@ your development team (or edit `DEVELOPMENT_TEAM` in `project.yml`).
 
 The app defaults to `https://app.hidemyemail.dev`. Self-hosters can change the
 server URL from the **Server** button on the login screen (or Settings → Server
-once signed in). It must be the full origin of your Worker, including `https://`.
+once signed in). Remote servers must be a canonical HTTPS origin with no path,
+query, fragment, or credentials. HTTP is accepted only for loopback development.
+Changing origin clears credentials and pending authentication before the app
+creates a client for the replacement server.
 
 ## Architecture
 
@@ -56,9 +59,14 @@ HideMyEmail/
 
 - On login the app sends `X-Auth-Mode: token`; the Worker returns the signed
   session token in the JSON body instead of relying on the HttpOnly cookie.
-- The token is stored in the **Keychain** (`kSecAttrAccessibleAfterFirstUnlock`)
-  and sent as `Authorization: Bearer <token>` on every guarded request.
-- A `401` anywhere drops the stored token and returns to the login screen.
+- The token and its canonical server origin are stored in the **Keychain**
+  (`kSecAttrAccessibleAfterFirstUnlock`) and sent as
+  `Authorization: Bearer <token>` on guarded requests to that origin only.
+- A `401` signs out only when it came from the current API client. A stale
+  response from an old server or session cannot delete replacement credentials.
+- Legacy Keychain tokens without an origin are deleted and require one login.
+- Account recovery revokes existing sessions, MFA, passkeys, and API keys, so
+  the app requires a new login after recovery.
 - The web app is unaffected: without the `X-Auth-Mode` header it keeps using
   cookies, and the token is never exposed to page JavaScript.
 
@@ -83,6 +91,11 @@ Setup required for it to actually work (it cannot run on the unsigned simulator)
    **Associated Domains** capability on the App ID.
 3. **Register first** — the app only *signs in* with an existing passkey; create
    one in the web dashboard (Settings → Passkeys), then test on a physical device.
+
+For arbitrary self-hosted origins, **Sign in on the Web** opens `/app-auth` in
+`ASWebAuthenticationSession`. The dashboard performs the origin-bound login and
+returns a short-lived, one-time code through the fixed `hidemyemail://auth`
+callback. The app exchanges it with a verifier that never leaves the device.
 
 ## Push notifications
 

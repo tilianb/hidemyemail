@@ -102,7 +102,7 @@ struct DestinationsView: View {
         loading = true
         defer { loading = false }
         do { destinations = try await client.destinations(); error = nil }
-        catch { handle(error) }
+        catch { handle(error, from: client) }
     }
 
     private func add() async {
@@ -110,19 +110,19 @@ struct DestinationsView: View {
         newEmail = ""
         guard let client = app.api(), !email.isEmpty else { return }
         do { try await client.createDestination(email: email); await reload() }
-        catch { handle(error) }
+        catch { handle(error, from: client) }
     }
 
     private func makeDefault(_ dest: Destination) async {
         guard let client = app.api() else { return }
         do { try await client.setDefaultDestination(id: dest.id); await reload() }
-        catch { handle(error) }
+        catch { handle(error, from: client) }
     }
 
     private func unsuppress(_ dest: Destination) async {
         guard let client = app.api() else { return }
         do { try await client.unsuppressDestination(id: dest.id); await reload() }
-        catch { handle(error) }
+        catch { handle(error, from: client) }
     }
 
     private func delete(_ offsets: IndexSet) {
@@ -131,15 +131,15 @@ struct DestinationsView: View {
             guard let client = app.api() else { return }
             for d in targets {
                 do { try await client.deleteDestination(id: d.id) }
-                catch { handle(error); break }
+                catch { handle(error, from: client); break }
             }
             await reload()
         }
     }
 
-    private func handle(_ error: Error) {
+    private func handle(_ error: Error, from client: APIClient) {
         if let err = error as? APIError, err.isAuthFailure {
-            Task { await app.handleAuthFailure() }
+            Task { await app.handleAuthFailure(from: client) }
         } else {
             self.error = error.localizedDescription
         }

@@ -43,7 +43,7 @@ fun StatsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
             stats = client.stats()
             error = null
         } catch (e: ApiException) {
-            if (e.isAuthFailure) app.handleAuthFailure() else error = e.message
+            if (e.isAuthFailure) app.handleAuthFailure(client) else error = e.message
         } catch (e: Exception) {
             error = e.message
         } finally {

@@ -29,6 +29,104 @@ beforeEach(async () => {
   await q.recordContact(DB(), 1, "boss@store.com", Date.now());
 });
 
+test("expired delivery lease owner cannot complete or release its replacement", async () => {
+  const first = await q.claimDelivery(DB(), "sns:lease", "notification", 1_000, "ses:semantic");
+  expect(first.status).toBe("claimed");
+  if (first.status !== "claimed") throw new Error("first lease not claimed");
+  const second = await q.claimDelivery(DB(), "sns:lease", "notification", 1_000 + 5 * 60_000, "ses:semantic");
+  expect(second.status).toBe("claimed");
+  if (second.status !== "claimed") throw new Error("second lease not claimed");
+  await q.completeDelivery(DB(), "sns:lease", first.token, 2_000);
+  await q.releaseDelivery(DB(), "sns:lease", first.token);
+  expect((await q.claimDelivery(DB(), "sns:lease", "notification", 2_001, "ses:semantic")).status).toBe("busy");
+  await q.completeDelivery(DB(), "sns:lease", second.token, 2_002);
+  expect((await q.claimDelivery(DB(), "sns:lease", "notification", 2_003, "ses:semantic")).status).toBe("completed");
+});
+
+test("expired quota reservation is reclaimed and stale owner cannot release it", async () => {
+  const first = await q.reserveMailQuota(DB(), { id: "mail:x", token: "old", kind: "reply", aliasId: 1, recipient: "boss@store.com", now: 1_000, aliasCap: -1, globalCap: -1, distinctCap: -1 });
+  expect(first).toBe("reserved");
+  const second = await q.reserveMailQuota(DB(), { id: "mail:x", token: "new", kind: "reply", aliasId: 1, recipient: "boss@store.com", now: 1_000 + 5 * 60_000, aliasCap: -1, globalCap: -1, distinctCap: -1 });
+  expect(second).toBe("reserved");
+  await q.releaseMailQuota(DB(), "mail:x", "old");
+  expect(await DB().prepare("SELECT token FROM mail_quota_reservations WHERE id='mail:x'").first<{ token: string }>()).toEqual({ token: "new" });
+});
+
+test("accepted reservation with an expired lease still consumes hourly alias and global quota", async () => {
+  await DB().prepare("DELETE FROM events").run();
+  const now = 2 * 3600_000;
+  expect(await q.reserveMailQuota(DB(), { id: "mail:accepted-hour", token: "owner", kind: "reply", aliasId: 1, recipient: "one@example.com", now: now - 30 * 60_000, aliasCap: 1, globalCap: 1, distinctCap: -1 })).toBe("reserved");
+  expect(await q.startMailSend(DB(), "mail:accepted-hour", "owner", now - 30 * 60_000)).toBe(true);
+  expect(await q.markMailQuotaAccepted(DB(), "mail:accepted-hour", "owner")).toBe(true);
+  await DB().prepare("UPDATE mail_quota_reservations SET expires_at=? WHERE id='mail:accepted-hour'").bind(now - 1).run();
+
+  expect(await q.reserveMailQuota(DB(), { id: "mail:alias-blocked", token: "next", kind: "reply", aliasId: 1, recipient: "two@example.com", now, aliasCap: 1, globalCap: -1, distinctCap: -1 })).toBe("cap");
+  expect(await q.reserveMailQuota(DB(), { id: "mail:global-blocked", token: "next", kind: "reply", aliasId: 1, recipient: "two@example.com", now, aliasCap: -1, globalCap: 1, distinctCap: -1 })).toBe("cap");
+});
+
+test("accepted reservation with an expired lease still consumes daily distinct-recipient quota", async () => {
+  await DB().prepare("DELETE FROM events").run();
+  const now = 2 * 86400_000;
+  expect(await q.reserveMailQuota(DB(), { id: "mail:accepted-day", token: "owner", kind: "reply", aliasId: 1, recipient: "one@example.com", now: now - 12 * 3600_000, aliasCap: -1, globalCap: -1, distinctCap: 1 })).toBe("reserved");
+  expect(await q.startMailSend(DB(), "mail:accepted-day", "owner", now - 12 * 3600_000)).toBe(true);
+  expect(await q.markMailQuotaAccepted(DB(), "mail:accepted-day", "owner")).toBe(true);
+  await DB().prepare("UPDATE mail_quota_reservations SET expires_at=? WHERE id='mail:accepted-day'").bind(now - 1).run();
+
+  expect(await q.reserveMailQuota(DB(), { id: "mail:distinct-blocked", token: "next", kind: "reply", aliasId: 1, recipient: "two@example.com", now, aliasCap: -1, globalCap: -1, distinctCap: 1 })).toBe("cap");
+});
+
+test("expired non-accepted reservation does not consume mail quota", async () => {
+  await DB().prepare("DELETE FROM events").run();
+  const now = 2 * 3600_000;
+  expect(await q.reserveMailQuota(DB(), { id: "mail:stale", token: "old", kind: "reply", aliasId: 1, recipient: "one@example.com", now: now - 10 * 60_000, aliasCap: 1, globalCap: 1, distinctCap: 1 })).toBe("reserved");
+
+  expect(await q.reserveMailQuota(DB(), { id: "mail:after-stale", token: "next", kind: "reply", aliasId: 1, recipient: "two@example.com", now, aliasCap: 1, globalCap: 1, distinctCap: 1 })).toBe("reserved");
+});
+
+test("quota cleanup retains accepted usage for its full daily window", async () => {
+  const now = 2 * 86400_000;
+  await DB().prepare("INSERT INTO mail_quota_reservations (id,token,kind,state,alias_id,recipient,created_at,expires_at) VALUES ('mail:keep','token','reply','accepted',1,'one@example.com',?,?)")
+    .bind(now - 86400_000 + 1, now - 2 * 86400_000).run();
+
+  await q.claimDelivery(DB(), "cleanup-trigger", "inbound", now);
+
+  expect(await DB().prepare("SELECT state FROM mail_quota_reservations WHERE id='mail:keep'").first()).toEqual({ state: "accepted" });
+});
+
+test("abandoned in-flight send can be reclaimed only after its deadline", async () => {
+  const first = await q.claimDelivery(DB(), "mail:abandoned", "inbound", 1_000, "ses:abandoned");
+  if (first.status !== "claimed") throw new Error("delivery not claimed");
+  expect(await q.reserveMailQuota(DB(), {
+    id: "mail:abandoned", token: "sender", kind: "forward", aliasId: 1,
+    recipient: "sender@example.com", now: 1_000, aliasCap: -1, globalCap: -1, distinctCap: -1,
+    deliveryToken: first.token,
+  })).toBe("reserved");
+  expect(await q.startMailSend(DB(), "mail:abandoned", "sender", 1_000)).toBe(true);
+  await DB().prepare("UPDATE mail_deliveries SET lease_until=0 WHERE external_id='mail:abandoned'").run();
+
+  expect((await q.claimDelivery(DB(), "mail:abandoned", "inbound", 2_000, "ses:abandoned")).status).toBe("busy");
+  const replacement = await q.claimDelivery(DB(), "mail:abandoned", "inbound", 5 * 60_000 + 1_001, "ses:abandoned");
+  expect(replacement.status).toBe("claimed");
+  if (replacement.status !== "claimed") throw new Error("delivery not reclaimed");
+  expect(await q.reserveMailQuota(DB(), {
+    id: "mail:abandoned", token: "replacement", kind: "forward", aliasId: 1,
+    recipient: "sender@example.com", now: 5 * 60_000 + 1_001, aliasCap: -1, globalCap: -1, distinctCap: -1,
+    deliveryToken: replacement.token,
+  })).toBe("reserved");
+});
+
+test("delivery is not completed when durable bookkeeping fails after SES", async () => {
+  const claim = await q.claimDelivery(DB(), "sns:bookkeeping", "inbound", Date.now(), "ses:bookkeeping");
+  expect(claim.status).toBe("claimed");
+  await DB().prepare("CREATE TRIGGER fail_reply_event BEFORE INSERT ON events WHEN NEW.type='reply' BEGIN SELECT RAISE(FAIL, 'bookkeeping failed'); END").run();
+  const sentinel = { sent: [] as any[] };
+  await expect(handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" }, { id: "sns:bookkeeping", token: claim.status === "claimed" ? claim.token : "" })).rejects.toThrow("bookkeeping failed");
+  expect(sentinel.sent).toHaveLength(1);
+  expect((await DB().prepare("SELECT state FROM mail_deliveries WHERE external_id='sns:bookkeeping'").first<{ state: string }>())?.state).toBe("processing");
+  expect((await q.getAlias(DB(), "shop@hidemyemail.dev"))?.reply_count).toBe(0);
+  await DB().prepare("DROP TRIGGER fail_reply_event").run();
+});
+
 test("owner reply with SPF pass → SES send as alias, leaks stripped", async () => {
   const sentinel = { sent: [] as any[] };
   await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
@@ -40,6 +138,22 @@ test("owner reply with SPF pass → SES send as alias, leaks stripped", async ()
   expect(decoded).not.toContain("real@me.com");
   expect(decoded).not.toContain("@gmail.com");
   expect((await q.getAlias(DB(), "shop@hidemyemail.dev"))?.reply_count).toBe(1);
+});
+
+test("concurrent replies atomically reserve the final per-alias quota slot", async () => {
+  await DB().prepare("INSERT INTO settings (key,value,updated_at) VALUES ('rate_limit_reply_per_alias','1',?) ON CONFLICT(key) DO UPDATE SET value='1'").bind(Date.now()).run();
+  const sentinel = { sent: [] as any[] };
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const e = { ...testEnv(sentinel), __sesSend: async (_c: any, m: any) => { sentinel.sent.push(m); await gate; return "mid"; } } as any;
+  const first = handleReply(mkMessage("real@me.com", TO, REPLY_RAW), e, PARSED, { spf: "PASS" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const second = handleReply(mkMessage("real@me.com", TO, REPLY_RAW), e, PARSED, { spf: "PASS" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  release();
+  await Promise.all([first, second]);
+  expect(sentinel.sent).toHaveLength(1);
+  await DB().prepare("UPDATE settings SET value='10' WHERE key='rate_limit_reply_per_alias'").run();
 });
 
 test("owner reply rewrites headers without touching MIME body bytes", async () => {
@@ -230,6 +344,27 @@ test("reply rate limit: inbound forwards do not count against per-alias reply ca
   const sentinel = { sent: [] as any[] };
   await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
   expect(sentinel.sent.length).toBe(1);
+});
+
+test("reply rate limit: accepted reservation with expired lease is diagnosed as rate without muting alias", async () => {
+  const now = Date.now();
+  await DB().prepare("UPDATE settings SET value='1', updated_at=? WHERE key='rate_limit_reply_per_alias'").bind(now).run();
+  expect(await q.reserveMailQuota(DB(), {
+    id: "mail:accepted-reply", token: "owner", kind: "reply", aliasId: 1,
+    recipient: "other@example.com", now: now - 1_000, aliasCap: 1, globalCap: -1, distinctCap: -1,
+  })).toBe("reserved");
+  expect(await q.startMailSend(DB(), "mail:accepted-reply", "owner", now - 1_000)).toBe(true);
+  expect(await q.markMailQuotaAccepted(DB(), "mail:accepted-reply", "owner")).toBe(true);
+  await DB().prepare("UPDATE mail_quota_reservations SET expires_at=? WHERE id='mail:accepted-reply'").bind(now - 1).run();
+
+  const sentinel = { sent: [] as any[] };
+  await handleReply(mkMessage("real@me.com", TO, REPLY_RAW), testEnv(sentinel), PARSED, { spf: "PASS" });
+
+  expect(sentinel.sent).toHaveLength(0);
+  const ev = await DB().prepare("SELECT detail FROM events WHERE type='reject' ORDER BY id DESC LIMIT 1").first<{ detail: string }>();
+  expect(ev?.detail).toBe("rate");
+  const alias = await DB().prepare("SELECT muted_until FROM aliases WHERE id=1").first<{ muted_until: number | null }>();
+  expect(alias?.muted_until).toBeNull();
 });
 
 test("reply rate limit: over per-alias cap → rejected, no SES", async () => {
