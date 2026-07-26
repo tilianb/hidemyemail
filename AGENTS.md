@@ -31,6 +31,7 @@ built dashboard assets.
 | `ios/` | Native SwiftUI app (XcodeGen `project.yml`) |
 | `android/` | Native Android app — Kotlin + Jetpack Compose (Gradle, package `dev.hidemyemail.app`) |
 | `website/` | Astro Starlight docs site, generated from `docs/` + README/CHANGELOG/ROADMAP by `scripts/sync-docs.mjs`; published to GitHub Pages |
+| `.agents/` | Amp orb lifecycle scripts: `setup` installs toolchains/dependencies and seeds local credentials; `resume` repairs paused environments when needed |
 
 ## Mobile (iOS + Android)
 
@@ -104,6 +105,10 @@ CI: `.github/workflows/docs.yml` builds and deploys to GitHub Pages on push to
   `worker/src/api/routes/admin/settings.ts`, a UI row in
   `dashboard/src/pages/Admin.tsx`, and a row in `docs/CONFIGURATION.md`.
   All four or it's not done.
+- **Docs:** user-visible behavior and changes to APIs, configuration, security,
+  deployment, or setup must update their source docs (`README.md`, `docs/`,
+  and `CHANGELOG.md` when release-facing) in the same PR. The website syncs
+  those sources during dev/build; never hand-edit `website/src/content/docs/`.
 - **Tests:** every behavior change gets a test in `worker/test/`. Pattern:
   build the Hono app with `createApp()`, call `app.request(...)` with a
   signed cookie, or call `handleInbound`/`handleReply` directly with a
