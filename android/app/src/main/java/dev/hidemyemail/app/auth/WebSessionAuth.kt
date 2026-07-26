@@ -19,10 +19,10 @@ import java.security.SecureRandom
  */
 object WebSessionAuth {
 
-    data class Pending(val verifier: String)
+    data class Pending(val verifier: String, val origin: String, val generation: Long)
 
     /** Launches the Custom Tab and returns the PKCE verifier to hold onto. */
-    fun begin(context: Context, serverUrl: String): Pending {
+    fun begin(context: Context, serverUrl: String, generation: Long): Pending {
         val verifier = randomVerifier()
         val challenge = challengeFor(verifier)
         val url = Uri.parse(serverUrl.trimEnd('/'))
@@ -31,7 +31,7 @@ object WebSessionAuth {
             .appendQueryParameter("challenge", challenge)
             .build()
         CustomTabsIntent.Builder().build().launchUrl(context, url)
-        return Pending(verifier)
+        return Pending(verifier, serverUrl, generation)
     }
 
     private fun randomVerifier(): String {

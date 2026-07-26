@@ -3,13 +3,19 @@ import type { AppEnv } from "../app";
 import { routeEmail } from "../../email/router";
 import { fetchS3Object } from "../../lib/s3";
 import { getEnvWithOverride } from "../../lib/settings";
-import { verifySnsMessage } from "../../lib/sns";
+import { getNumericSetting } from "../../lib/settings";
+import { readSnsJson, verifySnsMessage } from "../../lib/sns";
+import { BodyTooLargeError } from "../../lib/bytes";
+import { SesTransientError } from "../../lib/ses";
+import * as q from "../../db/queries";
 
 export function sesInboundRoutes() {
   const r = new Hono<AppEnv>();
 
   r.post("/ses/inbound", async (c) => {
-    const body = await c.req.json<any>().catch(() => null);
+    const parsedBody = await readSnsJson(c.req.raw);
+    if (parsedBody.tooLarge) return c.json({ error: "Body too large" }, 413);
+    const body = parsedBody.body as any;
     if (!body) return c.json({ error: "Bad body" }, 400);
 
     const sesRegion = await getEnvWithOverride(c.env.DB, c.env, "ses_region");
@@ -32,7 +38,8 @@ export function sesInboundRoutes() {
       if (typeof subscribeUrl !== "string" || !/^https:\/\/sns\.[a-z0-9-]+\.amazonaws\.com\//i.test(subscribeUrl)) {
         return c.json({ error: "Invalid subscribe url" }, 400);
       }
-      console.log("SNS inbound SubscribeURL (auto-confirming):", subscribeUrl);
+      const safeUrl = new URL(subscribeUrl);
+      console.log("SNS inbound subscription auto-confirming", `${safeUrl.origin}${safeUrl.pathname}`);
       
       // Auto-confirm the subscription so you don't have to check logs
       const confirmFetch: typeof fetch = (c.env as any).__snsConfirmFetch ?? fetch;
@@ -65,6 +72,15 @@ export function sesInboundRoutes() {
       return c.json({ error: "Missing required fields" }, 400);
     }
 
+    // The SES message identity survives SNS republishing under a new MessageId.
+    // Use it for the delivery and quota reservation so accepted sends can resume
+    // bookkeeping without rekeying related durable rows.
+    const deliveryId = `ses:${messageId}`;
+    const claim = await q.claimDelivery(c.env.DB, deliveryId, "inbound", Date.now(), deliveryId);
+    if (claim.status !== "claimed") {
+      return claim.status === "completed" ? c.json({ ok: true }) : c.json({ error: "Already processing" }, 503);
+    }
+
     // SES receipt verdicts — spf/dmarc gate reverse-alias replies (anti-spoof);
     // spam/virus gate inbound forwards (sender-reputation protection).
     const auth = {
@@ -87,8 +103,15 @@ export function sesInboundRoutes() {
     const s3Fetch = (c.env as any).__s3Fetch ?? fetchS3Object;
     let raw: Uint8Array;
     try {
-      raw = await s3Fetch(creds, s3InboundBucket, messageId);
+      const maxInboundBytes = await getNumericSetting(c.env.DB, "max_inbound_bytes");
+      raw = await s3Fetch(creds, s3InboundBucket, messageId, undefined, maxInboundBytes);
     } catch (err) {
+      if (err instanceof BodyTooLargeError) {
+        return (await q.completeDelivery(c.env.DB, deliveryId, claim.token, Date.now()))
+          ? c.json({ ok: true })
+          : c.json({ error: "Delivery lease lost" }, 503);
+      }
+      await q.releaseDelivery(c.env.DB, deliveryId, claim.token);
       console.error("S3 fetch failed for", messageId, String(err));
       return c.json({ error: "S3 unavailable" }, 500); // 5xx → SNS retries for up to 23 days
     }
@@ -114,10 +137,20 @@ export function sesInboundRoutes() {
 
     try {
       // routeEmail dispatches reverse-alias replies → handleReply, everything else → handleInbound.
-      await routeEmail(fakeMessage, c.env, undefined, auth);
+      await routeEmail(fakeMessage, c.env, undefined, auth, { id: deliveryId, token: claim.token });
     } catch (err) {
+      // A timeout/network failure may have reached SES. Keep both the delivery
+      // claim and sending fence until their deadline prevents an immediate,
+      // potentially duplicate send on SNS retry.
+      if (!(err instanceof SesTransientError)) await q.releaseDelivery(c.env.DB, deliveryId, claim.token);
       console.error("routeEmail failed for", messageId, String(err));
       return c.json({ error: "Processing failed" }, 500); // 5xx → SNS retries
+    }
+
+    const completed = await c.env.DB.prepare("SELECT state FROM mail_deliveries WHERE external_id=? AND claim_token=?")
+      .bind(deliveryId, claim.token).first<{ state: string }>();
+    if (completed?.state !== "completed" && !(await q.completeDelivery(c.env.DB, deliveryId, claim.token, Date.now()))) {
+      return c.json({ error: "Delivery lease lost" }, 503);
     }
 
     return c.json({ ok: true });

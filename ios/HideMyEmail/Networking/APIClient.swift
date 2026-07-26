@@ -13,9 +13,13 @@ actor APIClient {
     private var freshAuth: String?
     private let session: URLSession
 
-    init(baseURL: URL, token: String?) {
+    init(baseURL: URL, token: String?, session: URLSession? = nil) {
         self.baseURL = baseURL
         self.token = token
+        if let session {
+            self.session = session
+            return
+        }
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
         // We manage auth ourselves and never want the system cookie store to
@@ -31,6 +35,12 @@ actor APIClient {
 
     func setFreshAuth(_ freshAuth: String?) {
         self.freshAuth = freshAuth
+    }
+
+    func invalidate() {
+        token = nil
+        freshAuth = nil
+        session.invalidateAndCancel()
     }
 
     // MARK: - Auth

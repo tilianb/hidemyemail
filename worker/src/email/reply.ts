@@ -5,6 +5,7 @@ import { parseMime, setHeader, removeHeaders, getHeader, serializeMime } from ".
 import { sendRaw, SesTransientError } from "../lib/ses";
 import { getEnvWithOverride, getNumericSetting } from "../lib/settings";
 import { pushReply } from "../lib/push";
+import type { DeliveryContext } from "./router";
 
 type SesSend = typeof sendRaw;
 
@@ -31,7 +32,7 @@ function extractEmailAddress(value: string): string {
 }
 
 export async function handleReply(
-  message: ForwardableEmailMessage, env: Env, parsed: ParsedReverse, auth?: ReplyAuth,
+  message: ForwardableEmailMessage, env: Env, parsed: ParsedReverse, auth?: ReplyAuth, delivery?: DeliveryContext,
 ): Promise<void> {
   const db = env.DB;
   const ses: SesSend = (env as any).__sesSend ?? sendRaw;
@@ -61,7 +62,8 @@ export async function handleReply(
   // Accepting `spf || dmarc` while only matching the envelope lets an attacker spoof
   // MAIL FROM=owner and DKIM-sign with their own header-From to slip past. Match each
   // signal against the principal it actually authenticates. Fail closed.
-  const rawBytes = await streamToBytes(message.raw);
+  const maxInboundBytes = await getNumericSetting(db, "max_inbound_bytes");
+  const rawBytes = await streamToBytes(message.raw, maxInboundBytes);
   let mime = parseMime(rawBytes);
   const subject = getHeader(mime, "Subject") ?? "";
   const rawFromHeader = getHeader(mime, "From") ?? "";
@@ -96,12 +98,6 @@ export async function handleReply(
   // aliases — so it is counted identically here. -1 disables a cap.
   const replyCap = await getNumericSetting(db, "rate_limit_reply_per_alias");
   const globalCap = await getNumericSetting(db, "rate_limit_global");
-  const aliasCount = await q.countEventsByTypeSince(db, alias.id, now - 3600_000, ["reply"]);
-  const globalCount = await q.countEventsByTypeSince(db, null, now - 3600_000, ["forward", "reply"]);
-  if ((replyCap >= 0 && aliasCount >= replyCap) || (globalCap >= 0 && globalCount >= globalCap)) {
-    await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: parsed.externalSender, detail: "rate", ts: now });
-    return;
-  }
 
   // ABUSE: even with first-contact + per-alias rate limiting, an authenticated owner
   // can reply to MANY DISTINCT strangers (each of whom emailed them once) and use the
@@ -111,18 +107,23 @@ export async function handleReply(
   // affected. Tripping the cap mutes the alias for 24h (inbound also pauses) to force
   // owner attention. -1 disables the cap. Fail closed.
   const distinctCap = await getNumericSetting(db, "reply_distinct_recipient_cap");
-  if (distinctCap >= 0) {
-    const since = now - 24 * 3600_000;
-    const alreadyContacted = await q.hasRepliedTo(db, alias.id, parsed.externalSender, since);
-    if (!alreadyContacted) {
-      const distinct = await q.countDistinctReplyRecipientsSince(db, alias.id, since);
-      if (distinct >= distinctCap) {
-        await q.muteAlias(db, alias.id, now + 24 * 3600_000); // 24h cooldown mute
-        await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: parsed.externalSender, detail: "distinct_recipient_cap", ts: now });
-        return;
-      }
-    }
+  const reservationId = delivery?.id ?? crypto.randomUUID();
+  const reservationToken = crypto.randomUUID();
+  const reservation = await q.reserveMailQuota(db, {
+    id: reservationId, token: reservationToken, kind: "reply", aliasId: alias.id, recipient: parsed.externalSender, now,
+    aliasCap: replyCap, globalCap, distinctCap, deliveryToken: delivery?.token,
+  });
+  if (reservation === "cap") {
+    const hourStart = now - 3600_000;
+    const active = await q.countHourlyMailQuotaReservations(db, alias.id, hourStart, now);
+    const aliasRateReached = replyCap >= 0 && (await q.countEventsByTypeSince(db, alias.id, hourStart, ["reply"]) + active.aliasReplies) >= replyCap;
+    const globalRateReached = globalCap >= 0 && (await q.countEventsByTypeSince(db, null, hourStart, ["forward", "reply"]) + active.global) >= globalCap;
+    const detail = aliasRateReached || globalRateReached ? "rate" : "distinct_recipient_cap";
+    if (detail === "distinct_recipient_cap") await q.muteAlias(db, alias.id, now + 24 * 3600_000);
+    await q.insertEvent(db, { alias_id: alias.id, type: "reject", external_sender: parsed.externalSender, detail, ts: now });
+    return;
   }
+  if (reservation === "sending") throw new Error("Mail send in flight");
 
   // Strip both legacy (X-Reinjected, X-Forwarded-*, X-Original-From) and the
   // current X-HideMyEmail-* forwarding metadata so an outbound reply never
@@ -138,21 +139,30 @@ export async function handleReply(
   mime = setHeader(mime, "Message-ID", `<${crypto.randomUUID()}@${domainName}>`);
 
   const rawBase64 = toBase64(serializeMime(mime));
+  let sesAccepted = reservation === "accepted";
   try {
     const sesAccessKeyId = await getEnvWithOverride(db, env, "ses_access_key_id");
     const sesSecretAccessKey = await getEnvWithOverride(db, env, "ses_secret_access_key");
     const sesRegion = await getEnvWithOverride(db, env, "ses_region");
-    await ses(
-      { accessKeyId: sesAccessKeyId, secretAccessKey: sesSecretAccessKey, region: sesRegion },
-      { from: alias.full_address, to: parsed.externalSender, rawBase64 }
-    );
+    if (reservation !== "accepted") {
+      if (delivery && !(await q.renewDelivery(db, delivery.id, delivery.token, Date.now()))) throw new Error("Delivery lease lost");
+      if (!(await q.startMailSend(db, reservationId, reservationToken, Date.now()))) throw new Error("Reservation ownership lost");
+      await ses(
+        { accessKeyId: sesAccessKeyId, secretAccessKey: sesSecretAccessKey, region: sesRegion },
+        { from: alias.full_address, to: parsed.externalSender, rawBase64 }
+      );
+      sesAccepted = true;
+      if (!(await q.markMailQuotaAccepted(db, reservationId, reservationToken))) throw new Error("Reservation ownership lost");
+    }
   } catch (err) {
     await q.insertEvent(db, { alias_id: alias.id, type: "error", detail: String(err), ts: now });
+    if (err instanceof Error && (err.message === "Delivery lease lost" || err.message === "Reservation ownership lost")) throw err;
     if (err instanceof SesTransientError) throw err;
+    if (!sesAccepted) await q.releaseMailQuota(db, reservationId, reservationToken);
     return;
   }
 
-  await q.insertEvent(db, { alias_id: alias.id, type: "reply", external_sender: parsed.externalSender, subject, ts: now });
-  await q.incCounter(db, alias.id, "reply_count");
+  if (!(await q.finishMailBookkeeping(db, { id: reservationId, token: reservationToken, aliasId: alias.id, kind: "reply", sender: parsed.externalSender, subject, now, deliveryToken: delivery?.token }))) throw new Error("Reservation ownership lost");
+  // Push is explicitly noncritical and internally catches provider failures.
   await pushReply(env, alias.user_id, alias.full_address, parsed.externalSender, subject);
 }

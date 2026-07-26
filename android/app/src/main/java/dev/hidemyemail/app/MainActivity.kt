@@ -21,6 +21,7 @@ import dev.hidemyemail.app.ui.LoginScreen
 import dev.hidemyemail.app.ui.MainScaffold
 import dev.hidemyemail.app.ui.MfaScreen
 import dev.hidemyemail.app.ui.Theme
+import dev.hidemyemail.app.auth.AuthCallback
 
 class MainActivity : ComponentActivity() {
 
@@ -69,10 +70,7 @@ class MainActivity : ComponentActivity() {
 
     /** hidemyemail://auth?code=… lands here after web sign-in in the Custom Tab. */
     private fun handleDeepLink(intent: Intent?) {
-        val data = intent?.data ?: return
-        if (data.scheme != "hidemyemail" || data.host != "auth") return
-        val code = data.getQueryParameter("code")
-        if (code.isNullOrEmpty()) return
+        val code = intent?.dataString?.let(AuthCallback::code) ?: return
         app.completeWebLogin(code) { message ->
             runOnUiThread {
                 Toast.makeText(this, message, Toast.LENGTH_LONG).show()

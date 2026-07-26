@@ -120,8 +120,8 @@ final class PushManager {
     /// row self-heals: the next dispatch hits an unregistered token, APNs returns
     /// 410, and the Worker prunes it. This guarantees a signed-out/shared device
     /// can't keep showing the previous account's notifications.
-    func onLogout() async {
-        if let token = deviceToken, let client = app?.api() {
+    func onLogout(client: APIClient? = nil) async {
+        if let token = deviceToken, let client = client ?? app?.api() {
             try? await client.unregisterPushDevice(token: token)
         }
         UIApplication.shared.unregisterForRemoteNotifications()

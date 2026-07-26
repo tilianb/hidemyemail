@@ -8,8 +8,10 @@ enum KeychainStore {
     private static let service = "dev.hidemyemail.app"
     private static let account = "session-token"
 
-    static func saveToken(_ token: String) {
-        let data = Data(token.utf8)
+    private struct Record: Codable { let token: String; let origin: String }
+
+    static func saveToken(_ token: String, origin: String) {
+        guard let data = try? JSONEncoder().encode(Record(token: token, origin: origin)) else { return }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -26,7 +28,7 @@ enum KeychainStore {
         SecItemAdd(attributes as CFDictionary, nil)
     }
 
-    static func loadToken() -> String? {
+    static func loadToken(origin: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -36,11 +38,16 @@ enum KeychainStore {
         ]
         var item: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data,
-              let token = String(data: data, encoding: .utf8) else {
+              let data = item as? Data else {
             return nil
         }
-        return token
+        guard let record = try? JSONDecoder().decode(Record.self, from: data) else {
+            // Legacy values have no trustworthy server binding.
+            deleteToken()
+            return nil
+        }
+        guard record.origin == origin else { return nil }
+        return record.token
     }
 
     static func deleteToken() {
