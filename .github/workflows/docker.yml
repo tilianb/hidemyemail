@@ -3,17 +3,23 @@ name: Docker
 # Builds the self-host container.
 # - PRs and pushes to dev: validate linux/amd64 only (no push), GHA cache keeps iteration fast.
 # - Push to main: build + push multi-arch :latest, :main, :sha-<short> to GHCR.
-# - Stable SemVer tag vX.Y.Z: build the exact tagged commit; push release tags to GHCR + Docker Hub.
+# - Stable SemVer release calls this workflow after release validation; pushes release tags to both registries.
 
 on:
+  workflow_call:
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: true
+      DOCKERHUB_TOKEN:
+        required: true
   push:
     branches: ['main']
-    tags: ["v*.*.*"]
     paths:
       - "docker/**"
       - "worker/**"
       - "dashboard/**"
       - ".github/workflows/docker.yml"
+      - ".github/workflows/release.yml"
       - "!**.md"
   pull_request:
     paths:
@@ -183,10 +189,11 @@ jobs:
         if: github.event_name != 'pull_request' && github.ref != 'refs/heads/dev'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: digests-${{ strategy.job-index }}
+          name: digests-${{ github.run_id }}-${{ strategy.job-index }}
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
+          overwrite: true
 
   merge:
     name: Merge Multi-Arch Manifests
@@ -203,7 +210,7 @@ jobs:
       - name: Download digests
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          pattern: digests-*
+          pattern: digests-${{ github.run_id }}-*
           path: /tmp/digests
           merge-multiple: true
 

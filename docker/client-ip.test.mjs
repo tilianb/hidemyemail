@@ -133,28 +133,68 @@ test("Docker refuses malformed encryption keys before listening without logging 
   }
 });
 
-test("publishing workflows gate secrets behind exact stable SemVer", async () => {
-  for (const name of ["docker", "release", "testflight"]) {
-    const workflow = await readFile(new URL(`../.github/workflows/${name}.yml`, import.meta.url), "utf8");
-    assert.match(workflow, /\^v\(0\|\[1-9\]\[0-9\]\*\)\\\.\(0\|\[1-9\]\[0-9\]\*\)\\\.\(0\|\[1-9\]\[0-9\]\*\)\$/);
-
-    const pattern = workflow.match(/\[\[ "\$tag" =~ (\S+) \]\]/)?.[1];
-    assert.ok(pattern, `${name} publish gate regex must be inspectable`);
-    const stableSemVer = new RegExp(pattern);
-    for (const tag of ["v0.0.0", "v1.2.3"]) {
-      assert.equal(stableSemVer.test(tag), true, `${name} should accept ${tag}`);
-    }
-    for (const tag of ["v01.2.3", "v1.02.3", "v1.2.03", "v1x2x3", "v1.2", "v1.2.3-malicious", "v1.2.3-rc1", "v1.2.3+build", "vv1.2.3"]) {
-      assert.equal(stableSemVer.test(tag), false, `${name} should reject ${tag}`);
-    }
-  }
+test("release is the only direct tag publisher", async () => {
+  const [docker, release, testflight] = await Promise.all(
+    ["docker", "release", "testflight"].map((name) =>
+      readFile(new URL(`../.github/workflows/${name}.yml`, import.meta.url), "utf8")),
+  );
+  assert.match(release, /push:\n\s+tags:\n\s+- "v\*\.\*\.\*"/);
+  assert.doesNotMatch(docker, /tags:\s*\[?"v\*\.\*\.\*"/);
+  assert.doesNotMatch(testflight, /push:/);
+  assert.match(docker, /workflow_call:/);
+  assert.match(testflight, /workflow_call:/);
 });
 
-test("release secret-bearing jobs depend on successful publish gates", async () => {
-  for (const [name, job] of [["release", "release"], ["testflight", "testflight"]]) {
-    const workflow = await readFile(new URL(`../.github/workflows/${name}.yml`, import.meta.url), "utf8");
-    const jobBlock = workflow.slice(workflow.indexOf(`  ${job}:`));
-    assert.match(jobBlock, /needs: publish-gate/);
-    assert.match(jobBlock, /if: needs\.publish-gate\.result == 'success' && needs\.publish-gate\.outputs\.stable-release == 'true'/);
+test("release publications depend on the validated tag and required artifacts", async () => {
+  const [release, docker, testflight] = await Promise.all(
+    ["release", "docker", "testflight"].map((name) =>
+      readFile(new URL(`../.github/workflows/${name}.yml`, import.meta.url), "utf8")),
+  );
+  assert.match(release, /node worker\/scripts\/validate-release\.mjs/);
+  for (const job of ["android", "testflight", "containers"]) {
+    const block = release.slice(release.indexOf(`  ${job}:`));
+    assert.match(block.split(/\n  [a-z-]+:/, 1)[0], /needs: validate/);
+  }
+  const releaseJob = release.slice(release.indexOf("  release:"));
+  assert.match(releaseJob, /needs: \[validate, android, testflight, containers\]/);
+  assert.doesNotMatch(releaseJob, /--clobber/);
+  const upload = releaseJob.indexOf("gh release upload");
+  const cleanup = releaseJob.indexOf("gh release delete-asset");
+  const edit = releaseJob.indexOf("gh release edit");
+  assert.ok(upload !== -1 && cleanup > upload && edit > cleanup);
+  assert.match(releaseJob, /grep -Fxq "\$asset_name"/);
+  assert.match(releaseJob, /grep -Fvx "\$asset_name"/);
+  assert.match(releaseJob, /refs\/tags\/\$GITHUB_REF_NAME/);
+  assert.match(releaseJob, /remote_tag_commit.*GITHUB_SHA/);
+  assert.match(release, /name: release-apk-\$\{\{ github\.run_id \}\}-android/);
+  assert.doesNotMatch(release, /release-apk[^\n]*run_attempt/);
+  assert.match(release, /overwrite: true/);
+  assert.match(docker, /name: digests-\$\{\{ github\.run_id \}\}-\$\{\{ strategy\.job-index \}\}/);
+  assert.match(docker, /pattern: digests-\$\{\{ github\.run_id \}\}-\*/);
+  assert.match(docker, /overwrite: true/);
+  assert.match(testflight, /BUILD_NUMBER="\$\{GITHUB_RUN_NUMBER\}\.\$\{GITHUB_RUN_ATTEMPT\}"/);
+  assert.match(testflight, /\^\[1-9\]\[0-9\]\*\\\.\[1-9\]\[0-9\]\*\$/);
+});
+
+test("reusable release workflows expose and receive only explicit secrets", async () => {
+  const [docker, release, testflight] = await Promise.all(
+    ["docker", "release", "testflight"].map((name) =>
+      readFile(new URL(`../.github/workflows/${name}.yml`, import.meta.url), "utf8")),
+  );
+  assert.doesNotMatch(release, /secrets: inherit/);
+  for (const secret of ["DOCKERHUB_USERNAME", "DOCKERHUB_TOKEN"]) {
+    assert.match(docker, new RegExp(`${secret}:\\n\\s+required: true`));
+    assert.match(release, new RegExp(`${secret}: \\$\\{\\{ secrets\\.${secret} \\}\\}`));
+  }
+  for (const secret of [
+    "BUILD_CERTIFICATE_BASE64",
+    "P12_PASSWORD",
+    "BUILD_PROVISION_PROFILE_BASE64",
+    "APP_STORE_CONNECT_API_PRIVATE_KEY",
+    "APP_STORE_CONNECT_API_KEY_ID",
+    "APP_STORE_CONNECT_API_ISSUER_ID",
+  ]) {
+    assert.match(testflight, new RegExp(`${secret}:\\n\\s+required: true`));
+    assert.match(release, new RegExp(`${secret}: \\$\\{\\{ secrets\\.${secret} \\}\\}`));
   }
 });

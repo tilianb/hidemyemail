@@ -4,14 +4,17 @@ on:
   push:
     tags:
       - "v*.*.*"
+
 permissions: {}
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  publish-gate:
-    name: Verify publish ref
+  validate:
+    name: Validate release source
     runs-on: ubuntu-latest
-    outputs:
-      stable-release: ${{ steps.ref.outputs.stable-release }}
     permissions:
       contents: read
     steps:
@@ -19,98 +22,168 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
-      - name: Require a release tag from main
-        id: ref
+      - name: Require a stable release tag from main
         run: |
-          tag="$GITHUB_REF_NAME"
-          [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || exit 1
           git fetch origin main
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
-          echo "stable-release=true" >> "$GITHUB_OUTPUT"
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "Release tag must point to a commit on main." >&2
+            exit 1
+          }
+      - name: Validate versions, Android versionCode, and release notes
+        run: |
+          node worker/scripts/validate-release.mjs \
+            --tag="$GITHUB_REF_NAME" \
+            --repository="$GITHUB_REPOSITORY" \
+            --notes-output=release-notes.md
+      - name: Validate exact remote tag
+        run: |
+          remote_ref="refs/remotes/origin/release-tag"
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:$remote_ref"
+          remote_tag_commit="$(git rev-parse "$remote_ref^{commit}")"
+          if [ "$remote_tag_commit" != "$GITHUB_SHA" ]; then
+            echo "Remote tag $GITHUB_REF_NAME moved from $GITHUB_SHA to $remote_tag_commit." >&2
+            exit 1
+          fi
 
-  release:
-    name: Create GitHub Release
-    needs: publish-gate
-    if: needs.publish-gate.result == 'success' && needs.publish-gate.outputs.stable-release == 'true'
+  android:
+    name: Build signed Android APK
+    needs: validate
     runs-on: ubuntu-latest
     environment: production
     permissions:
-      contents: write
+      contents: read
     steps:
-      - name: Checkout
+      - name: Checkout exact tag
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          fetch-depth: 0
-
-      - name: Resolve validated tag
-        id: tag
-        run: |
-          tag="$GITHUB_REF_NAME"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
-      - name: Create release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.tag.outputs.tag }}
-        run: |
-          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
-            git tag "$TAG"
-            git push origin "$TAG"
-          fi
-          
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists. Skipping creation."
-          else
-            gh release create "$TAG" \
-              --title "$TAG" \
-              --generate-notes \
-              --verify-tag
-          fi
-
+          ref: ${{ github.sha }}
       - name: Set up JDK 21
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
           java-version: '21'
           distribution: 'temurin'
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
-
-      - name: Decrypt Keystore
+      - name: Decrypt keystore
         env:
           ANDROID_KEYSTORE_DECRYPT_PASS: ${{ secrets.ANDROID_KEYSTORE_DECRYPT_PASS }}
-        run: |
-          cd android
-          openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 -in release.keystore.enc -out release.keystore -k "$ANDROID_KEYSTORE_DECRYPT_PASS"
-
-      # Firebase config enables FCM push in the shipped APK. Written from a
-      # secret so release builds include it; absent on forks/PRs, where the
-      # app still builds (push reported unavailable) — see android/README.md.
-      - name: Write google-services.json
+        run: openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 -in android/release.keystore.enc -out android/release.keystore -k "$ANDROID_KEYSTORE_DECRYPT_PASS"
+      - name: Write Firebase configuration
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
           if [ -n "$GOOGLE_SERVICES_JSON" ]; then
             printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
-            echo "Wrote android/app/google-services.json — FCM push enabled."
           else
-            echo "GOOGLE_SERVICES_JSON secret not set — building without Firebase (push disabled)."
+            echo "GOOGLE_SERVICES_JSON is unset; building without Firebase push."
           fi
-
-      - name: Build Android Release APK
+      - name: Build Android release APK
+        working-directory: android
         env:
           ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
           ANDROID_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        run: |
-          cd android
-          ./gradlew assembleRelease
+        run: ./gradlew assembleRelease
+      - name: Stage versioned APK
+        run: cp android/app/build/outputs/apk/release/app-release.apk "HideMyEmail-${GITHUB_REF_NAME}.apk"
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-apk-${{ github.run_id }}-android
+          path: HideMyEmail-${{ github.ref_name }}.apk
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
 
-      - name: Upload Android APK
+  testflight:
+    name: Publish TestFlight build
+    needs: validate
+    permissions:
+      contents: read
+    uses: ./.github/workflows/testflight.yml
+    secrets:
+      BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+      P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+      BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+      APP_STORE_CONNECT_API_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY }}
+      APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+      APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+
+  containers:
+    name: Publish release containers
+    needs: validate
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/docker.yml
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  release:
+    name: Publish GitHub release
+    needs: [validate, android, testflight, containers]
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout exact tag
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - name: Revalidate immutable remote tag
+        run: |
+          remote_ref="refs/remotes/origin/release-tag"
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:$remote_ref"
+          remote_tag_commit="$(git rev-parse "$remote_ref^{commit}")"
+          if [ "$remote_tag_commit" != "$GITHUB_SHA" ]; then
+            echo "Remote tag $GITHUB_REF_NAME moved from $GITHUB_SHA to $remote_tag_commit." >&2
+            exit 1
+          fi
+      - name: Recreate curated release notes
+        run: |
+          node worker/scripts/validate-release.mjs \
+            --tag="$GITHUB_REF_NAME" \
+            --repository="$GITHUB_REPOSITORY" \
+            --notes-output=release-notes.md
+      - name: Download exact APK artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-apk-${{ github.run_id }}-android
+          path: release-assets
+      - name: Publish release last
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          apk_name="HideMyEmail-${TAG}.apk"
-          cp android/app/build/outputs/apk/release/app-release.apk "$apk_name"
-          gh release upload "$TAG" "$apk_name" --clobber
+          source_asset="release-assets/HideMyEmail-${GITHUB_REF_NAME}.apk"
+          short_sha="${GITHUB_SHA:0:7}"
+          asset_name="HideMyEmail-${GITHUB_REF_NAME}-${short_sha}-run${GITHUB_RUN_ID}.apk"
+          asset="release-assets/$asset_name"
+          test -f "$source_asset"
+          cp "$source_asset" "$asset"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            if ! gh release view "$GITHUB_REF_NAME" --json assets \
+              --jq '.assets[].name' | grep -Fxq "$asset_name"; then
+              gh release upload "$GITHUB_REF_NAME" "$asset"
+            fi
+
+            mapfile -t obsolete_assets < <(
+              gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' |
+                grep -E '^HideMyEmail-v[^/]+\.apk$|^HideMyEmail-v[^/]+-[0-9a-f]+-(attempt|run)[0-9]+\.apk$' |
+                grep -Fvx "$asset_name" || true
+            )
+            for obsolete_asset in "${obsolete_assets[@]}"; do
+              gh release delete-asset "$GITHUB_REF_NAME" "$obsolete_asset" --yes
+            done
+
+            gh release edit "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --notes-file release-notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" "$asset" \
+              --title "$GITHUB_REF_NAME" \
+              --notes-file release-notes.md \
+              --verify-tag
+          fi
