@@ -30,6 +30,17 @@ if (missing.length) {
   console.error(`[hidemyemail] See docker/.env.example for the full list.`);
   process.exit(1);
 }
+try {
+  const encryptionKey = Buffer.from(env.DESTINATION_ENCRYPTION_KEY, "base64");
+  if (
+    !/^[A-Za-z0-9+/]{43}=$/.test(env.DESTINATION_ENCRYPTION_KEY)
+    || encryptionKey.length !== 32
+    || encryptionKey.toString("base64") !== env.DESTINATION_ENCRYPTION_KEY
+  ) throw new Error();
+} catch {
+  console.error("[hidemyemail] Invalid encryption key configuration");
+  process.exit(1);
+}
 
 const DATA_DIR = env.DATA_DIR ?? "/data";
 const ASSETS_DIR = env.ASSETS_DIR ?? "/app/public";

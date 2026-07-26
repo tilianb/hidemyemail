@@ -1,7 +1,49 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { normalizeIp, trustedProxySet, workerHeaders } from "./client-ip.mjs";
+
+function startServerWithKey(key) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [fileURLToPath(new URL("./server.mjs", import.meta.url))], {
+      env: {
+        ...process.env,
+        SESSION_SECRET: "session-secret",
+        AUTH_PASSWORD_HASH: "password-hash",
+        AUTH_PASSWORD_SALT: "password-salt",
+        DESTINATION_ENCRYPTION_KEY: key,
+        SES_ACCESS_KEY_ID: "access-key",
+        SES_SECRET_ACCESS_KEY: "secret-key",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill("SIGKILL");
+      reject(new Error("Docker server did not exit within 5 seconds"));
+    }, 5_000);
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
+    child.once("close", (code) => {
+      clearTimeout(timer);
+      if (settled) return;
+      settled = true;
+      resolve({ code, stdout, stderr });
+    });
+  });
+}
 
 test("canonicalizes IPv4-mapped and equivalent IPv6 addresses", () => {
   assert.equal(normalizeIp("::FFFF:127.0.0.1"), "127.0.0.1");
@@ -73,6 +115,22 @@ test("Docker runtime copies every local server module import", async () => {
 test("Docker runtime binds the configured canonical app origin", async () => {
   const server = await readFile(new URL("./server.mjs", import.meta.url), "utf8");
   assert.match(server, /APP_ORIGIN:\s*env\.APP_ORIGIN/);
+});
+
+test("Docker refuses malformed encryption keys before listening without logging them", async () => {
+  for (const key of [
+    "not-base64!",
+    "YQ==",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==", // 31 bytes
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", // 33 bytes
+    `${"A".repeat(43)}=junk`,
+  ]) {
+    const result = await startServerWithKey(key);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /Invalid encryption key configuration/);
+    assert.doesNotMatch(result.stdout + result.stderr, new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.doesNotMatch(result.stdout, /Listening on/);
+  }
 });
 
 test("publishing workflows gate secrets behind exact stable SemVer", async () => {
