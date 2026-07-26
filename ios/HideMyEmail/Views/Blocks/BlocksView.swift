@@ -95,7 +95,7 @@ struct BlocksView: View {
             async let a = client.aliases()
             (blocks, domains, aliases) = try await (b, d, a)
             error = nil
-        } catch { handle(error) }
+        } catch { handle(error, from: client) }
     }
 
     private func delete(_ offsets: IndexSet, from group: [Block]) {
@@ -104,15 +104,15 @@ struct BlocksView: View {
         Task {
             guard let client = app.api() else { return }
             for rule in targets {
-                do { try await client.deleteBlock(id: rule.id) } catch { handle(error) }
+                do { try await client.deleteBlock(id: rule.id) } catch { handle(error, from: client) }
             }
             await reload()
         }
     }
 
-    private func handle(_ error: Error) {
+    private func handle(_ error: Error, from client: APIClient) {
         if let err = error as? APIError, err.isAuthFailure {
-            Task { await app.handleAuthFailure() }
+            Task { await app.handleAuthFailure(from: client) }
         } else {
             self.error = error.localizedDescription
         }

@@ -79,8 +79,8 @@ fun DomainsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
     val quotaLabel = if (maxSubdomains >= 0) "${personalSubdomains.size} / $maxSubdomains used"
     else "${personalSubdomains.size} used"
 
-    fun handle(e: Exception) {
-        if (e is ApiException && e.isAuthFailure) app.handleAuthFailure() else error = e.message
+    fun handle(e: Exception, client: dev.hidemyemail.app.net.ApiClient) {
+        if (e is ApiException && e.isAuthFailure) app.handleAuthFailure(client) else error = e.message
     }
 
     suspend fun reload() {
@@ -110,7 +110,7 @@ fun DomainsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
             }
             error = null
         } catch (e: Exception) {
-            handle(e)
+            handle(e, client)
         } finally {
             loading = false
         }
@@ -190,15 +190,16 @@ fun DomainsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
                         Button(
                             onClick = {
                                 val base = selectedBaseDomain ?: return@Button
+                                val client = app.api() ?: return@Button
                                 creating = true
                                 scope.launch {
                                     try {
-                                        app.api()?.createDomain(prefix, selectedDestination, base.id)
+                                        client.createDomain(prefix, selectedDestination, base.id)
                                         prefix = ""
                                         selectedDestination = "global"
                                         reload()
                                     } catch (e: Exception) {
-                                        handle(e)
+                                        handle(e, client)
                                     } finally {
                                         creating = false
                                     }
@@ -310,6 +311,7 @@ fun DomainsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
                     onClick = {
                         saving = true
                         scope.launch {
+                            val client = app.api() ?: return@launch
                             try {
                                 val fields = kotlinx.serialization.json.buildJsonObject {
                                     if (selection != (d.defaultDestination ?: "global")) {
@@ -330,11 +332,11 @@ fun DomainsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
                                         )
                                     }
                                 }
-                                app.api()?.updateDomain(d.id, fields)
+                                client.updateDomain(d.id, fields)
                                 editing = null
                                 reload()
                             } catch (e: Exception) {
-                                handle(e)
+                                handle(e, client)
                             } finally {
                                 saving = false
                             }
@@ -360,11 +362,12 @@ fun DomainsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
                 TextButton(onClick = {
                     pendingDelete = null
                     scope.launch {
+                        val client = app.api() ?: return@launch
                         try {
-                            app.api()?.deleteDomain(d.id)
+                            client.deleteDomain(d.id)
                             reload()
                         } catch (e: Exception) {
-                            handle(e)
+                            handle(e, client)
                         }
                     }
                 }) { Text("Delete", color = Theme.red) }

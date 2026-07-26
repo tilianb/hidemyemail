@@ -28,6 +28,10 @@ Update both:
 - The SNS certificate URL must be an AWS SNS certificate URL.
 - Ensure you subscribed the correct topic to `/api/ses/inbound`.
 
+An unset `SNS_INBOUND_TOPIC_ARN` returns a server configuration error rather
+than accepting an unsigned authority. Set the exact ARN as a plain environment
+variable; do not configure `SNS_SECRET`.
+
 ## SNS outbound notification returns 401 or 403
 
 - `SNS_ALLOWED_TOPIC_ARN` must exactly match the outbound SES event topic.
@@ -39,6 +43,12 @@ Update both:
 - Confirm the endpoint is reachable over public HTTPS.
 - Confirm any reverse proxy forwards POST requests and request bodies.
 - Confirm the Worker has the right topic ARN for that endpoint.
+
+## SNS returns 503 or logs "Already processing"
+
+Another worker owns the delivery lease. Allow SNS to retry. Do not manually
+republish under a different topic or bypass the delivery claim; completed
+duplicates are acknowledged without repeating mail side effects.
 
 ## S3 fetch fails with 403
 
@@ -52,6 +62,13 @@ Update both:
 - Confirm SES receipt rule stores the message in the configured bucket.
 - Check whether your receipt rule uses an object key prefix.
 - Confirm SNS `mail.messageId` matches the S3 object key format used by the rule.
+
+## Inbound mail is acknowledged but not forwarded
+
+Check whether raw MIME exceeds `max_inbound_bytes` (25 MiB by default). Oversize
+mail is intentionally acknowledged and dropped so SNS does not retry a payload
+the instance will never accept. Raise the setting only after accounting for
+Worker memory and attachment risk.
 
 ## SES outbound send fails
 
@@ -100,7 +117,8 @@ Add the TXT verification record shown in Admin, wait for DNS propagation, then v
 ## Destination decrypt errors
 
 - `DESTINATION_ENCRYPTION_KEY` must be the same value used when destinations were stored.
-- The key must be a 32-byte hex string.
+- The key must be base64 encoding of exactly 32 random bytes. Generate it with
+  `openssl rand -base64 32`; a hex string fails key import.
 - Legacy plaintext destination rows are still supported, but invalid ciphertext fails closed.
 
 ## Docker container will not start

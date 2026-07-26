@@ -4,6 +4,7 @@ import { createApp } from "../src/api/app";
 import { resetDb } from "./helpers";
 import * as q from "../src/db/queries";
 import { makeSignedSnsBody } from "./sns-signature";
+import { fetchS3Object } from "../src/lib/s3";
 
 const INBOUND_ARN = "arn:aws:sns:ap-southeast-2:123456789012:hidemyemail-inbound-notifications";
 const RAW_EMAIL = [
@@ -137,6 +138,72 @@ test("valid Received → S3 fetched, inbound forwarded, SES sends, 200", async (
   expect(atob(e._sesSent[0].rawBase64)).toContain("Reply-To: shop+alice=store.com@test.hidemyemail.dev");
 });
 
+test("completed SES message replay returns 200 without a second send", async () => {
+  const e = testEnv();
+  const app = createApp();
+  const signed = await snsNotification();
+  const request = () => app.request("/api/ses/inbound", {
+    method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(signed.body),
+  }, { ...e, __snsCertFetch: async () => new Response(signed.certPem) });
+
+  expect((await request()).status).toBe(200);
+  expect((await request()).status).toBe(200);
+  expect(e._sesSent).toHaveLength(1);
+});
+
+test("same SES message under a new SNS MessageId is not sent twice", async () => {
+  const e = testEnv();
+  const app = createApp();
+  const first = await snsNotification("shop@test.hidemyemail.dev", "semantic-replay");
+  const second = await snsNotification("shop@test.hidemyemail.dev", "semantic-replay");
+  const send = (signed: Awaited<ReturnType<typeof snsNotification>>) => app.request("/api/ses/inbound", {
+    method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(signed.body),
+  }, { ...e, __snsCertFetch: async () => new Response(signed.certPem) });
+  expect((await send(first)).status).toBe(200);
+  expect((await send(second)).status).toBe(200);
+  expect(e._sesSent).toHaveLength(1);
+});
+
+test("terminal oversized S3 object is completed and immediately acknowledged", async () => {
+  const signed = await snsNotification("shop@test.hidemyemail.dev", "too-large");
+  const e = { ...testEnv(), __s3Fetch: async () => { throw new (await import("../src/lib/bytes")).BodyTooLargeError("too large"); } } as any;
+  const request = () => createApp().request("/api/ses/inbound", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(signed.body) }, { ...e, __snsCertFetch: async () => new Response(signed.certPem) });
+  expect((await request()).status).toBe(200);
+  expect((await request()).status).toBe(200);
+});
+
+test("oversized S3 error response stays retryable and a valid retry is processed", async () => {
+  const messageId = "oversized-s3-error";
+  const deliveryId = `ses:${messageId}`;
+  const signed = await snsNotification("shop@test.hidemyemail.dev", messageId);
+  let s3Response = () => new Response("x".repeat(4097), { status: 503 });
+  const e = {
+    ...testEnv(),
+    __s3Fetch: (creds: any, bucket: string, key: string, _fetch: undefined, maxBytes: number) =>
+      fetchS3Object(creds, bucket, key, async () => s3Response(), maxBytes),
+  } as any;
+  const request = () => createApp().request("/api/ses/inbound", {
+    method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(signed.body),
+  }, { ...e, __snsCertFetch: async () => new Response(signed.certPem) });
+
+  expect((await request()).status).toBe(500);
+  expect(await (env.DB as D1Database).prepare("SELECT state FROM mail_deliveries WHERE external_id=?").bind(deliveryId).first()).toBeNull();
+
+  s3Response = () => new Response(RAW_EMAIL);
+  expect((await request()).status).toBe(200);
+  expect(e._sesSent).toHaveLength(1);
+  expect((await (env.DB as D1Database).prepare("SELECT state FROM mail_deliveries WHERE external_id=?").bind(deliveryId).first<{ state: string }>())?.state).toBe("completed");
+});
+
+test("oversized public SNS body is rejected before certificate fetch", async () => {
+  let certFetches = 0;
+  const res = await createApp().request("/api/ses/inbound", {
+    method: "POST", body: "x".repeat(300_000), headers: { "Content-Type": "text/plain" },
+  }, { ...testEnv(), __snsCertFetch: async () => { certFetches++; return new Response(""); } });
+  expect(res.status).toBe(413);
+  expect(certFetches).toBe(0);
+});
+
 test("reply to reverse alias routes to handleReply, not a re-wrapped inbound", async () => {
   const alias = await q.autoCreateAlias(env.DB as D1Database, 1, "shop", "shop@test.hidemyemail.dev");
   // First-contact rule: model the prior inbound from alice@store.com this is a reply to.
@@ -165,6 +232,127 @@ test("reply to reverse alias routes to handleReply, not a re-wrapped inbound", a
   expect(e._sesSent[0].from).toBe("shop@test.hidemyemail.dev");
   expect(e._sesSent[0].to).toBe("alice@store.com");
   expect(atob(e._sesSent[0].rawBase64)).not.toContain("=store.com=");
+});
+
+test("reply retry resumes an SES-accepted delivery without muting or sending twice", async () => {
+  const alias = await q.autoCreateAlias(env.DB as D1Database, 1, "shop", "shop@test.hidemyemail.dev");
+  await q.recordContact(env.DB as D1Database, alias!.id, "alice@store.com", Date.now());
+  await (env.DB as D1Database).prepare("UPDATE settings SET value='1' WHERE key='reply_distinct_recipient_cap'").run();
+  await (env.DB as D1Database).prepare(
+    "CREATE TRIGGER fail_reply_event BEFORE INSERT ON events WHEN NEW.type='reply' BEGIN SELECT RAISE(FAIL, 'bookkeeping failed'); END"
+  ).run();
+  const replyRaw = "From: Me <real@me.com>\r\nTo: shop+alice=store.com@test.hidemyemail.dev\r\nSubject: Re: Order\r\n\r\nThanks\r\n";
+  const e = testEnv({ raw: replyRaw });
+  const signed = await snsNotification("shop+alice=store.com@test.hidemyemail.dev", "msg-reply-retry", { source: "real@me.com", spf: "PASS" });
+  const request = () => createApp().request("/api/ses/inbound", {
+    method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(signed.body),
+  }, { ...e, __snsCertFetch: async () => new Response(signed.certPem) });
+
+  expect((await request()).status).toBe(500);
+  expect(e._sesSent).toHaveLength(1);
+  await (env.DB as D1Database).prepare("DROP TRIGGER fail_reply_event").run();
+  expect((await request()).status).toBe(200);
+
+  expect(e._sesSent).toHaveLength(1);
+  expect((await q.getAlias(env.DB as D1Database, "shop@test.hidemyemail.dev"))?.muted_until).toBeNull();
+  expect((await q.getAlias(env.DB as D1Database, "shop@test.hidemyemail.dev"))?.reply_count).toBe(1);
+  expect((await (env.DB as D1Database).prepare("SELECT COUNT(*) n FROM events WHERE type='reply'").first<{ n: number }>())?.n).toBe(1);
+});
+
+test("inbound retry resumes an SES-accepted delivery without sending twice", async () => {
+  await (env.DB as D1Database).prepare(
+    "CREATE TRIGGER fail_forward_event BEFORE INSERT ON events WHEN NEW.type='forward' BEGIN SELECT RAISE(FAIL, 'bookkeeping failed'); END"
+  ).run();
+  const e = testEnv();
+  const signed = await snsNotification("shop@test.hidemyemail.dev", "msg-forward-retry");
+  const request = () => createApp().request("/api/ses/inbound", {
+    method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(signed.body),
+  }, { ...e, __snsCertFetch: async () => new Response(signed.certPem) });
+
+  expect((await request()).status).toBe(500);
+  expect(e._sesSent).toHaveLength(1);
+  await (env.DB as D1Database).prepare("DROP TRIGGER fail_forward_event").run();
+  expect((await request()).status).toBe(200);
+
+  expect(e._sesSent).toHaveLength(1);
+  expect((await q.getAlias(env.DB as D1Database, "shop@test.hidemyemail.dev"))?.fwd_count).toBe(1);
+  expect((await (env.DB as D1Database).prepare("SELECT COUNT(*) n FROM events WHERE type='forward'").first<{ n: number }>())?.n).toBe(1);
+});
+
+test("new SNS id resumes accepted semantic delivery bookkeeping without a second SES send", async () => {
+  await (env.DB as D1Database).prepare(
+    "CREATE TRIGGER fail_forward_event BEFORE INSERT ON events WHEN NEW.type='forward' BEGIN SELECT RAISE(FAIL, 'bookkeeping failed'); END"
+  ).run();
+  const e = testEnv();
+  const first = await snsNotification("shop@test.hidemyemail.dev", "semantic-takeover");
+  const replacement = await snsNotification("shop@test.hidemyemail.dev", "semantic-takeover");
+  const send = (signed: Awaited<ReturnType<typeof snsNotification>>) => createApp().request("/api/ses/inbound", {
+    method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(signed.body),
+  }, { ...e, __snsCertFetch: async () => new Response(signed.certPem) });
+
+  expect((await send(first)).status).toBe(500);
+  expect(e._sesSent).toHaveLength(1);
+  await (env.DB as D1Database).prepare("UPDATE mail_deliveries SET lease_until=0").run();
+  await (env.DB as D1Database).prepare("DROP TRIGGER fail_forward_event").run();
+
+  expect((await send(replacement)).status).toBe(200);
+  expect(e._sesSent).toHaveLength(1);
+  expect((await q.getAlias(env.DB as D1Database, "shop@test.hidemyemail.dev"))?.fwd_count).toBe(1);
+});
+
+test("transient SES timeout keeps the send fence and retry before deadline cannot send again", async () => {
+  const e = testEnv();
+  const signed = await snsNotification("shop@test.hidemyemail.dev", "timeout-fence");
+  let sends = 0;
+  e.__sesSend = async () => {
+    sends++;
+    throw new (await import("../src/lib/ses")).SesTransientError("SES request timed out");
+  };
+  const request = () => createApp().request("/api/ses/inbound", {
+    method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(signed.body),
+  }, { ...e, __snsCertFetch: async () => new Response(signed.certPem) });
+
+  expect((await request()).status).toBe(500);
+  expect((await request()).status).toBe(503);
+  expect(sends).toBe(1);
+  expect(await (env.DB as D1Database).prepare(
+    "SELECT d.state delivery_state,r.state reservation_state,r.send_deadline FROM mail_deliveries d JOIN mail_quota_reservations r ON r.id=d.external_id"
+  ).first()).toMatchObject({ delivery_state: "processing", reservation_state: "sending" });
+});
+
+test("replacement waits while the original SES send remains in flight", async () => {
+  const e = testEnv();
+  const signed = await snsNotification("shop@test.hidemyemail.dev", "msg-lease-takeover");
+  const deliveryId = "ses:msg-lease-takeover";
+  let sendStarted!: () => void;
+  let finishSend!: () => void;
+  const started = new Promise<void>((resolve) => { sendStarted = resolve; });
+  const finish = new Promise<void>((resolve) => { finishSend = resolve; });
+  e.__sesSend = async (_c: any, m: any) => {
+    e._sesSent.push(m);
+    if (e._sesSent.length === 1) {
+      sendStarted();
+      await finish;
+    }
+    return "mid";
+  };
+
+  const request = () => createApp().request("/api/ses/inbound", {
+    method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(signed.body),
+  }, { ...e, __snsCertFetch: async () => new Response(signed.certPem) });
+
+  const original = request();
+  await started;
+  await (env.DB as D1Database).prepare("UPDATE mail_deliveries SET lease_until=? WHERE external_id=?").bind(Date.now() - 1, deliveryId).run();
+
+  expect((await request()).status).toBe(503);
+  expect(e._sesSent).toHaveLength(1);
+
+  finishSend();
+  expect((await original).status).toBe(200);
+  expect((await (env.DB as D1Database).prepare("SELECT COUNT(*) n FROM events WHERE type='forward'").first<{ n: number }>())?.n).toBe(1);
+  expect((await q.getAlias(env.DB as D1Database, "shop@test.hidemyemail.dev"))?.fwd_count).toBe(1);
+  expect((await (env.DB as D1Database).prepare("SELECT state FROM mail_deliveries WHERE external_id=?").bind(deliveryId).first<{ state: string }>())?.state).toBe("completed");
 });
 
 test("reply with SPF fail → no SES send (anti-spoof)", async () => {
