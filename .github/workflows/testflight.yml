@@ -61,8 +61,19 @@ jobs:
         with:
           xcode-version: latest-stable
 
+      - name: Cache Homebrew downloads
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: brew-xcodegen-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ios/project.yml') }}
+          restore-keys: |
+            brew-xcodegen-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install XcodeGen
         run: brew install xcodegen
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
 
       - name: Generate Xcode Project
         run: |
