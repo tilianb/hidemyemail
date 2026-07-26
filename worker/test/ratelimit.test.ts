@@ -1,7 +1,9 @@
 import { env } from "cloudflare:test";
+import { Hono } from "hono";
 import { beforeAll, beforeEach, expect, test } from "vitest";
 import { createApp } from "../src/api/app";
 import { hashPassword } from "../src/lib/auth";
+import { markFailedAttempt, rateLimitFailures, sourceIp } from "../src/lib/auth-security";
 
 let testEnv: any;
 beforeAll(async () => {
@@ -35,8 +37,8 @@ test("successful logins do not consume rate limit budget", async () => {
     .prepare("SELECT attempts FROM rate_limits WHERE ip = ?")
     .bind(ip)
     .first<{ attempts: number }>();
-  // No row should exist because no failure ever happened.
-  expect(row).toBeNull();
+  // Atomic refunds may retain an empty bucket, but no failure is charged.
+  expect(row?.attempts ?? 0).toBe(0);
 });
 
 test("failed logins consume budget and 11th attempt is blocked", async () => {
@@ -52,6 +54,90 @@ test("failed logins consume budget and 11th attempt is blocked", async () => {
   // 11th attempt — even with the correct password — is blocked by rate limit.
   const blocked = await loginAttempt(app, "hunter2", ip);
   expect(blocked.status).toBe(429);
+});
+
+test("concurrent failures atomically contend for the final attempt", async () => {
+  const app = createApp();
+  const ip = "10.0.0.8";
+
+  await (env.DB as D1Database).prepare(
+    "INSERT INTO rate_limits (ip, attempts, reset_at) VALUES (?, 9, ?)"
+  ).bind(ip, Math.floor(Date.now() / 1000) + 3600).run();
+
+  const responses = await Promise.all([
+    loginAttempt(app, "wrong-passphrase-a", ip),
+    loginAttempt(app, "wrong-passphrase-b", ip),
+  ]);
+
+  expect(responses.map((response) => response.status).sort()).toEqual([401, 429]);
+  const row = await (env.DB as D1Database).prepare("SELECT attempts FROM rate_limits WHERE ip = ?")
+    .bind(ip).first<{ attempts: number }>();
+  expect(row?.attempts).toBe(10);
+});
+
+test("a successful concurrent request refunds only its own reservation", async () => {
+  const app = new Hono<any>();
+  let releaseFailure!: () => void;
+  const failureMayFinish = new Promise<void>((resolve) => { releaseFailure = resolve; });
+  let failureAdmitted!: () => void;
+  const failureWasAdmitted = new Promise<void>((resolve) => { failureAdmitted = resolve; });
+  app.use("*", rateLimitFailures());
+  app.get("/fail", async (c) => {
+    failureAdmitted();
+    await failureMayFinish;
+    markFailedAttempt(c);
+    return c.json({ error: "no" }, 401);
+  });
+  app.get("/success", (c) => c.text("ok"));
+  const ip = "10.0.0.9";
+
+  const failed = app.request("/fail", { headers: withIp(ip) }, testEnv);
+  await failureWasAdmitted;
+  expect((await app.request("/success", { headers: withIp(ip) }, testEnv)).status).toBe(200);
+  releaseFailure();
+  expect((await failed).status).toBe(401);
+
+  const row = await (env.DB as D1Database).prepare("SELECT attempts FROM rate_limits WHERE ip = ?")
+    .bind(ip).first<{ attempts: number }>();
+  expect(row?.attempts).toBe(1);
+});
+
+test("cleanup failure does not replace the original route exception", async () => {
+  const cleanupError = new Error("cleanup contains sensitive database details");
+  const fakeDb = {
+    prepare(sql: string) {
+      return {
+        bind() {
+          return sql.startsWith("INSERT")
+            ? { first: async () => ({ reset_at: 123 }) }
+            : { run: async () => { throw cleanupError; } };
+        },
+      };
+    },
+  };
+  const app = new Hono<any>();
+  app.use("*", rateLimitFailures());
+  app.get("/throws", () => { throw new Error("original route error"); });
+  app.onError((error, c) => c.text(error.message, 500));
+
+  const response = await app.request("/throws", {}, { ...testEnv, DB: fakeDb });
+  expect(await response.text()).toBe("original route error");
+});
+
+test("source IP headers are isolated by deployment mode with a shared fallback", async () => {
+  const app = new Hono<any>();
+  app.get("/", (c) => c.text(sourceIp(c)));
+  const headers = {
+    "cf-connecting-ip": "203.0.113.10",
+    "x-hidemyemail-client-ip": "192.0.2.20",
+    "x-forwarded-for": "198.51.100.30",
+  };
+
+  expect(await (await app.request("/", { headers }, { ...testEnv, ENVIRONMENT: "production" })).text()).toBe("203.0.113.10");
+  expect(await (await app.request("/", { headers }, { ...testEnv, ENVIRONMENT: "self-hosted" })).text()).toBe("192.0.2.20");
+  expect(await (await app.request("/", { headers: { "x-hidemyemail-client-ip": "192.0.2.20" } }, { ...testEnv, ENVIRONMENT: "production" })).text()).toBe("unknown");
+  expect(await (await app.request("/", { headers: { "cf-connecting-ip": "203.0.113.10" } }, { ...testEnv, ENVIRONMENT: "self-hosted" })).text()).toBe("unknown");
+  expect(await (await app.request("/", { headers: { "x-forwarded-for": "198.51.100.30" } }, { ...testEnv, ENVIRONMENT: "production" })).text()).toBe("unknown");
 });
 
 test("rate limit is shared across login and register endpoints", async () => {
@@ -125,6 +211,10 @@ test("passkey/challenge is not rate limited", async () => {
   }
 
   // Challenge endpoint must still respond — it doesn't authenticate, just issues a random challenge.
-  const ch = await app.request("/api/passkey/challenge", { method: "POST", headers: withIp(ip) }, testEnv);
+  const ch = await app.request(
+    "/api/passkey/challenge",
+    { method: "POST", headers: withIp(ip) },
+    { ...testEnv, APP_ORIGIN: "https://mail.example.net" },
+  );
   expect(ch.status).toBe(200);
 }, 15000);

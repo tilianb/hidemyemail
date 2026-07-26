@@ -5,34 +5,13 @@ import { signPasskeyRegChallenge, verifyPasskeyRegChallenge } from "../../lib/au
 import { hasFreshAuth } from "../auth-helpers";
 import { fromBase64url, toBase64url, getRpFromOrigin } from "../../lib/webauthn";
 import type { RegistrationResponseJSON } from "@simplewebauthn/server";
-
-const RATE_LIMIT_MAX = 10;
-const RATE_LIMIT_WINDOW_SECONDS = 3600;
-
-async function canAttempt(ip: string, db: D1Database): Promise<boolean> {
-  const now = Math.floor(Date.now() / 1000);
-  const row = await db.prepare("SELECT attempts, reset_at FROM rate_limits WHERE ip = ?").bind(ip).first<{ attempts: number; reset_at: number }>();
-  if (!row) return true;
-  if (now >= row.reset_at) return true;
-  return row.attempts < RATE_LIMIT_MAX;
-}
-
-async function recordFailedAttempt(ip: string, db: D1Database): Promise<void> {
-  const now = Math.floor(Date.now() / 1000);
-  const row = await db.prepare("SELECT attempts, reset_at FROM rate_limits WHERE ip = ?").bind(ip).first<{ attempts: number; reset_at: number }>();
-  if (!row) {
-    await db.prepare("INSERT INTO rate_limits (ip, attempts, reset_at) VALUES (?, 1, ?)").bind(ip, now + RATE_LIMIT_WINDOW_SECONDS).run();
-    return;
-  }
-  if (now >= row.reset_at) {
-    await db.prepare("UPDATE rate_limits SET attempts = 1, reset_at = ? WHERE ip = ?").bind(now + RATE_LIMIT_WINDOW_SECONDS, ip).run();
-    return;
-  }
-  await db.prepare("UPDATE rate_limits SET attempts = attempts + 1 WHERE ip = ?").bind(ip).run();
-}
+import { consumeAuthArtifact, markFailedAttempt, rateLimitFailures } from "../../lib/auth-security";
 
 export function settingsRoutes() {
   const r = new Hono<AppEnv>();
+
+  r.use("/mfa/disable", rateLimitFailures());
+  r.use("/mfa/backup-codes", rateLimitFailures());
 
   r.get("/preferences", async (c) => {
     const userId = c.get("userId");
@@ -167,8 +146,6 @@ export function settingsRoutes() {
 
   // Disable TOTP — requires a valid TOTP code or backup code for confirmation
   r.post("/mfa/disable", async (c) => {
-    const ip = c.req.header("cf-connecting-ip") || "unknown";
-    if (!(await canAttempt(ip, c.env.DB))) return c.json({ error: "Too many attempts" }, 429);
     const userId = c.get("userId");
     if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
     const { code } = await c.req.json<{ code: string }>().catch(() => ({ code: "" }));
@@ -197,21 +174,23 @@ export function settingsRoutes() {
     }
 
     if (!verified) {
-      await recordFailedAttempt(ip, c.env.DB);
+      markFailedAttempt(c);
       return c.json({ error: "Invalid code" }, 401);
     }
 
-    await c.env.DB.prepare(
-      "UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL WHERE user_id = ?"
-    ).bind(userId).run();
+    const disabled = await c.env.DB.prepare(
+      "UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL WHERE user_id = ? AND totp_enabled = 1 AND totp_backup_codes IS ?"
+    ).bind(userId, mfa.totp_backup_codes).run();
+    if (disabled.meta.changes !== 1) {
+      markFailedAttempt(c);
+      return c.json({ error: "Invalid code" }, 401);
+    }
 
     return c.json({ ok: true });
   });
 
   // Regenerate backup codes — requires current TOTP code
   r.post("/mfa/backup-codes", async (c) => {
-    const ip = c.req.header("cf-connecting-ip") || "unknown";
-    if (!(await canAttempt(ip, c.env.DB))) return c.json({ error: "Too many attempts" }, 429);
     const userId = c.get("userId");
     if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
     const { code } = await c.req.json<{ code: string }>().catch(() => ({ code: "" }));
@@ -232,7 +211,7 @@ export function settingsRoutes() {
     const secret = await decryptDestination(mfa.totp_secret, c.env.DESTINATION_ENCRYPTION_KEY);
 
     if (!(await verifyTOTP(secret, code))) {
-      await recordFailedAttempt(ip, c.env.DB);
+      markFailedAttempt(c);
       return c.json({ error: "Invalid code" }, 401);
     }
 
@@ -260,7 +239,12 @@ export function settingsRoutes() {
     const userId = c.get("userId");
     if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
     const { generateRegistrationOptions } = await import("@simplewebauthn/server");
-    const { rpID } = getRpFromOrigin(c.req.header("origin"));
+    let rpID: string;
+    try {
+      ({ rpID } = getRpFromOrigin(c.env.APP_ORIGIN));
+    } catch {
+      return c.json({ error: "Passkey authentication is not configured" }, 500);
+    }
 
     const existing = await c.env.DB.prepare(
       "SELECT id, transports FROM passkey_credentials WHERE user_id = ?"
@@ -312,7 +296,13 @@ export function settingsRoutes() {
     if (!response?.id) return c.json({ error: "Invalid request" }, 400);
 
     const { verifyRegistrationResponse } = await import("@simplewebauthn/server");
-    const { rpID, expectedOrigin } = getRpFromOrigin(c.req.header("origin"));
+    let rpID: string;
+    let expectedOrigin: string;
+    try {
+      ({ rpID, expectedOrigin } = getRpFromOrigin(c.env.APP_ORIGIN));
+    } catch {
+      return c.json({ error: "Passkey authentication is not configured" }, 500);
+    }
 
     const result = await verifyRegistrationResponse({
       response,
@@ -324,6 +314,9 @@ export function settingsRoutes() {
 
     if (!result.verified || !result.registrationInfo) {
       return c.json({ error: "Verification failed" }, 400);
+    }
+    if (!(await consumeAuthArtifact(c.env.DB, regCookie, Math.floor(Date.now() / 1000) + 300))) {
+      return c.json({ error: "Invalid or expired challenge" }, 401);
     }
 
     const { credential } = result.registrationInfo;

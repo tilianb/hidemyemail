@@ -87,6 +87,11 @@ Set the resulting topic ARNs in Cloudflare:
 - inbound topic → `SNS_INBOUND_TOPIC_ARN`
 - outbound topic → `SNS_ALLOWED_TOPIC_ARN`
 
+Set both values to the exact topic ARN. The Worker verifies AWS SNS signatures,
+certificates, and TopicArn identity; there is no `SNS_SECRET`. Keep raw MIME in
+S3 long enough for SNS retries. The Worker streams each object under
+`max_inbound_bytes` (25 MiB by default).
+
 ## 5. Create SES receipt rule
 
 Create or update an active SES receipt rule set.
@@ -146,6 +151,8 @@ aws sns subscribe \
 ```
 
 The Worker auto-confirms subscriptions when AWS sends `SubscriptionConfirmation`.
+It verifies the AWS signature and exact configured TopicArn before confirming
+or processing a message.
 Use `wrangler tail` or Docker logs to inspect failures.
 
 ## 7. Give the Worker AWS permissions

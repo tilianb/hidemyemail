@@ -329,6 +329,14 @@ export function Login() {
                   </button>
                 )}
               </div>
+              <button
+                type="button"
+                className="btn btn-soft btn-full btn-center"
+                onClick={() => { window.location.href = "/recover"; }}
+                disabled={loading}
+              >
+                Forgot passphrase? Recover with a code
+              </button>
               {registrationEnabled === false && (
                 <p className="muted-copy">New account registration is currently disabled.</p>
               )}

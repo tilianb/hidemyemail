@@ -208,7 +208,7 @@ struct SubdomainsView: View {
                 baseDomainId = baseDomains.first?.id
             }
             error = nil
-        } catch { handle(error) }
+        } catch { handle(error, from: client) }
     }
 
     private func create() async {
@@ -224,19 +224,19 @@ struct SubdomainsView: View {
             prefix = ""
             selectedDestination = "global"
             await reload()
-        } catch { handle(error) }
+        } catch { handle(error, from: client) }
     }
 
     private func remove(_ d: Domain) async {
         pendingDelete = nil
         guard let client = app.api() else { return }
         do { try await client.deleteDomain(id: d.id); await reload() }
-        catch { handle(error) }
+        catch { handle(error, from: client) }
     }
 
-    private func handle(_ error: Error) {
+    private func handle(_ error: Error, from client: APIClient) {
         if let err = error as? APIError, err.isAuthFailure {
-            Task { await app.handleAuthFailure() }
+            Task { await app.handleAuthFailure(from: client) }
         } else {
             self.error = error.localizedDescription
         }

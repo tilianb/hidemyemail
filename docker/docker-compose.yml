@@ -27,10 +27,24 @@ services:
     pull_policy: ${PULL_POLICY:-missing}
     container_name: hidemyemail
     restart: unless-stopped
+    # Security invariant: publish only on loopback. Terminate public TLS at the
+    # documented trusted reverse-proxy boundary.
     ports:
-      - "${HOST_PORT:-8787}:8787"
+      - "127.0.0.1:${HOST_PORT:-8787}:8787"
+    # Security invariants: preserve non-root runtime confinement and keep only
+    # /data writable. Do not add privileged mode, host networking/socket, broad
+    # host mounts, or capabilities.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     env_file:
       - .env
+    environment:
+      ENVIRONMENT: self-hosted
     volumes:
       - hidemyemail-data:/data
     healthcheck:

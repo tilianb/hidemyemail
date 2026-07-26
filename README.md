@@ -68,7 +68,10 @@ Recipients see the alias.
 - Native [iOS](ios/README.md) and [Android](android/README.md) apps:
   passphrase + TOTP or passkey sign-in, alias/domain/destination/rule
   management, stats, and push notifications (APNs / FCM).
-- SNS signature checks, encrypted destination addresses, and rate limits.
+- Origin-bound native credentials, one-time PKCE web handoff, and recovery
+  that revokes sessions, MFA, passkeys, and API keys.
+- Bounded mail ingress, SNS signature and topic checks, replay-safe delivery,
+  encrypted destination addresses, and atomic mail quotas.
 
 ## Quick start
 
@@ -83,7 +86,10 @@ docker compose pull
 docker compose up -d
 ```
 
-Open <http://localhost:8787>. AWS SES is still required for mail. See [Docker self-hosting](docker/README.md).
+Open <http://localhost:8787>. Compose publishes to loopback only; put a TLS
+reverse proxy in front for public access and preserve its trusted client-IP
+header contract. AWS SES is still required for mail. See
+[Docker self-hosting](docker/README.md).
 
 ### Cloudflare Worker
 

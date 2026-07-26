@@ -24,3 +24,19 @@ test("maps status codes to error types", async () => {
   const f400 = async () => new Response("{}", { status: 400 });
   await expect(sendRaw(creds, { from: "a@d", to: "b@c", rawBase64: "x" }, f400 as any)).rejects.toBeInstanceOf(SesPermanentError);
 });
+
+test("classifies fetch timeouts and network failures as transient", async () => {
+  const timeoutFetch = (_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+  });
+  await expect(sendRaw(
+    creds,
+    { from: "a@d", to: "b@c", rawBase64: "x" },
+    timeoutFetch as typeof fetch,
+    { timeoutMs: 5 },
+  )).rejects.toBeInstanceOf(SesTransientError);
+
+  const networkFetch = async () => { throw new TypeError("fetch failed"); };
+  await expect(sendRaw(creds, { from: "a@d", to: "b@c", rawBase64: "x" }, networkFetch as any))
+    .rejects.toBeInstanceOf(SesTransientError);
+});

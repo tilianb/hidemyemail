@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { fetchS3Object } from "../src/lib/s3";
+import { BodyTooLargeError } from "../src/lib/bytes";
 
 test("returns bytes from S3 object", async () => {
   const expected = new Uint8Array([72, 101, 108, 108, 111]); // "Hello"
@@ -54,4 +55,44 @@ test("throws on non-OK S3 response", async () => {
       mockFetch as unknown as typeof fetch
     )
   ).rejects.toThrow("S3 404");
+});
+
+test("oversized non-OK response is an ordinary bounded S3 fetch error", async () => {
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      controller.enqueue(new Uint8Array(4097));
+    },
+    cancel() { cancelled = true; },
+  });
+  const mockFetch = async () => new Response(body, { status: 503 });
+
+  const error = await fetchS3Object(
+    { accessKeyId: "AKIATEST", secretAccessKey: "testsecret", region: "ap-southeast-2" },
+    "hidemyemail-inbound-raw",
+    "unavailable",
+    mockFetch as unknown as typeof fetch,
+  ).catch((caught: unknown) => caught);
+
+  expect(error).toBeInstanceOf(Error);
+  expect(error).not.toBeInstanceOf(BodyTooLargeError);
+  expect((error as Error).message).toContain("S3 503");
+  expect(cancelled).toBe(true);
+});
+
+test("stops streaming an S3 object once the configured byte limit is exceeded", async () => {
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      controller.enqueue(new Uint8Array(6));
+    },
+    cancel() { cancelled = true; },
+  });
+  const mockFetch = async () => new Response(body);
+
+  await expect(fetchS3Object(
+    { accessKeyId: "AKIATEST", secretAccessKey: "testsecret", region: "ap-southeast-2" },
+    "hidemyemail-inbound-raw", "large", mockFetch as typeof fetch, 10,
+  )).rejects.toThrow("exceeds 10 bytes");
+  expect(cancelled).toBe(true);
 });

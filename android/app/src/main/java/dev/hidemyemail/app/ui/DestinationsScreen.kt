@@ -56,8 +56,8 @@ fun DestinationsScreen(app: AppViewModel, onBack: () -> Unit, modifier: Modifier
     var showAdd by remember { mutableStateOf(false) }
     var newEmail by remember { mutableStateOf("") }
 
-    fun handle(e: Exception) {
-        if (e is ApiException && e.isAuthFailure) app.handleAuthFailure() else error = e.message
+    fun handle(e: Exception, client: dev.hidemyemail.app.net.ApiClient) {
+        if (e is ApiException && e.isAuthFailure) app.handleAuthFailure(client) else error = e.message
     }
 
     suspend fun reload() {
@@ -67,7 +67,7 @@ fun DestinationsScreen(app: AppViewModel, onBack: () -> Unit, modifier: Modifier
             destinations = client.destinations()
             error = null
         } catch (e: Exception) {
-            handle(e)
+            handle(e, client)
         } finally {
             loading = false
         }
@@ -104,26 +104,29 @@ fun DestinationsScreen(app: AppViewModel, onBack: () -> Unit, modifier: Modifier
                             dest = dest,
                             onMakeDefault = {
                                 scope.launch {
+                                    val client = app.api() ?: return@launch
                                     try {
-                                        app.api()?.setDefaultDestination(dest.id)
+                                        client.setDefaultDestination(dest.id)
                                         reload()
-                                    } catch (e: Exception) { handle(e) }
+                                    } catch (e: Exception) { handle(e, client) }
                                 }
                             },
                             onResume = {
                                 scope.launch {
+                                    val client = app.api() ?: return@launch
                                     try {
-                                        app.api()?.unsuppressDestination(dest.id)
+                                        client.unsuppressDestination(dest.id)
                                         reload()
-                                    } catch (e: Exception) { handle(e) }
+                                    } catch (e: Exception) { handle(e, client) }
                                 }
                             },
                             onDelete = {
                                 scope.launch {
+                                    val client = app.api() ?: return@launch
                                     try {
-                                        app.api()?.deleteDestination(dest.id)
+                                        client.deleteDestination(dest.id)
                                         reload()
-                                    } catch (e: Exception) { handle(e) }
+                                    } catch (e: Exception) { handle(e, client) }
                                 }
                             },
                         )
@@ -177,10 +180,11 @@ fun DestinationsScreen(app: AppViewModel, onBack: () -> Unit, modifier: Modifier
                         newEmail = ""
                         if (email.isNotEmpty()) {
                             scope.launch {
+                                val client = app.api() ?: return@launch
                                 try {
-                                    app.api()?.createDestination(email)
+                                    client.createDestination(email)
                                     reload()
-                                } catch (e: Exception) { handle(e) }
+                                } catch (e: Exception) { handle(e, client) }
                             }
                         }
                     },

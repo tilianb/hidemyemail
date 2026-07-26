@@ -4,6 +4,7 @@ import { getCookie } from "hono/cookie";
 import type { Env } from "../types";
 import { verifySession } from "../lib/auth";
 import { authRoutes } from "./routes/auth";
+import { appAuthRoutes } from "./routes/app-auth";
 import { domainRoutes } from "./routes/domains";
 import { aliasRoutes } from "./routes/aliases";
 import { blockRoutes } from "./routes/blocks";
@@ -25,6 +26,7 @@ export type AppEnv = {
   Bindings: Env;
   Variables: {
     userId: number;
+    authVersion: number;
   };
 };
 
@@ -81,6 +83,7 @@ export function createApp() {
 
   // public routes (no session)
   app.route("/api", authRoutes());
+  app.route("/api/app-auth", appAuthRoutes());
   app.route("/api", verificationRoute());
   app.route("/api", sesWebhookRoutes());
   app.route("/api", sesInboundRoutes());
@@ -105,10 +108,10 @@ export function createApp() {
       p === "/api/ses/notification" ||
       p === "/api/ses/inbound" ||
       p === "/api/unsubscribe" ||
-      // App-auth handoff: exchange is pre-auth by definition; code does its
-      // own session-cookie check inside the handler.
+      // App-auth handoff: exchange is pre-auth by definition; authorize does
+      // its own session + fresh-auth cookie checks inside the handler.
       p === "/api/app-auth/exchange" ||
-      p === "/api/app-auth/code"
+      p === "/api/app-auth/authorize"
     ) return next();
     // Web clients send the HttpOnly __Host-session cookie; native clients send
     // the same signed session token as `Authorization: Bearer <token>`.
@@ -118,13 +121,15 @@ export function createApp() {
       if (authHeader?.startsWith("Bearer ")) token = authHeader.slice(7).trim();
     }
     if (!token) return c.json({ error: "Unauthorized" }, 401);
-    const userId = await verifySession(c.env.SESSION_SECRET, token);
-    if (userId === null) return c.json({ error: "Unauthorized" }, 401);
-    const user = await c.env.DB.prepare("SELECT active, deleted_at FROM users WHERE id = ?")
-      .bind(userId).first<{ active: number; deleted_at: number | null }>();
+    const principal = await verifySession(c.env.SESSION_SECRET, token);
+    if (principal === null) return c.json({ error: "Unauthorized" }, 401);
+    const user = await c.env.DB.prepare("SELECT active, deleted_at, auth_version FROM users WHERE id = ?")
+      .bind(principal.userId).first<{ active: number; deleted_at: number | null; auth_version: number }>();
+    if (user && user.auth_version !== principal.authVersion) return c.json({ error: "Unauthorized" }, 401);
     if (!user || user.active === 0) return c.json({ error: "Account is disabled" }, 403);
     if (user.deleted_at != null) return c.json({ error: "Account has been deleted" }, 403);
-    c.set("userId", userId);
+    c.set("userId", principal.userId);
+    c.set("authVersion", principal.authVersion);
     return next();
   });
 
