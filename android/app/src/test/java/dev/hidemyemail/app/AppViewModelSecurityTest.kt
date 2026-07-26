@@ -37,6 +37,13 @@ class AppViewModelSecurityTest {
         override fun delete() { deleteCalls++; token = null; origin = null }
     }
 
+    @Test fun exposesApplicationOnlyConstructorToDefaultViewModelFactory() {
+        val constructor = AppViewModel::class.java.getConstructor(Application::class.java)
+        val app = constructor.newInstance(RuntimeEnvironment.getApplication() as Application)
+
+        assertNotNull(app)
+    }
+
     @Test fun staleBootstrapFailureDoesNotDeleteNewOriginCredentials() = runTest {
         val old = MockWebServer().apply {
             enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))

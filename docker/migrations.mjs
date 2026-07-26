@@ -28,9 +28,44 @@ export function splitSqlStatements(sql) {
   let buffer = "";
   let inSingle = false;
   let inDouble = false;
-  for (const character of sql) {
-    if (character === "'" && !inDouble) inSingle = !inSingle;
-    else if (character === '"' && !inSingle) inDouble = !inDouble;
+  let inLineComment = false;
+  let inBlockComment = false;
+  for (let i = 0; i < sql.length; i++) {
+    const character = sql[i];
+    const next = sql[i + 1];
+    if (inLineComment) {
+      if (character === "\n") {
+        inLineComment = false;
+        buffer += character;
+      }
+      continue;
+    }
+    if (inBlockComment) {
+      if (character === "*" && next === "/") {
+        inBlockComment = false;
+        i++;
+      }
+      continue;
+    }
+    if (!inSingle && !inDouble && character === "-" && next === "-") {
+      inLineComment = true;
+      buffer += " ";
+      i++;
+      continue;
+    }
+    if (!inSingle && !inDouble && character === "/" && next === "*") {
+      inBlockComment = true;
+      buffer += " ";
+      i++;
+      continue;
+    }
+    if (character === "'" && !inDouble) {
+      if (inSingle && next === "'") buffer += sql[i++];
+      else inSingle = !inSingle;
+    } else if (character === '"' && !inSingle) {
+      if (inDouble && next === '"') buffer += sql[i++];
+      else inDouble = !inDouble;
+    }
     if (character === ";" && !inSingle && !inDouble) {
       out.push(buffer);
       buffer = "";

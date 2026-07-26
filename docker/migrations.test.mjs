@@ -1,10 +1,31 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { Miniflare } from "miniflare";
 import { applyMigrations } from "./migrations.mjs";
+
+test("all Worker migrations can be applied with comments ignored", async (t) => {
+  const mf = new Miniflare({
+    modules: true,
+    script: "export default { fetch() { return new Response('ok') } }",
+    compatibilityDate: "2026-05-01",
+    d1Databases: { DB: "all-migrations-test" },
+  });
+  t.after(() => mf.dispose());
+
+  await mf.ready;
+  const db = await mf.getD1Database("DB");
+  const migrationsDir = fileURLToPath(new URL("../worker/migrations", import.meta.url));
+  await applyMigrations(db, migrationsDir);
+
+  assert.equal(
+    (await db.prepare("SELECT COUNT(*) AS count FROM d1_migrations").first()).count,
+    (await readdir(migrationsDir)).filter((file) => file.endsWith(".sql")).length,
+  );
+});
 
 test("a failed multi-statement migration rolls back and can be retried", async (t) => {
   const migrationsDir = await mkdtemp(path.join(os.tmpdir(), "hidemyemail-migrations-"));
