@@ -14,6 +14,7 @@
     "deploy:preview": "wrangler deploy --env preview --keep-vars",
     "migrate:prod": "wrangler d1 migrations apply DB --remote --env=\"\"",
     "migrate:preview": "wrangler d1 migrations apply DB --remote --env preview",
+    "predeploy": "npm run migrate:prod",
     "predeploy:preview": "npm run migrate:preview",
     "typegen": "wrangler types"
   },

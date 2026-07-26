@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { Miniflare } from "miniflare";
+import { WORKER_FIRST_ROUTES } from "./assets-routing.mjs";
 import { applyMigrations } from "./migrations.mjs";
 
 test("all Worker migrations can be applied with comments ignored", async (t) => {
@@ -81,4 +82,11 @@ test("Docker startup accepts no APP_ORIGIN and migrates before listening", async
     server.indexOf("await applyMigrations") < server.indexOf("server.listen"),
     "pending migrations must finish before the HTTP socket listens",
   );
+});
+
+test("Docker routes API and AASA requests through the Worker before assets", () => {
+  assert.deepEqual(WORKER_FIRST_ROUTES, [
+    "/api/*",
+    "/.well-known/apple-app-site-association",
+  ]);
 });

@@ -98,7 +98,7 @@ git clone https://github.com/tilianb/hidemyemail.git
 cd hidemyemail
 cd dashboard && npm ci && npm run build
 cd ../worker && npm ci
-npx wrangler deploy
+npm run deploy
 ```
 
 You also need D1 databases, Worker secrets, SES/S3/SNS, and DNS. Follow [Getting started](docs/GETTING_STARTED.md), then [Deployment guide](docs/DEPLOY.md).

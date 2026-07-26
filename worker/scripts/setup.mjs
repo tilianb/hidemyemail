@@ -173,9 +173,8 @@ console.error(`
 Done. All secrets are set${wranglerEnv ? ` for env "${wranglerEnv}"` : ""}.
 
 Next steps:
-  1. npx wrangler d1 migrations apply DB --remote
-  2. npx wrangler deploy
-  3. Log in with your admin passphrase and finish setup in the dashboard
+  1. npm run deploy
+  2. Log in with your admin passphrase and finish setup in the dashboard
      (docs/DEPLOY.md § First-run dashboard setup).
 
 Skipped AWS secrets can be added later with:

@@ -10,6 +10,7 @@ import { createServer } from "node:http";
 import path from "node:path";
 import process from "node:process";
 import { Miniflare } from "miniflare";
+import { WORKER_FIRST_ROUTES } from "./assets-routing.mjs";
 import { trustedProxySet, workerHeaders } from "./client-ip.mjs";
 import { applyMigrations } from "./migrations.mjs";
 
@@ -83,14 +84,14 @@ const mf = new Miniflare({
   d1Persist: D1_PERSIST_DIR,
 
   // Static SPA (dashboard/dist) — Workers Assets routing parity.
-  // run_worker_first: ["/api/*"] from wrangler.jsonc becomes:
+  // run_worker_first from wrangler.jsonc becomes:
   //   has_user_worker + static_routing.user_worker
   assets: {
     directory: ASSETS_DIR,
     binding: "ASSETS",
     routerConfig: {
       has_user_worker: true,
-      static_routing: { user_worker: ["/api/*"] },
+      static_routing: { user_worker: WORKER_FIRST_ROUTES },
     },
     assetConfig: {
       not_found_handling: "single-page-application",
