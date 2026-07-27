@@ -9,7 +9,21 @@ android_tools_version="11076708"
 
 echo "==> Installing personal Amp skills"
 personal_skills_repo="$HOME/.local/share/amp-personal-skills"
+validate_personal_skills_checkout() {
+  local origin branch
+  origin="$(git -C "$personal_skills_repo" remote get-url origin)"
+  branch="$(git -C "$personal_skills_repo" branch --show-current)"
+  if [[ "$origin" != "https://github.com/tilianb/amp-personal-skills.git" || "$branch" != "main" ]]; then
+    echo "Unexpected personal skills checkout: origin=$origin branch=$branch" >&2
+    exit 1
+  fi
+  if [[ -n "$(git -C "$personal_skills_repo" status --porcelain)" ]]; then
+    echo "Personal skills checkout has uncommitted changes: $personal_skills_repo" >&2
+    exit 1
+  fi
+}
 if [[ -d "$personal_skills_repo/.git" ]]; then
+  validate_personal_skills_checkout
   git -C "$personal_skills_repo" \
     -c credential.helper= \
     -c 'credential.helper=!gh auth git-credential' \
@@ -21,6 +35,7 @@ else
   mkdir -p "$(dirname "$personal_skills_repo")"
   gh repo clone tilianb/amp-personal-skills "$personal_skills_repo"
 fi
+validate_personal_skills_checkout
 "$personal_skills_repo/scripts/install.sh"
 
 echo "==> Installing required system packages"
