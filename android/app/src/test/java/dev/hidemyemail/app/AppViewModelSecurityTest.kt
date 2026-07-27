@@ -6,6 +6,8 @@ import android.os.Looper
 import dev.hidemyemail.app.auth.AuthTokenStore
 import dev.hidemyemail.app.auth.WebSessionAuth
 import dev.hidemyemail.app.net.ApiClient
+import dev.hidemyemail.app.net.ApiException
+import dev.hidemyemail.app.ui.shouldRequestReauthentication
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -35,6 +37,20 @@ class AppViewModelSecurityTest {
         override fun load(origin: String) = token.takeIf { this.origin == origin }
         override fun save(token: String, origin: String) { this.token = token; this.origin = origin }
         override fun delete() { deleteCalls++; token = null; origin = null }
+    }
+
+    @Test fun exposesApplicationOnlyConstructorToDefaultViewModelFactory() {
+        val constructor = AppViewModel::class.java.getConstructor(Application::class.java)
+        val app = constructor.newInstance(RuntimeEnvironment.getApplication() as Application)
+
+        assertNotNull(app)
+    }
+
+    @Test fun freshAuthRetryDecisionAllowsOnlyOneReauthentication() {
+        val error = ApiException.Server(401, "Fresh authentication required")
+
+        assertEquals(true, shouldRequestReauthentication(error, retryAvailable = true))
+        assertEquals(false, shouldRequestReauthentication(error, retryAvailable = false))
     }
 
     @Test fun staleBootstrapFailureDoesNotDeleteNewOriginCredentials() = runTest {

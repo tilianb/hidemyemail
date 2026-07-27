@@ -5,9 +5,10 @@ Cloudflare Worker API as the web dashboard, using **bearer-token auth** (the
 `X-Auth-Mode: token` opt-in added in `worker/src/api/`).
 
 Sign in (passphrase + TOTP MFA, or **passkey**), manage aliases and personal
-subdomains, manage destination inboxes, view stats, and receive **push
-notifications** for blocked mail and paused destinations. The remaining native
-integrations (share sheet, App Intents) are tracked as follow-ups — see
+subdomains, manage destination inboxes, set up TOTP MFA and passkeys, view
+stats, and receive **push notifications** for blocked mail and paused
+destinations. The remaining native integrations (share sheet, App Intents) are
+tracked as follow-ups — see
 [the roadmap](../docs/ROADMAP.md). A companion [Android client](../android/README.md)
 ships the same API and bearer-token flow.
 
@@ -89,13 +90,20 @@ Setup required for it to actually work (it cannot run on the unsigned simulator)
    `webcredentials:app.hidemyemail.dev`. The relying-party domain, `APP_ORIGIN`,
    and the AASA host must all match. Set a real `DEVELOPMENT_TEAM` and enable the
    **Associated Domains** capability on the App ID.
-3. **Register first** — the app only *signs in* with an existing passkey; create
-   one in the web dashboard (Settings → Passkeys), then test on a physical device.
+3. **Enroll** — on the official associated origin, Settings → Security can
+   create and manage passkeys natively. Test enrollment on a physical device.
 
 For arbitrary self-hosted origins, **Sign in on the Web** opens `/app-auth` in
 `ASWebAuthenticationSession`. The dashboard performs the origin-bound login and
 returns a short-lived, one-time code through the fixed `hidemyemail://auth`
 callback. The app exchanges it with a verifier that never leaves the device.
+
+Settings → Security also supports local TOTP QR/manual-secret setup,
+verification, one-time backup-code display, regeneration, and disable.
+Sensitive changes reauthenticate inline and keep fresh-auth only in memory.
+Passkey enrollment on arbitrary self-hosted origins uses a short-lived browser
+handoff with an explicit confirmation tap; no bearer token enters the URL or
+browser JavaScript.
 
 ## Push notifications
 

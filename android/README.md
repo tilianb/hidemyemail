@@ -7,9 +7,9 @@ opt-in in `worker/src/api/`).
 
 Sign in (passphrase + TOTP MFA, or **passkey** via the web handoff), manage
 aliases and personal subdomains, manage destination inboxes, configure
-block/allow rules, view stats, and receive **push notifications** (FCM) for
-blocked mail and paused destinations. The remaining native integrations (share
-target, Autofill) are tracked as follow-ups — see
+block/allow rules, set up TOTP MFA and passkeys, view stats, and receive **push
+notifications** (FCM) for blocked mail and paused destinations. The remaining
+native integrations (share target, Autofill) are tracked as follow-ups — see
 [the roadmap](../docs/ROADMAP.md), kept at parity with iOS.
 
 ## Requirements
@@ -90,6 +90,22 @@ native credential API:
 
 This mirrors the iOS `WebSessionAuthenticator`, and works against any server,
 self-hosted included, with no per-app association setup.
+
+### Security setup
+
+Settings → Security supports the full TOTP lifecycle: local QR/manual-secret
+setup, verification, one-time backup-code display, regeneration, and disable.
+Sensitive changes reauthenticate inline; the short-lived fresh-auth credential
+is held in memory only.
+
+The official `https://app.hidemyemail.dev` deployment enrolls passkeys natively
+through Android Credential Manager. Its Worker must set `ANDROID_APP_ORIGINS`
+to the exact release signing-certificate origin and serve the corresponding
+Digital Asset Links response; see
+[`docs/CONFIGURATION.md`](../docs/CONFIGURATION.md). Other origins use a
+short-lived authenticated browser handoff. The confirmation page requires an
+explicit tap before its one-time code is redeemed, and no bearer token enters
+the URL or browser JavaScript.
 
 ### Push notifications (FCM)
 
