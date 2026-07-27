@@ -6,41 +6,14 @@ removed when shipped; see CHANGELOG.md for what already landed.
 
 ## Recently shipped
 
+- [x] **v1.3.0 secure foundations and aliases on demand.** Added native MFA
+  and passkey setup, fail-closed destination encryption, migration-safe
+  deploys, Docker AASA parity, release gates and artifacts, a minimal Chromium
+  alias extension, and operator-defined blocked subdomains.
 - [x] **v1.2.1 security and reliability hardening.** Added durable SNS/SES
   delivery claims, account-wide recovery revocation, canonical HTTPS-bound
   native credentials, Android Keystore token protection, trusted Docker proxy
   routing, and transactional pre-listen Docker migrations.
-
----
-
-## v1.3.0 — Secure foundations + aliases on demand
-
-- [ ] **Native MFA and passkey setup** _(mobile / security)_. Let iOS and
-  Android users manage TOTP MFA and passkeys without leaving the apps. Use
-  native enrollment only for associated official origins and an authenticated,
-  confirmation-gated browser handoff for self-hosted deployments.
-- [ ] **Fail closed when destination encryption is unavailable** _(security)_.
-  Reject startup or destination operations when `DESTINATION_ENCRYPTION_KEY` is
-  absent, empty, malformed, or not exactly 32 bytes; never fall back to storing
-  plaintext email or a plaintext lookup value. Preserve read compatibility for
-  intentionally migrated legacy rows only when a valid key is configured.
-- [ ] **Migration-safe manual production deploys** _(deployment)_. Make the
-  supported production command apply D1 migrations before publishing, align
-  setup/deploy docs on that command, and document safe retry behavior after a
-  migration or deploy failure.
-- [ ] **Finish Docker AASA routing parity** _(security / self-hosting)_. Route
-  `/.well-known/apple-app-site-association` through the Worker instead of the
-  dashboard SPA and add configured/unconfigured integration checks.
-- [ ] **Gate releases on versions and artifacts** _(release engineering)_. Check
-  that the tag matches every product version; publish the GitHub release only
-  after APK, TestFlight, and container jobs succeed; use curated release notes.
-- [ ] **Chromium alias extension** _(product)_. Ship a minimal Manifest V3 popup
-  that uses a dedicated API key to generate and copy an alias. No content
-  scripts, form injection, autofill, analytics, or broad permanent host access.
-- [ ] **Stretch: operator-defined blocked subdomains** _(security /
-  self-hosting)_. Support a strict comma-separated list of exact labels only;
-  reject malformed configuration and block before DNS, quota, or reservation
-  work. Cut this item before delaying the release.
 
 ---
 

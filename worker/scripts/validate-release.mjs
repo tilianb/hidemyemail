@@ -90,6 +90,10 @@ const changelog = readFileSync(resolve(root, 'CHANGELOG.md'), 'utf8')
 const escapedVersion = version.replaceAll('.', '\\.')
 const section = changelog.match(new RegExp(`^## \\[${escapedVersion}\\][^\\n]*\\n([\\s\\S]*?)(?=^## \\[|(?![\\s\\S]))`, 'm'))?.[1]?.trim()
 if (!section) fail(`CHANGELOG.md has no non-empty section for ${version}`)
+const openingBlock = section.split(/\n\s*\n/, 1)[0]
+if (/^\s*(?:#{1,6}\s|[-*+]\s|>)/m.test(openingBlock)) {
+  fail(`CHANGELOG.md ${version} section must start with a user-facing summary before its headings`)
+}
 if (!/^### Upgrade Notes\s*$/m.test(section)) fail(`CHANGELOG.md ${version} section lacks "### Upgrade Notes"`)
 if (!notesOutput) fail('--notes-output is required')
 

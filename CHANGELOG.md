@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [1.3.0] — 2026-07-27
 
+HideMyEmail 1.3.0 brings secure MFA and passkey setup to both mobile apps,
+adds aliases on demand through a minimal Chromium extension, and hardens
+encryption, deployment, and release safety for every installation.
+
 ### Added
 
 - iOS and Android Settings now support the full TOTP MFA lifecycle, including

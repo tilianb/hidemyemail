@@ -12,7 +12,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) execFileSync('rm', ['-rf', root])
 })
 
-function fixture(version = '2.0.0', changelog = `## [2.0.0] - 2026-07-26\n\nCurrent notes.\n\n### Upgrade Notes\n\nNone.\n`) {
+function fixture(version = '2.0.0', changelog = `## [2.0.0] - 2026-07-26\n\nThis release improves security and reliability for every deployment.\n\n### Added\n\nCurrent notes.\n\n### Upgrade Notes\n\nNone.\n`) {
   const root = mkdtempSync(join(tmpdir(), 'release-validator-'))
   roots.push(root)
   for (const path of ['worker', 'dashboard', 'extension', 'android/app', 'ios']) mkdirSync(join(root, path), { recursive: true })
@@ -103,7 +103,8 @@ test('accepts a release section ending at EOF', () => {
 test.each([
   ['', 'no non-empty section'],
   ['## [2.0.0]\n', 'no non-empty section'],
-  ['## [2.0.0]\n\nNotes only.\n', 'lacks "### Upgrade Notes"'],
+  ['## [2.0.0]\n\n### Added\n\nNotes only.\n\n### Upgrade Notes\n\nNone.\n', 'must start with a user-facing summary'],
+  ['## [2.0.0]\n\nA user-facing summary.\n', 'lacks "### Upgrade Notes"'],
 ])('rejects missing release requirements', (changelog, error) => {
   const root = fixture('2.0.0', changelog)
   const result = run(root, 'v2.0.0', ['--previous-tag='])
