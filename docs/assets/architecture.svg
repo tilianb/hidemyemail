@@ -89,9 +89,10 @@
   </g>
   <text class="edge-label" x="573" y="216">SNS</text>
 
-  <path d="M1072 276C1072 308 1045 330 1012 330H321Q297 330 297 306V278" fill="none" stroke="#315f69" stroke-width="1.6" stroke-dasharray="6 6" marker-end="url(#mailArrow)"/>
-  <rect x="505" y="313" width="358" height="25" rx="12" fill="#081421"/>
-  <text class="edge-label" x="684" y="329">replies return through the reverse alias</text>
+  <g fill="none" stroke="#315f69" stroke-width="1.6" stroke-dasharray="6 6">
+    <path d="M1072 276V306Q1072 330 1048 330H875"/>
+    <path d="M493 330H321Q297 330 297 306V278" marker-end="url(#mailArrow)"/>
+  </g>
 
   <text class="lane" x="42" y="390" fill="#7dd3fc">CONTROL PLANE</text>
   <path d="M42 408H726M764 408H1158" stroke="#163249"/>
@@ -122,11 +123,14 @@
     <path d="M226 514V546"/>
     <path d="M354 514V546"/>
     <path d="M496 514V546"/>
-    <path d="M98 546H620V510H650" marker-end="url(#apiArrow)"/>
+    <path d="M98 546H606Q620 546 620 532V524Q620 510 634 510H650" marker-end="url(#apiArrow)"/>
     <path d="M840 480H942" marker-end="url(#apiArrow)"/>
   </g>
   <path d="M745 438V365Q745 350 730 350H692Q677 350 677 284" fill="none" stroke="#586a9a" stroke-width="1.6" stroke-dasharray="5 5" marker-end="url(#apiArrow)"/>
   <text class="edge-label" x="887" y="467">queries</text>
+
+  <rect x="505" y="313" width="358" height="25" rx="12" fill="#081421"/>
+  <text class="edge-label" x="684" y="329">replies return through the reverse alias</text>
 
   <g transform="translate(42 570)">
     <rect width="1116" height="50" rx="12" fill="#0b1d2e" stroke="#163249"/>
