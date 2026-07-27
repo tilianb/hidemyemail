@@ -3,7 +3,9 @@
 </p>
 
 <p align="center">
-  <a href="https://app.hidemyemail.dev">app.hidemyemail.dev</a>
+  <a href="https://app.hidemyemail.dev">App</a>
+  ·
+  <a href="https://tilianb.github.io/hidemyemail/">Documentation</a>
 </p>
 
 # HideMyEmail
