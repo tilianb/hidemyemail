@@ -87,7 +87,7 @@ From `worker/`, one interactive pass generates and pushes everything
 (admin passphrase, random secrets, optional AWS credentials):
 
 ```bash
-npm run setup
+npm run setup   # new deployments only; never key rotation
 ```
 
 See [Configuration](CONFIGURATION.md) for the manual per-secret equivalent
@@ -109,7 +109,10 @@ Set them in the Cloudflare dashboard or via Wrangler deploy flags. The Wrangler 
 
 `APP_ORIGIN` must exactly match the browser-visible HTTPS origin. iOS native
 passkeys also require `APPLE_APP_ID` and a matching AASA response; see
-[Configuration](CONFIGURATION.md).
+[Configuration](CONFIGURATION.md). Native Android passkey enrollment requires
+`ANDROID_APP_ORIGINS` derived from the release signing certificate and a
+matching `assetlinks.json` response. Self-hosted apps use the authenticated
+browser handoff instead and do not need a mobile-app association.
 
 ## 6. Configure AWS and DNS
 
@@ -126,6 +129,11 @@ npm run build
 cd ../worker
 npm run deploy
 ```
+
+`npm run deploy` applies production D1 migrations before publishing the
+Worker. If migration fails, the Worker is not published. If deploy fails after
+a backward-compatible migration, the old Worker remains active; retrying
+`npm run deploy` is safe.
 
 Preview:
 

@@ -10,6 +10,30 @@ type ResolvedDefaultDestination = {
   publicValue: string | null | undefined;
 };
 
+const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const DEFAULT_BLOCKED_SUBDOMAINS = new Set([
+  "admin", "api", "www", "dev", "mail", "smtp", "imap", "pop", "pop3", "webmail", "autoconfig", "autodiscover",
+]);
+
+let cachedBlockedSubdomainsRaw: unknown = Symbol("unset");
+let cachedBlockedSubdomains: Set<string> | null = DEFAULT_BLOCKED_SUBDOMAINS;
+
+function blockedSubdomainLabels(value: unknown): Set<string> | null {
+  if (value === cachedBlockedSubdomainsRaw) return cachedBlockedSubdomains;
+  cachedBlockedSubdomainsRaw = value;
+  if (value === undefined || (typeof value === "string" && !value.trim())) {
+    cachedBlockedSubdomains = DEFAULT_BLOCKED_SUBDOMAINS;
+    return cachedBlockedSubdomains;
+  }
+  if (typeof value !== "string") {
+    cachedBlockedSubdomains = null;
+    return cachedBlockedSubdomains;
+  }
+  const labels = value.split(",").map((label) => label.trim().toLowerCase());
+  cachedBlockedSubdomains = labels.some((label) => !DNS_LABEL.test(label)) ? null : new Set(labels);
+  return cachedBlockedSubdomains;
+}
+
 async function resolveDefaultDestination(
   db: D1Database,
   userId: number,
@@ -75,12 +99,30 @@ export function domainRoutes() {
 
   r.post("/domains", async (c) => {
     const userId = c.get("userId");
-    const { domain, default_destination, base_domain_id } = await c.req.json<{ domain: string; default_destination: string; base_domain_id?: number }>();
-    if (!domain) return c.json({ error: "Missing domain prefix" }, 400);
+    const body: unknown = await c.req.json<unknown>().catch(() => undefined);
+    if (body === null || typeof body !== "object" || Array.isArray(body) || Object.getPrototypeOf(body) !== Object.prototype) {
+      return c.json({ error: "Invalid request body" }, 400);
+    }
 
-    const prefix = domain.toLowerCase().replace(/[^a-z0-9-]/g, "");
-    if (!prefix || prefix.length > 63) return c.json({ error: "Invalid prefix" }, 400);
-    if (prefix === "dev") return c.json({ error: "The 'dev' subdomain is reserved" }, 400);
+    const request = body as Record<string, unknown>;
+    const { domain, default_destination, base_domain_id } = request;
+    if (!domain) return c.json({ error: "Missing domain prefix" }, 400);
+    if (typeof domain !== "string") return c.json({ error: "Invalid domain" }, 400);
+    if (default_destination !== undefined && default_destination !== null && typeof default_destination !== "string") {
+      return c.json({ error: "Invalid default_destination" }, 400);
+    }
+    if (Object.prototype.hasOwnProperty.call(request, "base_domain_id") &&
+        (typeof base_domain_id !== "number" || !Number.isFinite(base_domain_id) || !Number.isInteger(base_domain_id) || base_domain_id <= 0)) {
+      return c.json({ error: "Invalid base_domain_id" }, 400);
+    }
+
+    const prefix = domain.trim().toLowerCase();
+    if (!DNS_LABEL.test(prefix)) return c.json({ error: "Invalid prefix" }, 400);
+
+    const blockedLabels = blockedSubdomainLabels(c.env.BLOCKED_SUBDOMAINS);
+    if (!blockedLabels || blockedLabels.has(prefix)) {
+      return c.json({ error: "Subdomain is not available" }, 409);
+    }
 
     let baseDomain: { domain: string; allow_subdomain_aliases: number; active: number; verified_at: number | null } | null;
     if (base_domain_id !== undefined) {
@@ -126,7 +168,7 @@ export function domainRoutes() {
     const resolvedDefaultDestination = await resolveDefaultDestination(
       c.env.DB,
       userId,
-      default_destination,
+      default_destination as string | null | undefined,
       c.env.DESTINATION_ENCRYPTION_KEY,
     );
     if (!resolvedDefaultDestination) return c.json({ error: "Destination email not verified" }, 400);
