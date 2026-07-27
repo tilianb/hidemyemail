@@ -109,7 +109,10 @@ Set them in the Cloudflare dashboard or via Wrangler deploy flags. The Wrangler 
 
 `APP_ORIGIN` must exactly match the browser-visible HTTPS origin. iOS native
 passkeys also require `APPLE_APP_ID` and a matching AASA response; see
-[Configuration](CONFIGURATION.md).
+[Configuration](CONFIGURATION.md). Native Android passkey enrollment requires
+`ANDROID_APP_ORIGINS` derived from the release signing certificate and a
+matching `assetlinks.json` response. Self-hosted apps use the authenticated
+browser handoff instead and do not need a mobile-app association.
 
 ## 6. Configure AWS and DNS
 

@@ -27,6 +27,7 @@ These are deployment-specific, not secrets. Store them in the Cloudflare dashboa
 | `SNS_ALLOWED_TOPIC_ARN` | yes for outbound SNS | Exact SNS topic for SES bounce and complaint notifications. Topic ARNs identify webhook authority but are not secrets. |
 | `APP_ORIGIN` | required for passkeys | Exact browser-visible dashboard origin, e.g. `https://app.hidemyemail.dev`. WebAuthn always derives its RP ID and expected origin from this value, never request headers. Production origins must use HTTPS and contain no path, query, fragment, credentials, or trailing slash; HTTP is accepted only for `localhost`, `127.0.0.1`, or `::1` development. Docker deployments must set the externally visible origin explicitly in `docker/.env` to enable passkeys; ordinary authentication and mail continue to work when it is unset. |
 | `APPLE_APP_ID` | for iOS passkeys | Apple App ID `<TeamID>.<bundleId>` (e.g. `ABCDE12345.dev.hidemyemail.app`) published in `/.well-known/apple-app-site-association`. The AASA route 404s until this is set. |
+| `ANDROID_APP_ORIGINS` | for native Android passkey enrollment | Comma-separated WebAuthn APK origins in the form `android:apk-key-hash:<base64url SHA-256 signing-certificate digest>`. Values authorize native registration and publish matching colon-delimited fingerprints at `/.well-known/assetlinks.json`; malformed nonempty configuration fails closed. Include both old and new certificate origins during a signing-key rotation. This is not needed for the authenticated browser handoff used by self-hosted mobile clients. |
 | `APNS_KEY_ID` | for iOS push | 10-char Key ID of the APNs `.p8` signing key. |
 | `APNS_TEAM_ID` | for iOS push | Apple Developer Team ID. Falls back to the `<TeamID>` prefix of `APPLE_APP_ID` if unset. |
 | `APNS_BUNDLE_ID` | for iOS push | APNs topic (the app bundle id, e.g. `dev.hidemyemail.app`). Falls back to the `<bundleId>` suffix of `APPLE_APP_ID`. |
@@ -34,6 +35,21 @@ These are deployment-specific, not secrets. Store them in the Cloudflare dashboa
 | `FCM_PROJECT_ID` | optional (Android push) | Firebase project id. Falls back to the `project_id` inside `FCM_SERVICE_ACCOUNT` when unset. |
 
 `worker/wrangler.jsonc` sets `keep_vars: true` so dashboard-managed variables are preserved even when Cloudflare Git deploys run plain `wrangler deploy`.
+
+Derive an Android APK origin from the certificate that signs the release APK:
+
+```bash
+digest=$(apksigner verify --print-certs app-release.apk \
+  | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+printf 'android:apk-key-hash:'
+printf '%s' "$digest" | xxd -r -p | openssl base64 -A \
+  | tr '+/' '-_' | tr -d '='
+printf '\n'
+```
+
+After deployment, verify `/.well-known/assetlinks.json` returns package
+`dev.hidemyemail.app` with the expected release-certificate fingerprint before
+offering native Android passkey enrollment.
 
 ## Worker secrets
 

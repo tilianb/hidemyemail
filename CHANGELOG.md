@@ -10,6 +10,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- iOS and Android Settings now support the full TOTP MFA lifecycle, including
+  locally rendered setup QR codes, manual secrets, one-time backup codes,
+  regeneration, and disable. Sensitive changes use inline fresh
+  reauthentication without persisting the short-lived credential.
+- The official associated iOS and Android apps can enroll and manage passkeys
+  natively. Other server origins use a short-lived authenticated browser
+  handoff with an explicit confirmation step; bearer tokens are never placed in
+  browser URLs or exposed to page JavaScript.
 - Added a minimal Chromium Manifest V3 popup that creates aliases through the
   existing API and copies them to the clipboard. It uses a dedicated locally
   stored `hme_` API key and requests runtime access only to the chosen server
@@ -75,6 +83,10 @@ All notable changes to this project are documented here. The format follows
 - `BLOCKED_SUBDOMAINS` is optional. When set, use exact comma-separated labels;
   it affects only new personal-subdomain claims, and malformed values fail
   closed.
+- Native Android passkey enrollment requires `ANDROID_APP_ORIGINS` containing
+  the release signing-certificate APK origin. Verify the generated
+  `/.well-known/assetlinks.json` response before release. Self-hosted app
+  origins use the authenticated browser handoff and need no association.
 - The Chromium extension requires one dedicated `hme_` API key, stored locally,
   and runtime access to the chosen server host and scheme. A non-default port
   remains in the API endpoint, but Chrome's host match permission is

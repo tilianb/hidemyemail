@@ -15,6 +15,10 @@ removed when shipped; see CHANGELOG.md for what already landed.
 
 ## v1.3.0 — Secure foundations + aliases on demand
 
+- [ ] **Native MFA and passkey setup** _(mobile / security)_. Let iOS and
+  Android users manage TOTP MFA and passkeys without leaving the apps. Use
+  native enrollment only for associated official origins and an authenticated,
+  confirmation-gated browser handoff for self-hosted deployments.
 - [ ] **Fail closed when destination encryption is unavailable** _(security)_.
   Reject startup or destination operations when `DESTINATION_ENCRYPTION_KEY` is
   absent, empty, malformed, or not exactly 32 bytes; never fall back to storing
