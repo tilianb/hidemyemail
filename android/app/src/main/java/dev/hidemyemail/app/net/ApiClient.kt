@@ -10,6 +10,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import okhttp3.Call
@@ -190,6 +192,35 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
 
     suspend fun mfaStatus(): MfaStatus = request("/api/settings/mfa")
 
+    suspend fun reauthenticate(passphrase: String, code: String? = null) {
+        val result: FreshAuthResponse = request(
+            "/api/settings/reauth", "POST",
+            buildJsonObject {
+                put("passphrase", passphrase)
+                if (!code.isNullOrBlank()) put("code", code)
+            },
+            authMode = true,
+        )
+        freshAuth = result.freshAuth
+    }
+
+    suspend fun setupMfa(): MfaSetup = request("/api/settings/mfa/setup", "POST")
+
+    suspend fun verifyMfa(code: String): MfaCodes = request(
+        "/api/settings/mfa/verify", "POST", buildJsonObject { put("code", code) },
+    )
+
+    suspend fun regenerateMfaBackupCodes(code: String): MfaCodes {
+        require(code.length == 6 && code.all(Char::isDigit)) { "A 6-digit authenticator code is required" }
+        return request(
+            "/api/settings/mfa/backup-codes", "POST", buildJsonObject { put("code", code) },
+        )
+    }
+
+    suspend fun disableMfa(code: String) = requestVoid(
+        "/api/settings/mfa/disable", "POST", buildJsonObject { put("code", code) },
+    )
+
     // MARK: Username & self-service recovery codes
 
     /** Current user's username + recovery-code status. */
@@ -229,6 +260,48 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
         requestVoid("/api/settings/passkeys/$id", "PATCH", buildJsonObject { put("deviceName", name) })
 
     suspend fun deletePasskey(id: String) = requestVoid("/api/settings/passkeys/$id", "DELETE")
+
+    suspend fun passkeyChallenge(): PasskeyChallenge {
+        val raw = perform(
+            "/api/settings/passkeys/challenge", "POST", null,
+            authMode = true, authed = true,
+        )
+        val objectValue = json.parseToJsonElement(raw) as? JsonObject
+            ?: throw ApiException.Decoding()
+        val challengeToken = (objectValue["challengeToken"] as? JsonPrimitive)?.content
+            ?: throw ApiException.Decoding()
+        val rpId = try {
+            objectValue.getValue("rp").jsonObject.getValue("id").jsonPrimitive.content
+        } catch (_: Exception) {
+            throw ApiException.Decoding()
+        }
+        return PasskeyChallenge(
+            JsonObject(objectValue - "challengeToken").toString(),
+            challengeToken,
+            rpId,
+        )
+    }
+
+    suspend fun registerPasskey(responseJson: String, deviceName: String?, challengeToken: String) {
+        val response = try {
+            json.parseToJsonElement(responseJson)
+        } catch (e: Exception) {
+            throw IllegalArgumentException("Invalid credential response", e)
+        }
+        requestVoid(
+            "/api/settings/passkeys/register", "POST",
+            buildJsonObject {
+                put("response", response)
+                if (!deviceName.isNullOrBlank()) put("deviceName", deviceName.trim())
+                put("challengeToken", challengeToken)
+            },
+            authMode = true,
+        )
+    }
+
+    suspend fun securityHandoff(): SecurityHandoff = request(
+        "/api/settings/security-handoff", "POST", authMode = true,
+    )
 
     // API keys (addy.io-compatible /api/v1). Creation/revocation is
     // fresh-auth gated; the created token is returned exactly once.
@@ -323,8 +396,13 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
         }
     }
 
-    private suspend fun requestVoid(path: String, method: String, body: JsonObject? = null) {
-        perform(path, method, body, authMode = false, authed = true)
+    private suspend fun requestVoid(
+        path: String,
+        method: String,
+        body: JsonObject? = null,
+        authMode: Boolean = false,
+    ) {
+        perform(path, method, body, authMode = authMode, authed = true)
     }
 
     private suspend fun perform(
@@ -373,7 +451,7 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
                 } catch (_: Exception) {
                     null
                 }
-                if (message == "Fresh authentication required") {
+                if (message != null && message != "Unauthorized") {
                     throw ApiException.Server(res.code, message)
                 }
                 throw ApiException.Unauthorized()
