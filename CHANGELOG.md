@@ -44,6 +44,18 @@ All notable changes to this project are documented here. The format follows
 - Chromium extension builds now produce a deterministic ZIP, with matching CI
   and release checks.
 
+### Fixed
+
+- Docker now ignores SQL comments when splitting migration files, so comment
+  text containing semicolons cannot break startup migrations.
+- Restored the Android application-only view-model constructor required by the
+  platform's default factory, preventing startup failure.
+
+### Docs
+
+- Kept the API reference directly discoverable from the generated docs
+  navigation.
+
 ### Upgrade Notes
 
 - Before upgrading, back up D1 and the existing encryption key. Continue only
