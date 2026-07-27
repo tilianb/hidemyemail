@@ -133,8 +133,14 @@ struct SecuritySection: View {
                 } else if let setup {
                     Section("Scan QR Code") {
                         if let image = qrImage(setup.uri) {
-                            Image(uiImage: image).interpolation(.none).resizable()
-                                .scaledToFit().frame(maxWidth: 220).accessibilityLabel("MFA setup QR code")
+                            Image(uiImage: image)
+                                .interpolation(.none)
+                                .resizable()
+                                .frame(width: 196, height: 196)
+                                .padding(12)
+                                .background(Color.white)
+                                .frame(maxWidth: .infinity)
+                                .accessibilityLabel("MFA setup QR code")
                         }
                         Text(setup.secret).font(.system(.body, design: .monospaced)).textSelection(.enabled)
                         Button { UIPasteboard.general.string = setup.secret } label: {
@@ -348,7 +354,14 @@ struct SecuritySection: View {
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(value.utf8)
         guard let output = filter.outputImage else { return nil }
-        return UIImage(ciImage: output.transformed(by: CGAffineTransform(scaleX: 8, y: 8)))
+
+        let colors = CIFilter.falseColor()
+        colors.inputImage = output
+        colors.color0 = CIColor.black
+        colors.color1 = CIColor.white
+        guard let rendered = colors.outputImage,
+              let image = CIContext().createCGImage(rendered, from: rendered.extent) else { return nil }
+        return UIImage(cgImage: image)
     }
 
     private func clearMFASecrets() { setup = nil; backupCodes = []; verifyCode = "" }

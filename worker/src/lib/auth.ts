@@ -98,6 +98,30 @@ export async function verifyPasskeyAuthChallenge(secret: string, token: string):
   return null;
 }
 
+// Account-bound passkey MFA challenge. This is deliberately a distinct
+// artifact from the discoverable, standalone `pauth` login token: the server
+// derives MFA mode and its principal exclusively from this signed payload.
+// Format: pauthmfa.{userId}.{authVersion}.{exp}.{challengeB64url}.{hmac}
+export async function signPasskeyMfaChallenge(secret: string, userId: number, authVersion: number, challenge: string): Promise<string> {
+  const exp = Math.floor(Date.now() / 1000) + 300;
+  const payload = `pauthmfa.${userId}.${authVersion}.${exp}.${challenge}`;
+  return `${payload}.${await hmac(secret, payload)}`;
+}
+
+export async function verifyPasskeyMfaChallenge(secret: string, token: string): Promise<{ userId: number; authVersion: number; challenge: string } | null> {
+  const parts = token.split(".");
+  if (parts.length !== 6 || parts[0] !== "pauthmfa") return null;
+  const [, userIdStr, authVersionStr, expStr, challenge, sig] = parts;
+  const payload = `pauthmfa.${userIdStr}.${authVersionStr}.${expStr}.${challenge}`;
+  if (!timingSafeEqual(sig!, await hmac(secret, payload))) return null;
+  const userId = Number(userIdStr);
+  const authVersion = Number(authVersionStr);
+  const exp = Number(expStr);
+  if (!Number.isSafeInteger(userId) || userId < 1 || !Number.isSafeInteger(authVersion) || authVersion < 0 ||
+      !Number.isSafeInteger(exp) || exp <= Math.floor(Date.now() / 1000) || !challenge) return null;
+  return { userId, authVersion, challenge };
+}
+
 // Passkey registration challenge (userId included, user already authenticated)
 // Format: preg.{userId}.{exp}.{challengeB64url}.{hmac}
 export async function signPasskeyRegChallenge(secret: string, userId: number, challenge: string, authVersion = 0): Promise<string> {
