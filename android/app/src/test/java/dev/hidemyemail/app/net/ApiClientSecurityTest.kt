@@ -108,6 +108,21 @@ class ApiClientSecurityTest {
         assertTrue(error is ApiException.Decoding)
     }
 
+    @Test fun passkeyChallengeRequiresNonBlankStringTokenAndRpId() = runTest {
+        val invalidResponses = listOf(
+            """{"challengeToken":123,"rp":{"id":"app.hidemyemail.dev"}}""",
+            """{"challengeToken":" ","rp":{"id":"app.hidemyemail.dev"}}""",
+            """{"challengeToken":"ct","rp":{"id":true}}""",
+            """{"challengeToken":"ct","rp":{"id":""}}""",
+        )
+
+        for (response in invalidResponses) {
+            server.enqueue(json(response))
+            val error = runCatching { client.passkeyChallenge() }.exceptionOrNull()
+            assertTrue(response, error is ApiException.Decoding)
+        }
+    }
+
     @Test fun authenticatedReauth401PreservesInvalidCredentialsAndTokens() = runTest {
         assertSemantic401PreservesAuth("Invalid credentials") {
             client.reauthenticate("wrong", "123456")

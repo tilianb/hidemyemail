@@ -95,8 +95,7 @@ the original encryption key from your secure backup:
 ```bash
 cd worker
 umask 077
-backup_dir="$HOME/hidemyemail-backups"
-mkdir -p "$backup_dir"
+backup_dir="$(mktemp -d "$HOME/hidemyemail-backup.XXXXXX")"
 npx wrangler d1 export DB --remote --output "$backup_dir/hidemyemail-v1.2.1-backup.sql"
 ```
 

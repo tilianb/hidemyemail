@@ -269,9 +269,12 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
         val (objectValue, challengeToken, rpId) = try {
             val objectValue = json.parseToJsonElement(raw) as? JsonObject
                 ?: throw ApiException.Decoding()
-            val challengeToken = (objectValue["challengeToken"] as? JsonPrimitive)?.content
+            val challengeToken = (objectValue["challengeToken"] as? JsonPrimitive)
+                ?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
                 ?: throw ApiException.Decoding()
-            val rpId = objectValue.getValue("rp").jsonObject.getValue("id").jsonPrimitive.content
+            val rpId = (objectValue.getValue("rp").jsonObject.getValue("id") as? JsonPrimitive)
+                ?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
+                ?: throw ApiException.Decoding()
             Triple(objectValue, challengeToken, rpId)
         } catch (_: Exception) {
             throw ApiException.Decoding()
