@@ -55,8 +55,24 @@ reviews:
         secret exposure, release gating, and whether third-party actions are
         pinned to immutable commit SHAs.
 
+  # Keep CodeRabbit advisory-only. It may review and suggest changes, but it
+  # must not generate code, commits, fixes, or pull requests.
+  finishing_touches:
+    autofix:
+      enabled: false
+    docstrings:
+      enabled: false
+    fix_ci:
+      enabled: false
+    resolve_merge_conflict:
+      enabled: false
+    simplify:
+      enabled: false
+    unit_tests:
+      enabled: false
+
 chat:
-  # Allow natural follow-up discussion in PR comments without requiring every
-  # reply to mention the bot.
-  auto_reply: true
+  # Avoid unsolicited conversation; explicitly mention @coderabbitai when a
+  # response is wanted.
+  auto_reply: false
   art: false
