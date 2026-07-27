@@ -183,8 +183,12 @@ struct SecuritySection: View {
                 SecureField("Passphrase", text: $flow.passphrase).textContentType(.password)
                     .accessibilityLabel("Account passphrase")
                 if mfa?.enabled == true {
-                    TextField("MFA code", text: $flow.reauthenticationCode).keyboardType(.numberPad)
-                        .textContentType(.oneTimeCode).accessibilityLabel("MFA code")
+                    TextField("MFA code", text: $flow.reauthenticationCode)
+                        .keyboardType(.asciiCapable)
+                        .textContentType(.oneTimeCode)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .accessibilityLabel("MFA code")
                 }
                 if let error { Text(error).foregroundStyle(Theme.red) }
                 Button("Continue") { Task { await reauthenticate() } }

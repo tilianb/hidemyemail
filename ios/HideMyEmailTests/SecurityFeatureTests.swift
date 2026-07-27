@@ -197,6 +197,36 @@ final class SecurityFeatureTests: XCTestCase {
         }
     }
 
+    func testExpiredPasskeyChallengePreservesBearerSession() async throws {
+        var requests: [URLRequest] = []
+        URLStub.handler = { request in
+            requests.append(request)
+            if request.url!.path == "/api/settings/passkeys/register" {
+                return (HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"])!,
+                    Data(#"{"error":"Invalid or expired passkey challenge"}"#.utf8))
+            }
+            return Self.response(request, #"{"enabled":false,"backupCodesRemaining":0}"#)
+        }
+        let api = client()
+        do {
+            try await api.registerPasskey(
+                response: ["id": "credential"], deviceName: "My iPhone", challengeToken: "expired")
+            XCTFail("Expected expired challenge")
+        } catch APIError.server(let status, let message) {
+            XCTAssertEqual(status, 401)
+            XCTAssertEqual(message, "Invalid or expired passkey challenge")
+        } catch {
+            XCTFail("Expected semantic Worker error, got \(error)")
+        }
+
+        _ = try await api.mfaStatus()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertTrue(requests.allSatisfy {
+            $0.value(forHTTPHeaderField: "Authorization") == "Bearer bearer"
+        })
+    }
+
     func testHandoffRejectsCrossOriginURL() async throws {
         URLStub.handler = { request in Self.response(request, #"{"url":"https://evil.example/security-handoff?code=x"}"#) }
         do {

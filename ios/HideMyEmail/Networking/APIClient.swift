@@ -479,8 +479,12 @@ actor APIClient {
             if path == "/api/settings/reauth", let message, message != "Unauthorized" {
                 throw APIError.server(status: 401, message: message)
             }
-            let mfaCodeEndpoints = ["/api/settings/mfa/disable", "/api/settings/mfa/backup-codes"]
-            if mfaCodeEndpoints.contains(path), let message, message != "Unauthorized" {
+            let semanticUnauthorizedEndpoints = [
+                "/api/settings/mfa/disable",
+                "/api/settings/mfa/backup-codes",
+                "/api/settings/passkeys/register",
+            ]
+            if semanticUnauthorizedEndpoints.contains(path), let message, message != "Unauthorized" {
                 throw APIError.server(status: 401, message: message)
             }
             throw APIError.unauthorized
