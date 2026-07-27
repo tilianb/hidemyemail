@@ -87,7 +87,7 @@ From `worker/`, one interactive pass generates and pushes everything
 (admin passphrase, random secrets, optional AWS credentials):
 
 ```bash
-npm run setup
+npm run setup   # new deployments only; never key rotation
 ```
 
 See [Configuration](CONFIGURATION.md) for the manual per-secret equivalent

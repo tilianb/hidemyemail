@@ -16,12 +16,15 @@ function fixture(version = '2.0.0', changelog = `## [2.0.0] - 2026-07-26\n\nCurr
   const root = mkdtempSync(join(tmpdir(), 'release-validator-'))
   roots.push(root)
   for (const path of ['worker', 'dashboard', 'extension', 'android/app', 'ios']) mkdirSync(join(root, path), { recursive: true })
-  for (const path of ['worker/package.json', 'worker/package-lock.json', 'dashboard/package.json', 'dashboard/package-lock.json', 'extension/package.json', 'extension/package-lock.json']) {
+  for (const path of ['worker/package.json', 'dashboard/package.json', 'extension/package.json']) {
     writeFileSync(join(root, path), JSON.stringify({ version }))
+  }
+  for (const path of ['worker/package-lock.json', 'dashboard/package-lock.json', 'extension/package-lock.json']) {
+    writeFileSync(join(root, path), JSON.stringify({ version, packages: { '': { version } } }))
   }
   writeFileSync(join(root, 'extension/manifest.json'), JSON.stringify({ version }))
   writeFileSync(join(root, 'android/app/build.gradle.kts'), `versionCode = 20\nversionName = "${version}"\n`)
-  writeFileSync(join(root, 'ios/project.yml'), `MARKETING_VERSION: "${version}"\n`)
+  writeFileSync(join(root, 'ios/project.yml'), `MARKETING_VERSION: "${version}"\nCURRENT_PROJECT_VERSION: "${version}"\n`)
   writeFileSync(join(root, 'CHANGELOG.md'), changelog)
   execFileSync('git', ['init', '-q'], { cwd: root })
   execFileSync('git', ['add', '.'], { cwd: root })
@@ -121,4 +124,23 @@ test.each(['extension/package.json', 'extension/package-lock.json', 'extension/m
   const result = run(root, 'v2.0.0', ['--previous-tag='])
   expect(result.status).toBe(1)
   expect(result.stderr).toContain(`${path} is 1.9.9`)
+})
+
+test.each(['worker/package-lock.json', 'dashboard/package-lock.json', 'extension/package-lock.json'])(
+  'rejects lockfile root package version mismatch in %s',
+  (path) => {
+    const root = fixture('2.0.0')
+    writeFileSync(join(root, path), JSON.stringify({ version: '2.0.0', packages: { '': { version: '1.9.9' } } }))
+    const result = run(root, 'v2.0.0', ['--previous-tag='])
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain(`${path} packages[""].version is 1.9.9`)
+  },
+)
+
+test('rejects iOS current project version mismatch', () => {
+  const root = fixture('2.0.0')
+  writeFileSync(join(root, 'ios/project.yml'), 'MARKETING_VERSION: "2.0.0"\nCURRENT_PROJECT_VERSION: "1.9.9"\n')
+  const result = run(root, 'v2.0.0', ['--previous-tag='])
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain('iOS CURRENT_PROJECT_VERSION is 1.9.9')
 })

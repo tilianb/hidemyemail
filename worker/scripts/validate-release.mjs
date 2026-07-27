@@ -41,16 +41,20 @@ function compareVersions(left, right) {
   return 0
 }
 
+const lockfiles = ['worker/package-lock.json', 'dashboard/package-lock.json', 'extension/package-lock.json']
 const versions = {
   'worker/package.json': readJson('worker/package.json').version,
-  'worker/package-lock.json': readJson('worker/package-lock.json').version,
   'dashboard/package.json': readJson('dashboard/package.json').version,
-  'dashboard/package-lock.json': readJson('dashboard/package-lock.json').version,
   'extension/package.json': readJson('extension/package.json').version,
-  'extension/package-lock.json': readJson('extension/package-lock.json').version,
   'extension/manifest.json': readJson('extension/manifest.json').version,
   'Android versionName': match('android/app/build.gradle.kts', /versionName\s*=\s*"([^"]+)"/, 'versionName'),
   'iOS MARKETING_VERSION': match('ios/project.yml', /^\s*MARKETING_VERSION:\s*"([^"]+)"/m, 'MARKETING_VERSION'),
+  'iOS CURRENT_PROJECT_VERSION': match('ios/project.yml', /^\s*CURRENT_PROJECT_VERSION:\s*"([^"]+)"/m, 'CURRENT_PROJECT_VERSION'),
+}
+for (const path of lockfiles) {
+  const lock = readJson(path)
+  versions[path] = lock.version
+  versions[`${path} packages[""].version`] = lock.packages?.['']?.version
 }
 for (const [source, actual] of Object.entries(versions)) {
   if (actual !== version) fail(`${source} is ${actual}; expected ${version} from ${tag}`)

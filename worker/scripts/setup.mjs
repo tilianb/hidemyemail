@@ -104,7 +104,14 @@ function putSecret(name, value) {
   }
 }
 
-console.error("hidemyemail setup — generates all Worker secrets in one pass.\n");
+console.error("hidemyemail setup — NEW DEPLOYMENTS ONLY.\n");
+console.error("Never use this command to repair or upgrade an existing deployment.");
+console.error("It generates a new DESTINATION_ENCRYPTION_KEY; replacing the existing key makes stored encrypted data unreadable.\n");
+const newDeployment = (await ask("Confirm this is a new deployment with no stored data. Continue? [y/N] ")).trim().toLowerCase();
+if (newDeployment !== "y" && newDeployment !== "yes") {
+  console.error("Aborted — no secrets were generated or pushed.");
+  process.exit(1);
+}
 if (printOnly) {
   console.error("(--print mode: stdout gets only KEY=VALUE lines, so `--print >> .env` is safe)\n");
 } else {

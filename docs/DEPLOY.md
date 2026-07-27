@@ -32,7 +32,8 @@ everything with `wrangler secret put`:
 
 ```bash
 cd worker
-npm run setup                    # or: npm run setup -- --env preview
+npm run setup                    # new deployments only; never key rotation
+# For a new preview deployment: npm run setup -- --env preview
 ```
 
 Add `-- --print` to print `KEY=VALUE` lines instead of pushing (useful for the

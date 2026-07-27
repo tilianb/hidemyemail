@@ -56,7 +56,7 @@ Set with `wrangler secret put`.
 From `worker/`:
 
 ```bash
-npm run setup   # interactive one-shot: generates + pushes everything
+npm run setup   # new deployments only; never key rotation
 ```
 
 Or manually:
@@ -70,6 +70,49 @@ openssl rand -base64 32  # DESTINATION_ENCRYPTION_KEY
 
 `DESTINATION_ENCRYPTION_KEY` must be base64 of exactly 32 bytes (AES-256).
 A hex string fails key import at runtime — do not use `openssl rand -hex`.
+
+## Pre-v1.3 encryption preflight
+
+Run this preflight while v1.2.1 is still deployed. First export D1 and preserve
+the original encryption key from your secure backup:
+
+```bash
+cd worker
+npx wrangler d1 export DB --remote --output ../hidemyemail-v1.2.1-backup.sql
+```
+
+Cloudflare secrets cannot be read back. If the original
+`DESTINATION_ENCRYPTION_KEY` is not available from a secure backup, stop and
+stay on v1.2.1. Validate a locally supplied key without printing or logging it:
+
+```bash
+printf 'DESTINATION_ENCRYPTION_KEY: ' >&2
+IFS= read -rs DESTINATION_ENCRYPTION_KEY
+printf '\n' >&2
+export DESTINATION_ENCRYPTION_KEY
+node -e '
+const v = process.env.DESTINATION_ENCRYPTION_KEY;
+const b = Buffer.from(v, "base64");
+if (b.length !== 32 || b.toString("base64") !== v) process.exit(1);
+'
+unset DESTINATION_ENCRYPTION_KEY
+```
+
+Exit status 0 means canonical Base64 decoding to exactly 32 bytes. Before
+continuing, verify account export succeeds, TOTP login succeeds if enabled, and
+send test mail if the `ses_secret_access_key` DB override is configured. Then
+check for legacy plaintext hashes:
+
+```bash
+npx wrangler d1 execute DB --remote --command "SELECT COUNT(*) AS plaintext_destination_hashes FROM destinations WHERE email_hash LIKE '%@%';"
+npx wrangler d1 execute DB --remote --command "SELECT COUNT(*) AS plaintext_alias_hashes FROM aliases WHERE destination_hash LIKE '%@%';"
+npx wrangler d1 execute DB --remote --command "SELECT COUNT(*) AS plaintext_domain_hashes FROM domains WHERE default_destination_hash LIKE '%@%';"
+```
+
+All three counts must be zero. Any failed check, unknown key history, or nonzero
+count means stop and remain on v1.2.1. Never generate a new key as a repair.
+Data written with one stable canonical 32-byte key remains compatible; v1.3
+does not provide automated key rotation or migration for unsupported configs.
 
 ## Database settings
 
