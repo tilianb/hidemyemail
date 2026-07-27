@@ -2,8 +2,8 @@ import { Hono } from "hono";
 import { setCookie, deleteCookie, getCookie } from "hono/cookie";
 import type { AppEnv } from "../app";
 import { signPasskeyRegChallenge, verifyPasskeyRegChallenge } from "../../lib/auth";
-import { hasFreshAuth } from "../auth-helpers";
-import { fromBase64url, toBase64url, getRpFromOrigin } from "../../lib/webauthn";
+import { hasFreshAuth, isAuthenticatedNative } from "../auth-helpers";
+import { fromBase64url, toBase64url, getAndroidAssociations, getRegistrationOrigins, getRpFromOrigin } from "../../lib/webauthn";
 import type { RegistrationResponseJSON } from "@simplewebauthn/server";
 import { consumeAuthArtifact, markFailedAttempt, rateLimitFailures } from "../../lib/auth-security";
 
@@ -237,11 +237,14 @@ export function settingsRoutes() {
   // Generate a WebAuthn registration challenge
   r.post("/passkeys/challenge", async (c) => {
     const userId = c.get("userId");
+    const tokenMode = c.req.header("X-Auth-Mode") === "token" && !c.req.header("Origin");
+    if (tokenMode && !isAuthenticatedNative(c)) return c.json({ error: "Native token mode required" }, 400);
     if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
     const { generateRegistrationOptions } = await import("@simplewebauthn/server");
     let rpID: string;
     try {
       ({ rpID } = getRpFromOrigin(c.env.APP_ORIGIN));
+      if (isAuthenticatedNative(c)) getAndroidAssociations(c.env.ANDROID_APP_ORIGINS);
     } catch {
       return c.json({ error: "Passkey authentication is not configured" }, 500);
     }
@@ -271,7 +274,9 @@ export function settingsRoutes() {
       },
     });
 
-    const cookie = await signPasskeyRegChallenge(c.env.SESSION_SECRET, userId, options.challenge);
+    const cookie = await signPasskeyRegChallenge(c.env.SESSION_SECRET, userId, options.challenge, c.get("authVersion"));
+    const native = isAuthenticatedNative(c);
+    if (native) return c.json({ ...options, challengeToken: cookie });
     setCookie(c, "__Host-passkey-reg", cookie, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: 300 });
 
     return c.json(options);
@@ -280,26 +285,34 @@ export function settingsRoutes() {
   // Verify attestation and persist the new credential
   r.post("/passkeys/register", async (c) => {
     const sessionUserId = c.get("userId");
+    const tokenMode = c.req.header("X-Auth-Mode") === "token" && !c.req.header("Origin");
+    if (tokenMode && !isAuthenticatedNative(c)) return c.json({ error: "Native token mode required" }, 400);
     if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
 
-    const regCookie = getCookie(c, "__Host-passkey-reg");
+    const body = await c.req.json<{ response: RegistrationResponseJSON; deviceName?: string; challengeToken?: unknown }>()
+      .catch(() => ({ response: null as unknown as RegistrationResponseJSON, deviceName: undefined, challengeToken: undefined }));
+    const native = isAuthenticatedNative(c);
+    const regCookie = native && typeof body.challengeToken === "string" ? body.challengeToken : getCookie(c, "__Host-passkey-reg");
     if (!regCookie) return c.json({ error: "No registration challenge" }, 401);
 
     const verified = await verifyPasskeyRegChallenge(c.env.SESSION_SECRET, regCookie);
-    if (!verified || verified.userId !== sessionUserId) {
+    if (!verified || verified.userId !== sessionUserId || verified.authVersion !== c.get("authVersion")) {
       return c.json({ error: "Invalid or expired challenge" }, 401);
     }
 
-    const { response, deviceName } = await c.req.json<{ response: RegistrationResponseJSON; deviceName?: string }>()
-      .catch(() => ({ response: null as unknown as RegistrationResponseJSON, deviceName: undefined }));
+    const { response, deviceName } = body;
 
     if (!response?.id) return c.json({ error: "Invalid request" }, 400);
+    if (!(await consumeAuthArtifact(c.env.DB, regCookie, Math.floor(Date.now() / 1000) + 300))) {
+      return c.json({ error: "Invalid or expired challenge" }, 401);
+    }
 
     const { verifyRegistrationResponse } = await import("@simplewebauthn/server");
     let rpID: string;
-    let expectedOrigin: string;
+    let expectedOrigin: string | string[];
     try {
-      ({ rpID, expectedOrigin } = getRpFromOrigin(c.env.APP_ORIGIN));
+      ({ rpID } = getRpFromOrigin(c.env.APP_ORIGIN));
+      expectedOrigin = getRegistrationOrigins(c.env.APP_ORIGIN, c.env.ANDROID_APP_ORIGINS, native);
     } catch {
       return c.json({ error: "Passkey authentication is not configured" }, 500);
     }
@@ -315,10 +328,6 @@ export function settingsRoutes() {
     if (!result.verified || !result.registrationInfo) {
       return c.json({ error: "Verification failed" }, 400);
     }
-    if (!(await consumeAuthArtifact(c.env.DB, regCookie, Math.floor(Date.now() / 1000) + 300))) {
-      return c.json({ error: "Invalid or expired challenge" }, 401);
-    }
-
     const { credential } = result.registrationInfo;
     const credId = credential.id;
 

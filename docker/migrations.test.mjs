@@ -85,9 +85,16 @@ test("Docker startup accepts no APP_ORIGIN and migrates before listening", async
   );
 });
 
-test("Docker routes API and AASA requests through the Worker before assets", () => {
+test("Docker routes all dynamic security and association requests through the Worker", () => {
   assert.deepEqual(WORKER_FIRST_ROUTES, [
     "/api/*",
     "/.well-known/apple-app-site-association",
+    "/.well-known/assetlinks.json",
+    "/security-handoff",
   ]);
+});
+
+test("Docker passes Android association configuration through to the Worker", async () => {
+  const server = await readFile(new URL("./server.mjs", import.meta.url), "utf8");
+  assert.match(server, /ANDROID_APP_ORIGINS:\s*env\.ANDROID_APP_ORIGINS\s*\?\?\s*["']{2}/);
 });

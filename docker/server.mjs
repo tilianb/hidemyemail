@@ -104,6 +104,7 @@ const mf = new Miniflare({
     ENVIRONMENT: env.ENVIRONMENT ?? "self-hosted",
     BLOCKED_SUBDOMAINS: env.BLOCKED_SUBDOMAINS ?? "",
     APP_ORIGIN: env.APP_ORIGIN ?? "",
+    ANDROID_APP_ORIGINS: env.ANDROID_APP_ORIGINS ?? "",
     SES_REGION: env.SES_REGION ?? "ap-southeast-2",
     S3_INBOUND_BUCKET: env.S3_INBOUND_BUCKET ?? "hidemyemail-inbound-raw",
     SNS_INBOUND_TOPIC_ARN: env.SNS_INBOUND_TOPIC_ARN ?? "",

@@ -19,6 +19,7 @@ export interface Env {
   // Web origin of the dashboard, e.g. https://app.hidemyemail.dev. Used as the
   // Canonical WebAuthn relying-party origin. Must be HTTPS except localhost.
   APP_ORIGIN?: string;
+  ANDROID_APP_ORIGINS?: string;
   // Apple App ID ("<TeamID>.<bundleId>", e.g. ABCDE12345.dev.hidemyemail.app)
   // published in the apple-app-site-association file for passkey association.
   APPLE_APP_ID?: string;

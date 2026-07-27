@@ -100,21 +100,41 @@ export async function verifyPasskeyAuthChallenge(secret: string, token: string):
 
 // Passkey registration challenge (userId included, user already authenticated)
 // Format: preg.{userId}.{exp}.{challengeB64url}.{hmac}
-export async function signPasskeyRegChallenge(secret: string, userId: number, challenge: string): Promise<string> {
+export async function signPasskeyRegChallenge(secret: string, userId: number, challenge: string, authVersion = 0): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + 300;
-  const payload = `preg.${userId}.${exp}.${challenge}`;
+  const payload = `preg2.${userId}.${authVersion}.${exp}.${challenge}`;
   return `${payload}.${await hmac(secret, payload)}`;
 }
 
-export async function verifyPasskeyRegChallenge(secret: string, token: string): Promise<{ userId: number; challenge: string } | null> {
+export async function verifyPasskeyRegChallenge(secret: string, token: string): Promise<{ userId: number; authVersion: number; challenge: string } | null> {
   const parts = token.split(".");
-  if (parts.length !== 5 || parts[0] !== "preg") return null;
-  const [, userIdStr, expStr, challenge, sig] = parts;
-  const payload = `preg.${userIdStr}.${expStr}.${challenge}`;
+  if (parts.length !== 6 || parts[0] !== "preg2") return null;
+  const [, userIdStr, authVersionStr, expStr, challenge, sig] = parts;
+  const payload = `preg2.${userIdStr}.${authVersionStr}.${expStr}.${challenge}`;
   const expected = await hmac(secret, payload);
   if (!timingSafeEqual(sig!, expected)) return null;
-  if (Number(expStr) > Math.floor(Date.now() / 1000)) return { userId: Number(userIdStr), challenge: challenge! };
+  if (Number(expStr) > Math.floor(Date.now() / 1000)) {
+    return { userId: Number(userIdStr), authVersion: Number(authVersionStr), challenge: challenge! };
+  }
   return null;
+}
+
+export async function signSecurityHandoff(secret: string, userId: number, authVersion: number): Promise<string> {
+  const exp = Math.floor(Date.now() / 1000) + 120;
+  const nonce = toHex(crypto.getRandomValues(new Uint8Array(16)).buffer);
+  const payload = `security1.${userId}.${authVersion}.${exp}.${nonce}`;
+  return `${payload}.${await hmac(secret, payload)}`;
+}
+
+export async function verifySecurityHandoff(secret: string, token: string): Promise<{ userId: number; authVersion: number; expiresAt: number } | null> {
+  const parts = token.split(".");
+  if (parts.length !== 6 || parts[0] !== "security1") return null;
+  const [, userIdStr, authVersionStr, expStr, nonce, sig] = parts;
+  const payload = `security1.${userIdStr}.${authVersionStr}.${expStr}.${nonce}`;
+  if (!timingSafeEqual(sig!, await hmac(secret, payload))) return null;
+  const expiresAt = Number(expStr);
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= Math.floor(Date.now() / 1000)) return null;
+  return { userId: Number(userIdStr), authVersion: Number(authVersionStr), expiresAt };
 }
 
 export async function signSession(secret: string, userId: number, ttlSeconds: number, authVersion = 0): Promise<string> {
