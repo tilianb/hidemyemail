@@ -7,6 +7,22 @@ node_root="$HOME/.local/node-v$node_version"
 android_home="$HOME/.local/share/android-sdk"
 android_tools_version="11076708"
 
+echo "==> Installing personal Amp skills"
+personal_skills_repo="$HOME/.local/share/amp-personal-skills"
+if [[ -d "$personal_skills_repo/.git" ]]; then
+  git -C "$personal_skills_repo" \
+    -c credential.helper= \
+    -c 'credential.helper=!gh auth git-credential' \
+    pull --ff-only --quiet
+elif [[ -e "$personal_skills_repo" ]]; then
+  echo "Personal skills path exists but is not a Git repository: $personal_skills_repo" >&2
+  exit 1
+else
+  mkdir -p "$(dirname "$personal_skills_repo")"
+  gh repo clone tilianb/amp-personal-skills "$personal_skills_repo"
+fi
+"$personal_skills_repo/scripts/install.sh"
+
 echo "==> Installing required system packages"
 packages=(ca-certificates curl unzip openjdk-17-jdk-headless)
 missing_packages=()
