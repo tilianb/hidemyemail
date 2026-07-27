@@ -32,7 +32,8 @@ everything with `wrangler secret put`:
 
 ```bash
 cd worker
-npm run setup                    # or: npm run setup -- --env preview
+npm run setup                    # new deployments only; never key rotation
+# For a new preview deployment: npm run setup -- --env preview
 ```
 
 Add `-- --print` to print `KEY=VALUE` lines instead of pushing (useful for the
@@ -172,10 +173,15 @@ npm run build
 
 cd ../worker
 npm ci
-npx wrangler deploy
+npm run deploy
 ```
 
 The Worker serves both API and dashboard through Wrangler Assets. You do not need a separate Cloudflare Pages project.
+
+`npm run deploy` applies production D1 migrations before publishing the
+Worker. If migration fails, the Worker is not published. If deploy fails after
+a backward-compatible migration, the old Worker remains active; retrying
+`npm run deploy` is safe.
 
 ## 8. Cloudflare automatic deploys
 

@@ -1,38 +1,26 @@
 name: TestFlight
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
+  workflow_call:
+    secrets:
+      BUILD_CERTIFICATE_BASE64:
+        required: true
+      P12_PASSWORD:
+        required: true
+      BUILD_PROVISION_PROFILE_BASE64:
+        required: true
+      APP_STORE_CONNECT_API_PRIVATE_KEY:
+        required: true
+      APP_STORE_CONNECT_API_KEY_ID:
+        required: true
+      APP_STORE_CONNECT_API_ISSUER_ID:
+        required: true
 
 permissions: {}
 
 jobs:
-  publish-gate:
-    name: Verify publish ref
-    runs-on: ubuntu-latest
-    outputs:
-      stable-release: ${{ steps.ref.outputs.stable-release }}
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout protected history
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          fetch-depth: 0
-      - name: Require a release tag from main
-        id: ref
-        run: |
-          tag="$GITHUB_REF_NAME"
-          [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || exit 1
-          git fetch origin main
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
-          echo "stable-release=true" >> "$GITHUB_OUTPUT"
-
   testflight:
     name: Upload to TestFlight
-    needs: publish-gate
-    if: needs.publish-gate.result == 'success' && needs.publish-gate.outputs.stable-release == 'true'
     runs-on: macos-15
     environment: production
     permissions:
@@ -84,27 +72,29 @@ jobs:
         run: |
           cd ios
           VERSION="${GITHUB_REF_NAME#v}"
-          if [[ "$GITHUB_REF_TYPE" != "tag" ]]; then
-            VERSION="1.0.0" # Fallback for manual branch triggers
-          fi
+          BUILD_NUMBER="${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*\.[1-9][0-9]*$ ]] || {
+            echo "Invalid TestFlight build number: $BUILD_NUMBER" >&2
+            exit 1
+          }
           xcodebuild archive \
             -project HideMyEmail.xcodeproj \
             -scheme HideMyEmail \
             -configuration Release \
-            -archivePath $PWD/build/HideMyEmail.xcarchive \
+            -archivePath "$PWD/build/HideMyEmail.xcarchive" \
             CODE_SIGN_STYLE=Manual \
             PROVISIONING_PROFILE_SPECIFIER=Github \
             CODE_SIGN_IDENTITY="Apple Distribution" \
-            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
-            MARKETING_VERSION=$VERSION
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            MARKETING_VERSION="$VERSION"
 
       - name: Export IPA
         run: |
           cd ios
           xcodebuild -exportArchive \
-            -archivePath $PWD/build/HideMyEmail.xcarchive \
+            -archivePath "$PWD/build/HideMyEmail.xcarchive" \
             -exportOptionsPlist ExportOptions.plist \
-            -exportPath $PWD/build
+            -exportPath "$PWD/build"
 
       - name: Setup App Store Connect API Key
         env:
@@ -112,7 +102,7 @@ jobs:
           ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
         run: |
           mkdir -p ~/.appstoreconnect/private_keys
-          echo "$ASC_PRIVATE_KEY" > ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          echo "$ASC_PRIVATE_KEY" > ~/.appstoreconnect/private_keys/"AuthKey_${ASC_KEY_ID}.p8"
 
       - name: Upload to TestFlight
         env:

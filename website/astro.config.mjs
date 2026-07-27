@@ -35,6 +35,7 @@ export default defineConfig({
             { label: "Deployment guide", slug: "deploy" },
             { label: "AWS SES setup", slug: "aws-ses-setup" },
             { label: "Configuration", slug: "configuration" },
+            { label: "API", slug: "api" },
             { label: "Troubleshooting", slug: "troubleshooting" },
             { label: "Security notes", slug: "security" },
           ],
