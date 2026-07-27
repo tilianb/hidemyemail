@@ -167,6 +167,38 @@ test("clamps the trigger and 230px chooser to the viewport and chooses the side 
   expect(panel.style.left).toBe("90px"); expect(getComputedStyle(panel).width).toBe("230px");
 });
 
+test("moves left of 1Password and Bitwarden-style inline controls without changing them", async () => {
+  const onePassword = document.createElement("com-1password-button");
+  vi.spyOn(onePassword, "getBoundingClientRect").mockReturnValue(rect(322, 106, 28, 28));
+  document.body.append(onePassword);
+  const bitwarden = document.createElement("bw-random-host"); bitwarden.setAttribute("popover", "manual");
+  vi.spyOn(bitwarden, "getBoundingClientRect").mockReturnValue(rect(322, 106, 28, 28));
+  document.body.append(bitwarden);
+
+  const { host } = await mounted();
+
+  await vi.waitFor(() => expect(host.style.left).toBe("288px"));
+  expect(onePassword.isConnected).toBe(true);
+  expect(bitwarden.isConnected).toBe(true);
+  expect(onePassword.getAttribute("style")).toBeNull();
+  expect(bitwarden.getAttribute("style")).toBeNull();
+});
+
+test("hides the trigger when a narrow field has no non-overlapping icon lane", async () => {
+  const overlay = document.createElement("com-1password-button");
+  vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue(rect(122, 106, 28, 28));
+  document.body.append(overlay);
+  const input = document.createElement("input"); input.type = "email";
+  vi.spyOn(input, "getBoundingClientRect").mockReturnValue(rect(100, 100, 50, 40));
+  document.body.append(input);
+  const host = mountContent(vi.fn(), "open");
+
+  input.focus();
+
+  await vi.waitFor(() => expect(host.hidden).toBe(true));
+  expect(overlay.isConnected).toBe(true);
+});
+
 test.each(["type", "class", "style", "detached"])("hides mounted controls when the target becomes ineligible via %s", async (change) => {
   vi.useFakeTimers();
   const { input, host } = await mounted();
@@ -217,15 +249,15 @@ test("uses the first eligible input in a page-owned open shadow root focus path"
 test("observes attributes only while a target is active and reverts after it closes", async () => {
   const observe = vi.spyOn(MutationObserver.prototype, "observe");
   const host = mountContent(vi.fn(), "open");
-  expect(observe).toHaveBeenLastCalledWith(document.documentElement, { childList: true, subtree: true });
+  expect(observe).toHaveBeenLastCalledWith(document.documentElement, { childList: true });
 
   const input = visibleEmailInput(); input.focus();
-  expect(observe).toHaveBeenLastCalledWith(document.documentElement, expect.objectContaining({ attributes: true, subtree: true }));
+  expect(observe).toHaveBeenLastCalledWith(document.documentElement, expect.objectContaining({ attributes: true, childList: true, subtree: true }));
 
   document.body.focus();
   document.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
   expect(host.hidden).toBe(true);
-  expect(observe).toHaveBeenLastCalledWith(document.documentElement, { childList: true, subtree: true });
+  expect(observe).toHaveBeenLastCalledWith(document.documentElement, { childList: true });
 });
 
 test("ignores extension-owned style mutations but reacts to target style mutations", async () => {

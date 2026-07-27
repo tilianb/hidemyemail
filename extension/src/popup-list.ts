@@ -1,5 +1,5 @@
 import type { Alias } from "./api";
-import { popupRequest } from "./popup-client";
+import { popupRequest, SAFE_ERROR } from "./popup-client";
 
 const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const state = byId<HTMLElement>("list-state"), list = byId<HTMLUListElement>("alias-list"), retry = byId<HTMLButtonElement>("retry");
@@ -34,7 +34,7 @@ async function mutate(alias: Alias, action: "activate" | "deactivate" | "delete"
   if (rowLocks.has(alias.id)) return;
   rowLocks.add(alias.id); mutationStateChanged(true); row.querySelectorAll("button").forEach((control) => { control.disabled = true; });
   try { await popupRequest({ type: `hme:aliases:${action}` as "hme:aliases:activate", id: alias.id }); await loadAliases(); }
-  catch { safeMessage("HideMyEmail could not complete the request. Try again."); row.querySelectorAll("button").forEach((control) => { control.disabled = false; }); }
+  catch { safeMessage(SAFE_ERROR); row.querySelectorAll("button").forEach((control) => { control.disabled = false; }); }
   finally { rowLocks.delete(alias.id); mutationStateChanged(rowLocks.size > 0); }
 }
 async function handleRow(event: Event, alias: Alias, row: HTMLLIElement) {
@@ -60,7 +60,7 @@ export async function loadAliases(): Promise<void> {
   try {
     const response = await popupRequest({ type: "hme:aliases:list", ...(search ? { search } : {}) });
     if (id !== requestId) return; render(response.aliases ?? []);
-  } catch { if (id === requestId) { list.replaceChildren(); safeMessage("HideMyEmail could not complete the request. Try again."); retry.hidden = false; } }
+  } catch { if (id === requestId) { list.replaceChildren(); safeMessage(SAFE_ERROR); retry.hidden = false; } }
 }
 
 export function resetAliasList(): void {

@@ -24,6 +24,12 @@ All notable changes to this project are documented here. The format follows
   alias generator and setup flow. New connections default to
   `https://app.hidemyemail.dev` while self-hosted deployments remain supported.
 
+### Fixed
+
+- Inline alias controls now move away from existing autofill controls such as
+  Bitwarden and 1Password, and stay hidden when a field is too narrow to fit a
+  separate control without overlap.
+
 ### Security
 
 - Browser field integration requires install-time access to HTTP and HTTPS

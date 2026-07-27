@@ -29,9 +29,9 @@ export const isValidDomain = (value: unknown): value is string => {
   return labels.length > 1 && labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label));
 };
 const localPart = (value: unknown): value is string => typeof value === "string" && value.length <= 64 && /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(value) && !value.includes("..");
-const creatableLocalPart = (value: unknown): value is string => localPart(value) && !value.toLowerCase().startsWith("r.");
+export const creatableLocalPart = (value: unknown): value is string => localPart(value) && !value.toLowerCase().startsWith("r.");
 const aliasId = (value: unknown): value is string => typeof value === "string" && /^[1-9]\d*$/.test(value);
-const inputDescription = (value: unknown): value is string => typeof value === "string" && value.length <= 255;
+export const inputDescription = (value: unknown): value is string => typeof value === "string" && value.length <= 255;
 
 function parseAlias(value: unknown): Alias | null {
   if (!record(value) || !aliasId(value.id) || typeof value.email !== "string" || typeof value.active !== "boolean" || !(value.description === null || typeof value.description === "string")) return null;

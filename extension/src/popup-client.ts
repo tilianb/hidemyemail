@@ -1,7 +1,7 @@
 import { isValidDomain, type Alias, type CreateAliasInput } from "./api";
 import type { PopupRequest } from "./messages";
 
-const SAFE_ERROR = "HideMyEmail could not complete the request. Try again.";
+export const SAFE_ERROR = "HideMyEmail could not complete the request. Try again.";
 const record = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const validAlias = (value: unknown): value is Alias => {
   if (!record(value) || typeof value.id !== "string" || !/^[1-9]\d*$/.test(value.id) || typeof value.email !== "string" || typeof value.active !== "boolean" || !(value.description === null || typeof value.description === "string") || !isValidDomain(value.domain) || typeof value.local_part !== "string") return false;

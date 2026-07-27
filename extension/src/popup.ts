@@ -1,6 +1,6 @@
 import { ApiError, createApi, type AliasFormat } from "./api";
 import { chromePlatform, ConfigError, configure, initializeConfig, type ExtensionConfig } from "./config";
-import { createInput, popupRequest } from "./popup-client";
+import { createInput, popupRequest, SAFE_ERROR } from "./popup-client";
 import { activateAliasList, loadAliases, registerAliasList, resetAliasList } from "./popup-list";
 
 const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -60,7 +60,7 @@ function registerCreate() {
     if (input.format === "custom" && !byId<HTMLInputElement>("local-part").checkValidity()) { byId<HTMLInputElement>("local-part").reportValidity(); return; }
     result.hidden = true; byId<HTMLElement>("create-status").textContent = "Creating alias…";
     try { const response = await popupRequest({ type: "hme:aliases:create", input }); if (!active()) return; byId<HTMLElement>("alias").textContent = response.alias!.email; result.hidden = false; byId<HTMLElement>("create-status").textContent = "Alias created"; void loadAliases(); byId<HTMLButtonElement>("copy").focus(); }
-    catch { if (active()) byId<HTMLElement>("create-status").textContent = "HideMyEmail could not complete the request. Try again."; }
+    catch { if (active()) byId<HTMLElement>("create-status").textContent = SAFE_ERROR; }
   }); });
   byId<HTMLButtonElement>("copy").addEventListener("click", () => { void navigator.clipboard.writeText(byId<HTMLElement>("alias").textContent ?? "").then(() => { byId<HTMLElement>("create-status").textContent = "Copied to clipboard"; }).catch(() => { byId<HTMLElement>("create-status").textContent = "Could not copy. Select the alias and copy it manually."; }); });
 }

@@ -4,6 +4,8 @@ import type { ContentRequest, ContentResponse } from "./messages";
 type Send = (message: ContentRequest) => Promise<unknown>;
 const SAFE_ERROR = "HideMyEmail could not complete the request. Try again.";
 const teardowns = new WeakMap<HTMLDivElement, () => void>();
+const TRIGGER_SIZE = 28;
+const OVERLAY_GAP = 6;
 
 function aliasResponse(value: unknown, domain: string): value is { ok: true; alias: string } {
   if (typeof value !== "object" || value === null || !("ok" in value) || !("alias" in value)) return false;
@@ -38,6 +40,39 @@ export function requestAliasOnClick(button: HTMLButtonElement, input: HTMLInputE
   });
 }
 
+function overlaps(left: number, top: number, rect: DOMRect): boolean {
+  return rect.right > left && rect.left < left + TRIGGER_SIZE && rect.bottom > top && rect.top < top + TRIGGER_SIZE;
+}
+
+function foreignOverlayRects(input: HTMLInputElement, host: HTMLDivElement, left: number, top: number): DOMRect[] {
+  const candidates = new Set<Element>(document.querySelectorAll("com-1password-button, [popover='manual']"));
+  if (typeof document.elementsFromPoint === "function") {
+    for (const x of [left + 2, left + TRIGGER_SIZE / 2, left + TRIGGER_SIZE - 2]) {
+      for (const element of document.elementsFromPoint(x, top + TRIGGER_SIZE / 2)) candidates.add(element);
+    }
+  }
+  const rects: DOMRect[] = [];
+  for (const element of candidates) {
+    if (!(element instanceof HTMLElement) || element === host || host.contains(element) || element === input || element.contains(input)) continue;
+    const style = getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0" || style.pointerEvents === "none") continue;
+    const rect = element.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0 && overlaps(left, top, rect)) rects.push(rect);
+  }
+  return rects;
+}
+
+export function triggerLeft(input: HTMLInputElement, host: HTMLDivElement, top: number): number | null {
+  const field = input.getBoundingClientRect();
+  let left = field.right - TRIGGER_SIZE;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const collisions = foreignOverlayRects(input, host, left, top);
+    if (collisions.length === 0) return left >= field.left ? left : null;
+    left = Math.min(...collisions.map((rect) => rect.left)) - OVERLAY_GAP - TRIGGER_SIZE;
+  }
+  return null;
+}
+
 export function mountContent(send: Send, shadowMode: ShadowRootMode = "closed"): HTMLDivElement {
   const host = document.createElement("div"); host.dataset.hmeExtension = "true";
   const shadow = host.attachShadow({ mode: shadowMode });
@@ -51,8 +86,12 @@ export function mountContent(send: Send, shadowMode: ShadowRootMode = "closed"):
     cancelAnimationFrame(frame); frame = requestAnimationFrame(() => {
       if (!target?.isConnected || !isEmailField(target)) return hide();
       const rect = target.getBoundingClientRect();
-      host.style.left = `${Math.min(Math.max(0, rect.right - 28), Math.max(0, innerWidth - 28))}px`;
-      host.style.top = `${Math.min(Math.max(0, rect.top + (rect.height - 28) / 2), Math.max(0, innerHeight - 28))}px`;
+      const top = Math.min(Math.max(0, rect.top + (rect.height - TRIGGER_SIZE) / 2), Math.max(0, innerHeight - TRIGGER_SIZE));
+      const left = triggerLeft(target, host, top);
+      host.hidden = left === null;
+      if (left === null) return;
+      host.style.left = `${Math.min(Math.max(0, left), Math.max(0, innerWidth - TRIGGER_SIZE))}px`;
+      host.style.top = `${top}px`;
       if (panel) {
         const panelWidth = 230; const panelHeight = panel.getBoundingClientRect().height || 190; const gap = 6;
         const below = innerHeight - rect.bottom; const top = below >= panelHeight + gap || below >= rect.top ? rect.bottom + gap : rect.top - panelHeight - gap;
@@ -66,8 +105,8 @@ export function mountContent(send: Send, shadowMode: ShadowRootMode = "closed"):
     panel?.remove(); panel = null;
     if (restore && target?.isConnected) target.focus();
   };
-  const inactiveObservation = { childList: true, subtree: true } as const;
-  const activeObservation: MutationObserverInit = { attributes: true, subtree: true, attributeFilter: ["type", "disabled", "readonly", "autocomplete", "name", "id", "aria-label", "placeholder", "class", "style", "hidden", "inert", "aria-hidden"] };
+  const inactiveObservation = { childList: true } as const;
+  const activeObservation: MutationObserverInit = { attributes: true, childList: true, subtree: true, attributeFilter: ["type", "disabled", "readonly", "autocomplete", "name", "id", "aria-label", "placeholder", "class", "style", "hidden", "inert", "aria-hidden"] };
   let recoveryObserver: MutationObserver; let attributeObserver: MutationObserver;
   const observe = (active: boolean) => {
     if (active) attributeObserver.observe(document.documentElement, activeObservation);

@@ -1,4 +1,4 @@
-import { isValidDomain, type Alias, type CreateAliasInput } from "./api";
+import { creatableLocalPart, inputDescription, isValidDomain, type Alias, type CreateAliasInput } from "./api";
 import type { ExtensionConfig } from "./config";
 
 export type ContentRequest = { type: "hme:domain-options" } | { type: "hme:generate"; domain: string };
@@ -45,10 +45,8 @@ function popupRequest(value: unknown): PopupRequest | null {
     const input = value.input;
     const inputKeys = Object.keys(input);
     const format = input.format;
-    const descriptionOk = input.description === undefined || (typeof input.description === "string" && input.description.length <= 255);
-    const localOk = format === "custom"
-      ? typeof input.local_part === "string" && input.local_part.length <= 64 && /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(input.local_part) && !input.local_part.includes("..") && !input.local_part.toLowerCase().startsWith("r.")
-      : input.local_part === undefined;
+    const descriptionOk = input.description === undefined || inputDescription(input.description);
+    const localOk = format === "custom" ? creatableLocalPart(input.local_part) : input.local_part === undefined;
     if (isValidDomain(input.domain) && (format === "random_characters" || format === "uuid" || format === "custom") && descriptionOk && localOk && inputKeys.every((key) => ["domain", "format", "description", "local_part"].includes(key))) return value as PopupRequest;
   }
   if ((value.type === "hme:aliases:activate" || value.type === "hme:aliases:deactivate" || value.type === "hme:aliases:delete") && keys.length === 2 && validId(value.id)) return value as PopupRequest;
