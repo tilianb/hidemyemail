@@ -16,9 +16,6 @@
     <marker id="mailArrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="userSpaceOnUse">
       <path d="M0 0 9 4.5 0 9Z" fill="#5eead4"/>
     </marker>
-    <marker id="replyArrow" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto" markerUnits="userSpaceOnUse">
-      <path d="M2 2 9 5.5 2 9Z" fill="#5eead4" stroke="#5eead4" stroke-width="2.4" stroke-linejoin="round"/>
-    </marker>
     <marker id="apiArrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="userSpaceOnUse">
       <path d="M0 0 9 4.5 0 9Z" fill="#7dd3fc"/>
     </marker>
@@ -92,7 +89,7 @@
   </g>
   <text class="edge-label" x="573" y="216">SNS</text>
 
-  <path d="M1072 276C1072 339 297 339 297 278" fill="none" stroke="#315f69" stroke-width="1.6" stroke-dasharray="6 6" marker-end="url(#replyArrow)"/>
+  <path d="M1072 276C1072 308 1045 330 1012 330H321Q297 330 297 306V278" fill="none" stroke="#315f69" stroke-width="1.6" stroke-dasharray="6 6" marker-end="url(#mailArrow)"/>
   <rect x="505" y="313" width="358" height="25" rx="12" fill="#081421"/>
   <text class="edge-label" x="684" y="329">replies return through the reverse alias</text>
 
