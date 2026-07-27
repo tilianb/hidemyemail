@@ -155,6 +155,9 @@ final class AppState {
 
         let opts = try await client.passkeyChallenge(mfaToken: mfaToken)
         try requireCurrent(snapshot)
+        guard let passkeyToken = opts.passkeyToken, !passkeyToken.isEmpty else {
+            throw APIError.server(status: -1, message: "Server returned an invalid passkey challenge")
+        }
         guard let challengeData = Data(base64urlEncoded: opts.challenge) else {
             throw APIError.server(status: -1, message: "Malformed challenge")
         }
@@ -184,8 +187,8 @@ final class AppState {
                 "signature": assertion.signature.base64urlEncodedString(),
                 "userHandle": assertion.userID.base64urlEncodedString(),
             ],
+            "passkey_token": passkeyToken,
         ]
-        if let token = opts.passkeyToken { response["passkey_token"] = token }
 
         let res = try await client.passkeyVerify(assertion: response)
         try await finishLogin(token: res.token, freshAuth: res.freshAuth, snapshot: snapshot, client: client)
