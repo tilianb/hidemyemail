@@ -68,6 +68,11 @@ internal class SecurityOperationGate {
 
 internal fun isCurrentPendingRetry(current: (() -> Unit)?, captured: () -> Unit) = current === captured
 
+internal fun reauthenticationContinuation(
+    retry: () -> Unit,
+    replacement: (() -> Unit)?,
+) = replacement ?: retry
+
 internal fun securityErrorMessage(error: Exception, onUnauthorized: () -> Unit): String? {
     if (error is ApiException.Unauthorized) {
         onUnauthorized()
@@ -125,7 +130,11 @@ fun SecuritySection(app: AppViewModel) {
         }
     }
 
-    fun sensitive(mayReauthenticate: Boolean = true, action: suspend (ApiClient) -> Unit) {
+    fun sensitive(
+        mayReauthenticate: Boolean = true,
+        afterReauthentication: (() -> Unit)? = null,
+        action: suspend (ApiClient) -> Unit,
+    ) {
         scope.launch {
             if (!operationGate.tryAcquire()) return@launch
             busy = true
@@ -137,7 +146,10 @@ fun SecuritySection(app: AppViewModel) {
                 clearSecrets(); pending = null; throw e
             } catch (e: Exception) {
                 if (shouldRequestReauthentication(e, mayReauthenticate)) {
-                    pending = { sensitive(mayReauthenticate = false, action = action) }
+                    pending = reauthenticationContinuation(
+                        retry = { sensitive(mayReauthenticate = false, action = action) },
+                        replacement = afterReauthentication,
+                    )
                 } else error = securityErrorMessage(e) { client?.let(app::handleAuthFailure) }
             } finally {
                 busy = false
@@ -229,7 +241,10 @@ fun SecuritySection(app: AppViewModel) {
         CodeDialog(purpose, code, { code = it }, regenerating, onDismiss = ::clearSecrets) {
         val entered = code
         clearSecrets()
-        sensitive { client ->
+        val afterReauthentication = if (regenerating) null else {
+            { codePurpose = "Disable two-factor auth" }
+        }
+        sensitive(afterReauthentication = afterReauthentication) { client ->
             if (!regenerating) client.disableMfa(entered)
             else codes = client.regenerateMfaBackupCodes(entered).backupCodes
             reload++

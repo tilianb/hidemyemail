@@ -236,9 +236,16 @@ struct SecuritySection: View {
             try await client.reauthenticate(passphrase: flow.passphrase,
                 code: mfa?.enabled == true ? flow.reauthenticationCode : nil)
             let retry = flow.consumePendingOperation()
+            let requestNewCode = retry?.requiresNewMfaCodeAfterReauthentication == true
             flow.cancel()
             operationGuard.end()
-            if let retry { await execute(retry) }
+            if requestNewCode {
+                actionCode = ""
+                disabling = true
+                showMFAAction = true
+            } else if let retry {
+                await execute(retry)
+            }
         } catch {
             operationGuard.end()
             await handleRequestError(error, client: client)

@@ -29,6 +29,27 @@ class SecurityOperationGateTest {
         assertTrue(isCurrentPendingRetry(current = captured, captured = captured))
     }
 
+    @Test fun reauthenticationCanReplaceARequestThatMustNotBeReplayed() {
+        var retried = false
+        var replaced = false
+
+        reauthenticationContinuation(
+            retry = { retried = true },
+            replacement = { replaced = true },
+        )()
+
+        assertFalse(retried)
+        assertTrue(replaced)
+    }
+
+    @Test fun reauthenticationRetriesRequestsWithoutAReplacement() {
+        var retried = false
+
+        reauthenticationContinuation(retry = { retried = true }, replacement = null)()
+
+        assertTrue(retried)
+    }
+
     @Test fun unauthorizedIsRoutedInsteadOfDisplayed() {
         var routed = false
 

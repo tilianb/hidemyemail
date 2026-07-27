@@ -42,6 +42,11 @@ enum SecurityOperation: Equatable {
     case disableMFA(code: String)
     case addPasskey(deviceName: String)
     case deletePasskey(id: String)
+
+    var requiresNewMfaCodeAfterReauthentication: Bool {
+        if case .disableMFA = self { return true }
+        return false
+    }
 }
 
 struct SecurityFlowState {

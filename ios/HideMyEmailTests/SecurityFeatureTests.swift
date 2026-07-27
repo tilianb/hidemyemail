@@ -288,6 +288,12 @@ final class SecurityFeatureTests: XCTestCase {
         XCTAssertNil(flow.consumePendingOperation())
     }
 
+    func testOnlyMFADisableRequiresANewCodeAfterReauthentication() {
+        XCTAssertTrue(SecurityOperation.disableMFA(code: "backup").requiresNewMfaCodeAfterReauthentication)
+        XCTAssertFalse(SecurityOperation.regenerateMFA(code: "123456").requiresNewMfaCodeAfterReauthentication)
+        XCTAssertFalse(SecurityOperation.setupMFA.requiresNewMfaCodeAfterReauthentication)
+    }
+
     func testSecurityFlowCancellationClearsPendingAndSensitiveState() {
         var flow = SecurityFlowState()
         flow.capture(.disableMFA(code: "secret"), actionSheetPresented: false)
