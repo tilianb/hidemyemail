@@ -148,6 +148,24 @@ data class MfaStatus(
     val backupCodesRemaining: Int,
 )
 
+@Serializable
+data class MfaSetup(val secret: String, val uri: String)
+
+@Serializable
+data class MfaCodes(@SerialName("backupCodes") val backupCodes: List<String>)
+
+@Serializable
+data class FreshAuthResponse(@SerialName("fresh_auth") val freshAuth: String)
+
+data class PasskeyChallenge(
+    val creationOptionsJson: String,
+    val challengeToken: String,
+    val rpId: String,
+)
+
+@Serializable
+data class SecurityHandoff(val url: String)
+
 // GET /api/passkeys — registered WebAuthn credentials.
 @Serializable
 data class Passkey(

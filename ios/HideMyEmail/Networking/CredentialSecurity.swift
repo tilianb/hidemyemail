@@ -4,6 +4,13 @@ struct ServerOrigin: Equatable {
     let url: URL
     var string: String { url.absoluteString }
 
+    static func canonicalOrigin(of url: URL) -> String? {
+        guard let scheme = url.scheme, let host = url.host else { return nil }
+        var value = "\(scheme)://\(host)"
+        if let port = url.port { value += ":\(port)" }
+        return try? ServerOrigin(value).string
+    }
+
     init(_ input: String) throws {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard var parts = URLComponents(string: trimmed),
@@ -26,6 +33,70 @@ struct ServerOrigin: Equatable {
         }
         guard let canonical = parts.url else { throw APIError.notConfigured }
         self.url = canonical
+    }
+}
+
+enum SecurityOperation: Equatable {
+    case setupMFA
+    case regenerateMFA(code: String)
+    case disableMFA(code: String)
+    case addPasskey(deviceName: String)
+    case deletePasskey(id: String)
+}
+
+struct SecurityFlowState {
+    var pendingOperation: SecurityOperation?
+    var passphrase = ""
+    var reauthenticationCode = ""
+    var showReauthentication = false
+    private var waitingForActionSheetDismissal = false
+
+    mutating func capture(_ operation: SecurityOperation, actionSheetPresented: Bool) {
+        pendingOperation = operation
+        waitingForActionSheetDismissal = actionSheetPresented
+    }
+
+    mutating func requireReauthentication() {
+        if waitingForActionSheetDismissal { return }
+        showReauthentication = true
+    }
+
+    mutating func actionSheetDidDismiss() {
+        guard waitingForActionSheetDismissal, pendingOperation != nil else { return }
+        waitingForActionSheetDismissal = false
+        showReauthentication = true
+    }
+
+    mutating func consumePendingOperation() -> SecurityOperation? {
+        defer { pendingOperation = nil }
+        return pendingOperation
+    }
+
+    mutating func cancel() {
+        pendingOperation = nil
+        passphrase = ""
+        reauthenticationCode = ""
+        showReauthentication = false
+        waitingForActionSheetDismissal = false
+    }
+}
+
+struct SecurityOperationGuard {
+    private(set) var isBusy = false
+    var allowsDismissal: Bool { !isBusy }
+
+    mutating func begin() -> Bool {
+        guard !isBusy else { return false }
+        isBusy = true
+        return true
+    }
+    mutating func end() { isBusy = false }
+}
+
+enum SecurityRequestError {
+    static func shouldHandleAuthFailure(_ error: Error) -> Bool {
+        if case APIError.unauthorized = error { return true }
+        return false
     }
 }
 

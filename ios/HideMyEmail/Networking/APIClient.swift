@@ -194,6 +194,35 @@ actor APIClient {
         try await request("/api/settings/mfa")
     }
 
+    func reauthenticate(passphrase: String, code: String?) async throws {
+        var body: [String: Any] = ["passphrase": passphrase]
+        if let code, !code.isEmpty { body["code"] = code }
+        let response: FreshAuthResponse = try await request(
+            "/api/settings/reauth", method: "POST", body: body,
+            authMode: true, includeFreshAuth: false
+        )
+        freshAuth = response.freshAuth
+    }
+
+    func setupMFA() async throws -> MFASetupResponse {
+        try await request("/api/settings/mfa/setup", method: "POST", body: [:])
+    }
+
+    func verifyMFA(code: String) async throws -> MFAVerifyResponse {
+        try await request("/api/settings/mfa/verify", method: "POST", body: ["code": code])
+    }
+
+    func regenerateMFABackupCodes(code: String) async throws -> [String] {
+        let response: MFABackupCodesResponse = try await request(
+            "/api/settings/mfa/backup-codes", method: "POST", body: ["code": code]
+        )
+        return response.backupCodes
+    }
+
+    func disableMFA(code: String) async throws {
+        try await requestVoid("/api/settings/mfa/disable", method: "POST", body: ["code": code])
+    }
+
     // MARK: - Username & self-service recovery codes
 
     /// Current user's username + recovery-code status.
@@ -249,6 +278,35 @@ actor APIClient {
 
     func deletePasskey(id: String) async throws {
         try await requestVoid("/api/settings/passkeys/\(id)", method: "DELETE")
+    }
+
+    func passkeyRegistrationChallenge() async throws -> PasskeyRegistrationOptions {
+        try await request("/api/settings/passkeys/challenge", method: "POST", body: [:], authMode: true)
+    }
+
+    func registerPasskey(response: [String: Any], deviceName: String?, challengeToken: String) async throws {
+        var body: [String: Any] = ["response": response, "challengeToken": challengeToken]
+        if let deviceName, !deviceName.isEmpty { body["deviceName"] = deviceName }
+        try await requestVoid("/api/settings/passkeys/register", method: "POST", body: body, authMode: true)
+    }
+
+    func securityHandoffURL() async throws -> URL {
+        let response: SecurityHandoffResponse = try await request(
+            "/api/settings/security-handoff", method: "POST", body: [:], authMode: true
+        )
+        guard let url = URL(string: response.url),
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              ServerOrigin.canonicalOrigin(of: url) == ServerOrigin.canonicalOrigin(of: baseURL),
+              components.path == "/security-handoff",
+              components.user == nil, components.password == nil,
+              components.fragment == nil,
+              let queryItems = components.queryItems,
+              queryItems.count == 1, queryItems[0].name == "code",
+              let code = queryItems[0].value,
+              !code.isEmpty else {
+            throw APIError.server(status: -1, message: "Invalid security handoff URL")
+        }
+        return url
     }
 
     // MARK: - API keys (addy.io-compatible /api/v1)
@@ -346,9 +404,11 @@ actor APIClient {
         method: String = "GET",
         body: [String: Any]? = nil,
         authMode: Bool = false,
-        authed: Bool = true
+        authed: Bool = true,
+        includeFreshAuth: Bool = true
     ) async throws -> T {
-        let data = try await perform(path, method: method, body: body, authMode: authMode, authed: authed)
+        let data = try await perform(path, method: method, body: body, authMode: authMode,
+                                     authed: authed, includeFreshAuth: includeFreshAuth)
         do {
             return try Self.decoder.decode(T.self, from: data)
         } catch {
@@ -359,9 +419,10 @@ actor APIClient {
     private func requestVoid(
         _ path: String,
         method: String,
-        body: [String: Any]? = nil
+        body: [String: Any]? = nil,
+        authMode: Bool = false
     ) async throws {
-        _ = try await perform(path, method: method, body: body, authMode: false, authed: true)
+        _ = try await perform(path, method: method, body: body, authMode: authMode, authed: true, includeFreshAuth: true)
     }
 
     private func perform(
@@ -369,7 +430,8 @@ actor APIClient {
         method: String,
         body: [String: Any]?,
         authMode: Bool,
-        authed: Bool
+        authed: Bool,
+        includeFreshAuth: Bool = true
     ) async throws -> Data {
         guard let url = URL(string: path, relativeTo: baseURL) else {
             throw APIError.notConfigured
@@ -381,7 +443,7 @@ actor APIClient {
         if authed {
             guard let token else { throw APIError.unauthorized }
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            if let freshAuth {
+            if includeFreshAuth, let freshAuth {
                 req.setValue(freshAuth, forHTTPHeaderField: "X-Fresh-Auth")
             }
         }
@@ -413,6 +475,17 @@ actor APIClient {
             let message = (try? Self.decoder.decode(APIErrorBody.self, from: data))?.error
             if message == "Fresh authentication required" {
                 throw APIError.server(status: 401, message: message!)
+            }
+            if path == "/api/settings/reauth", let message, message != "Unauthorized" {
+                throw APIError.server(status: 401, message: message)
+            }
+            let semanticUnauthorizedEndpoints = [
+                "/api/settings/mfa/disable",
+                "/api/settings/mfa/backup-codes",
+                "/api/settings/passkeys/register",
+            ]
+            if semanticUnauthorizedEndpoints.contains(path), let message, message != "Unauthorized" {
+                throw APIError.server(status: 401, message: message)
             }
             throw APIError.unauthorized
         }

@@ -4,13 +4,25 @@ function looksLikeLegacyPlaintextEmail(value: string): boolean {
   return /^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/.test(value);
 }
 
+function encryptionKey(keyBase64: string): Uint8Array {
+  try {
+    if (typeof keyBase64 !== "string" || !/^[A-Za-z0-9+/]{43}=$/.test(keyBase64)) {
+      throw new Error();
+    }
+    const keyData = fromBase64(keyBase64);
+    if (keyData.length !== 32 || toBase64(keyData) !== keyBase64) throw new Error();
+    return keyData;
+  } catch {
+    throw new Error("Invalid encryption key configuration");
+  }
+}
+
 /**
  * Hash an email using HMAC-SHA256 for deterministic lookups.
  */
 export async function hashDestination(email: string, keyBase64: string): Promise<string> {
-  if (!keyBase64) return email.toLowerCase();
+  const keyData = encryptionKey(keyBase64);
   try {
-    const keyData = fromBase64(keyBase64);
     const key = await crypto.subtle.importKey(
       "raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
     );
@@ -27,9 +39,8 @@ export async function hashDestination(email: string, keyBase64: string): Promise
  * Returns a base64 string containing the IV prepended to the ciphertext.
  */
 export async function encryptDestination(email: string, keyBase64: string): Promise<string> {
-  if (!keyBase64) return email;
+  const keyData = encryptionKey(keyBase64);
   try {
-    const keyData = fromBase64(keyBase64);
     const key = await crypto.subtle.importKey(
       "raw", keyData, "AES-GCM", false, ["encrypt"]
     );
@@ -52,9 +63,8 @@ export async function encryptDestination(email: string, keyBase64: string): Prom
  * Decrypt a base64 destination email using AES-GCM.
  */
 export async function decryptDestination(encryptedBase64: string, keyBase64: string): Promise<string> {
-  if (!keyBase64) return encryptedBase64;
+  const keyData = encryptionKey(keyBase64);
   try {
-    const keyData = fromBase64(keyBase64);
     const key = await crypto.subtle.importKey(
       "raw", keyData, "AES-GCM", false, ["decrypt"]
     );

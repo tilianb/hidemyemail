@@ -15,9 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.IosShare
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -47,8 +45,6 @@ import androidx.core.content.ContextCompat
 import dev.hidemyemail.app.AppViewModel
 import dev.hidemyemail.app.net.ApiException
 import dev.hidemyemail.app.net.ApiKey
-import dev.hidemyemail.app.net.MfaStatus
-import dev.hidemyemail.app.net.Passkey
 import dev.hidemyemail.app.net.Preferences
 import dev.hidemyemail.app.net.PushPrefs
 import dev.hidemyemail.app.push.PushManager
@@ -590,120 +586,6 @@ fun ApiKeysSection(app: AppViewModel) {
             },
             dismissButton = {
                 TextButton(onClick = { pendingDelete = null }) { Text("Cancel", color = Theme.accent) }
-            },
-        )
-    }
-}
-
-/** Read-mostly security overview: TOTP status, passkey list with rename/delete. */
-@Composable
-fun SecuritySection(app: AppViewModel) {
-    val scope = rememberCoroutineScope()
-    var mfa by remember { mutableStateOf<MfaStatus?>(null) }
-    var passkeys by remember { mutableStateOf<List<Passkey>>(emptyList()) }
-    var renaming by remember { mutableStateOf<Passkey?>(null) }
-    var renameDraft by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf<String?>(null) }
-    var reloadKey by remember { mutableStateOf(0) }
-
-    LaunchedEffect(reloadKey) {
-        try {
-            val client = app.api() ?: return@LaunchedEffect
-            mfa = client.mfaStatus()
-            passkeys = client.passkeys()
-        } catch (e: Exception) {
-            error = e.message
-        }
-    }
-
-    SectionHeader("Security")
-    SectionCard {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-        ) {
-            Icon(Icons.Default.Lock, contentDescription = null, tint = Theme.accent, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.size(10.dp))
-            Text("Two-factor auth", style = Theme.bodyStyle(15.sp), modifier = Modifier.weight(1f))
-            val m = mfa
-            Text(
-                when {
-                    m == null -> "—"
-                    m.enabled -> "On · ${m.backupCodesRemaining} backup codes"
-                    else -> "Off"
-                },
-                style = Theme.bodyStyle(13.sp).copy(
-                    color = if (m?.enabled == true) Theme.green else Theme.textSecondary
-                ),
-            )
-        }
-        RowDivider()
-        if (passkeys.isEmpty()) {
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-                Text("Passkeys", style = Theme.bodyStyle(15.sp), modifier = Modifier.weight(1f))
-                Text("None registered", style = Theme.bodyStyle(13.sp).copy(color = Theme.textSecondary))
-            }
-        } else {
-            passkeys.forEachIndexed { i, pk ->
-                if (i > 0) RowDivider()
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 6.dp, bottom = 6.dp),
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(pk.deviceName ?: "Unnamed passkey", style = Theme.bodyStyle(15.sp))
-                        Text(
-                            DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(pk.createdAt.toLong())),
-                            style = Theme.bodyStyle(11.sp).copy(color = Theme.textSecondary),
-                        )
-                    }
-                    IconButton(onClick = { renameDraft = pk.deviceName ?: ""; renaming = pk }) {
-                        Icon(Icons.Default.Edit, contentDescription = "Rename", tint = Theme.textSecondary, modifier = Modifier.size(18.dp))
-                    }
-                    IconButton(onClick = {
-                        scope.launch {
-                            try {
-                                app.api()?.deletePasskey(pk.id)
-                                reloadKey++
-                            } catch (e: Exception) {
-                                error = e.message
-                            }
-                        }
-                    }) {
-                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Theme.red, modifier = Modifier.size(18.dp))
-                    }
-                }
-            }
-        }
-    }
-    SectionFooter(error ?: "Set up two-factor auth and register new passkeys in the web dashboard.")
-
-    renaming?.let { pk ->
-        AlertDialog(
-            onDismissRequest = { renaming = null },
-            containerColor = Theme.surface2,
-            title = { Text("Rename Passkey", style = Theme.displayStyle(18.sp)) },
-            text = {
-                OutlinedTextField(value = renameDraft, onValueChange = { renameDraft = it }, singleLine = true)
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val name = renameDraft.trim()
-                    renaming = null
-                    if (name.isNotEmpty()) {
-                        scope.launch {
-                            try {
-                                app.api()?.renamePasskey(pk.id, name)
-                                reloadKey++
-                            } catch (e: Exception) {
-                                error = e.message
-                            }
-                        }
-                    }
-                }) { Text("Save", color = Theme.accent) }
-            },
-            dismissButton = {
-                TextButton(onClick = { renaming = null }) { Text("Cancel", color = Theme.accent) }
             },
         )
     }

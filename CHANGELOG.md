@@ -6,6 +6,97 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-07-27
+
+HideMyEmail 1.3.0 brings secure MFA and passkey setup to both mobile apps,
+adds aliases on demand through a minimal Chromium extension, and hardens
+encryption, deployment, and release safety for every installation.
+
+### Added
+
+- iOS and Android Settings now support the full TOTP MFA lifecycle, including
+  locally rendered setup QR codes, manual secrets, one-time backup codes,
+  regeneration, and disable. Sensitive changes use inline fresh
+  reauthentication without persisting the short-lived credential.
+- The official associated iOS and Android apps can enroll and manage passkeys
+  natively. Other server origins use a short-lived authenticated browser
+  handoff with an explicit confirmation step; bearer tokens are never placed in
+  browser URLs or exposed to page JavaScript.
+- Added a minimal Chromium Manifest V3 popup that creates aliases through the
+  existing API and copies them to the clipboard. It uses a dedicated locally
+  stored `hme_` API key and requests runtime access only to the chosen server
+  host and scheme. A non-default port remains part of the API endpoint, while
+  Chrome's host match permission is host-scoped.
+- Operators can optionally reserve exact personal-subdomain labels with
+  `BLOCKED_SUBDOMAINS`. Reservations affect only new claims; existing
+  subdomains continue to work.
+
+### Security
+
+- Destination encryption now fails closed when
+  `DESTINATION_ENCRYPTION_KEY` is missing, invalid Base64, noncanonical, or
+  not exactly 32 bytes. The Worker no longer falls back to plaintext hashing
+  or writes, and Docker rejects invalid configuration before listening.
+- Hardened release and deployment safety: manual Worker production deploys
+  apply remote D1 migrations before Worker publication, while Docker applies
+  local migrations transactionally at container startup before the service
+  listens. Docker serves AASA through the Worker first, and the release gate
+  validates an immutable tag on `main`, synchronized versions, an increasing
+  Android version code, and curated notes. Publication waits for the APK,
+  extension ZIP, TestFlight, and GHCR/Docker Hub images before creating the
+  GitHub release.
+
+### Changed
+
+- `npm run deploy` now applies production D1 migrations before publishing the
+  Worker and retains Wrangler's migration retry behavior.
+- Personal-subdomain creation now rejects malformed JSON, incorrect body field
+  types, invalid positive-integer base-domain IDs, and invalid DNS labels
+  instead of silently removing invalid label characters.
+- Chromium extension builds now produce a deterministic ZIP, with matching CI
+  and release checks.
+
+### Fixed
+
+- Docker now ignores SQL comments when splitting migration files, so comment
+  text containing semicolons cannot break startup migrations.
+- Restored the Android application-only view-model constructor required by the
+  platform's default factory, preventing startup failure.
+
+### Docs
+
+- Kept the API reference directly discoverable from the generated docs
+  navigation.
+
+### Upgrade Notes
+
+- Before upgrading, back up D1 and the existing encryption key. Continue only
+  if every deployment used that same preserved `DESTINATION_ENCRYPTION_KEY`,
+  in canonical Base64 form decoding to exactly 32 bytes. There is no D1 schema
+  migration for installations that pass this preflight.
+- Never generate, replace, or rotate the key to satisfy this check. Different
+  valid bytes cannot decrypt destinations, MFA secrets, or DB-stored SES
+  credentials and also produce incompatible destination hashes. A
+  noncanonical encoding may be canonicalized only after proving it represents
+  the exact same 32 bytes; new bytes are a key rotation.
+- If data was stored while the key was missing or decoded to 16/24 bytes, or if
+  the key is unknown, unavailable, or its provenance is uncertain, do not
+  upgrade. Stay on v1.2.1: v1.3 does not migrate unsupported configurations.
+- `npm run deploy` now applies remote D1 migrations before Worker publication
+  and uses Wrangler's normal retry behavior.
+- `BLOCKED_SUBDOMAINS` is optional. When set, use exact comma-separated labels;
+  it affects only new personal-subdomain claims, and malformed values fail
+  closed.
+- Native Android passkey enrollment requires `ANDROID_APP_ORIGINS` containing
+  the release signing-certificate APK origin. Verify the generated
+  `/.well-known/assetlinks.json` response before release. Self-hosted app
+  origins use the authenticated browser handoff and need no association.
+- The Chromium extension requires one dedicated `hme_` API key, stored locally,
+  and runtime access to the chosen server host and scheme. A non-default port
+  remains in the API endpoint, but Chrome's host match permission is
+  host-scoped. This release provides a deterministic extension ZIP but does not
+  claim publication in a browser extension store.
+
 ## [1.2.1] — 2026-07-26
 
 ### Security
@@ -294,7 +385,8 @@ All notable changes to this project are documented here. The format follows
 Pre-v1 baseline: core alias forwarding, reply-from-alias, MFA + passkeys,
 admin settings, Docker self-host, Cloudflare Workers deploy.
 
-[Unreleased]: https://github.com/tilianb/hidemyemail/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/tilianb/hidemyemail/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/tilianb/hidemyemail/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/tilianb/hidemyemail/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/tilianb/hidemyemail/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/tilianb/hidemyemail/compare/v1.1.0...v1.1.1
