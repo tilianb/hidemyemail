@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { setCookie, deleteCookie, getCookie } from "hono/cookie";
 import type { AppEnv } from "../app";
-import { verifyPassword, signFreshAuth, verifyFreshAuth, signSession, verifySession, derivePassphraseHash, createPassphraseVerifier, verifyPassphraseVerifier, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge, updatePasskeySignCount } from "../../lib/auth";
+import { verifyPassword, signFreshAuth, verifyFreshAuth, signSession, verifySession, derivePassphraseHash, createPassphraseVerifier, verifyPassphraseVerifier, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge, signPasskeyMfaChallenge, verifyPasskeyMfaChallenge, updatePasskeySignCount } from "../../lib/auth";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { getEnvWithOverride, getMainGlobalDomain } from "../../lib/settings";
 import { consumeAuthArtifact, markFailedAttempt, rateLimitFailures } from "../../lib/auth-security";
@@ -251,6 +251,8 @@ export function authRoutes() {
   r.post("/passkey/challenge", async (c) => {
     const { generateAuthenticationOptions } = await import("@simplewebauthn/server");
     const { getRpFromOrigin } = await import("../../lib/webauthn");
+    const body: { mfa?: true; mfa_token?: string } = await c.req.json<{ mfa?: true; mfa_token?: string }>().catch(() => ({}));
+    const mfaMode = body.mfa === true;
 
     let rpID: string;
     try {
@@ -259,13 +261,43 @@ export function authRoutes() {
       return c.json({ error: "Passkey authentication is not configured" }, 500);
     }
 
+    let mfaPrincipal: { userId: number; authVersion: number } | null = null;
+    let allowCredentials: { id: string; transports?: any[] }[] | undefined;
+    if (mfaMode) {
+      // Web requests use only the HttpOnly cookie; native token mode uses only
+      // the explicit body token. Never let either transport silently fall back
+      // to a standalone ceremony.
+      const mfaChallenge = wantsToken(c) ? body.mfa_token : getCookie(c, "__Host-mfa-challenge");
+      if (!mfaChallenge) return c.json({ error: "No MFA challenge" }, 401);
+      mfaPrincipal = await verifyMfaChallenge(c.env.SESSION_SECRET, mfaChallenge);
+      if (!mfaPrincipal) return c.json({ error: "MFA challenge expired" }, 401);
+
+      const user = await c.env.DB.prepare(
+        "SELECT u.active, u.deleted_at, u.auth_version, m.totp_enabled FROM users u JOIN mfa m ON m.user_id = u.id WHERE u.id = ?"
+      ).bind(mfaPrincipal.userId).first<{ active: number; deleted_at: number | null; auth_version: number; totp_enabled: number }>();
+      if (!user || user.active !== 1 || user.deleted_at !== null || user.auth_version !== mfaPrincipal.authVersion || user.totp_enabled !== 1) {
+        return c.json({ error: "MFA challenge expired" }, 401);
+      }
+      const passkeys = await c.env.DB.prepare(
+        "SELECT id, transports FROM passkey_credentials WHERE user_id = ? ORDER BY created_at"
+      ).bind(mfaPrincipal.userId).all<{ id: string; transports: string | null }>();
+      if (!passkeys.results.length) return c.json({ error: "No passkeys registered for this account" }, 409);
+      allowCredentials = passkeys.results.map(passkey => ({
+        id: passkey.id,
+        transports: passkey.transports ? JSON.parse(passkey.transports) : undefined,
+      }));
+    }
+
     const options = await generateAuthenticationOptions({
       rpID,
       userVerification: "required",
-      // Empty allowCredentials → browser shows all resident passkeys for this origin
+      // Standalone remains discoverable; MFA is restricted to this account.
+      allowCredentials,
     });
 
-    const cookie = await signPasskeyAuthChallenge(c.env.SESSION_SECRET, options.challenge);
+    const cookie = mfaPrincipal
+      ? await signPasskeyMfaChallenge(c.env.SESSION_SECRET, mfaPrincipal.userId, mfaPrincipal.authVersion, options.challenge)
+      : await signPasskeyAuthChallenge(c.env.SESSION_SECRET, options.challenge);
     setCookie(c, "__Host-passkey-challenge", cookie, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: 300 });
 
     // Token-mode (native) clients can't persist the HttpOnly cookie, so echo the
@@ -282,24 +314,31 @@ export function authRoutes() {
     const cookie = getCookie(c, "__Host-passkey-challenge") || response.passkey_token || null;
     if (!cookie) return c.json({ error: "No challenge" }, 401);
 
-    const expectedChallenge = await verifyPasskeyAuthChallenge(c.env.SESSION_SECRET, cookie);
+    const boundPrincipal = await verifyPasskeyMfaChallenge(c.env.SESSION_SECRET, cookie);
+    const standaloneChallenge = boundPrincipal ? null : await verifyPasskeyAuthChallenge(c.env.SESSION_SECRET, cookie);
+    const expectedChallenge = boundPrincipal?.challenge ?? standaloneChallenge;
     if (!expectedChallenge) return c.json({ error: "Challenge expired" }, 401);
 
     const cred = await c.env.DB.prepare(
-      "SELECT p.user_id, p.public_key, p.sign_count, p.transports, u.auth_version FROM passkey_credentials p JOIN users u ON u.id = p.user_id WHERE p.id = ?"
-    ).bind(response.id).first<{ user_id: number; public_key: string; sign_count: number; transports: string | null; auth_version: number }>();
+      "SELECT p.user_id, p.public_key, p.sign_count, p.transports, u.auth_version, u.active, u.deleted_at, m.totp_enabled FROM passkey_credentials p JOIN users u ON u.id = p.user_id LEFT JOIN mfa m ON m.user_id = u.id WHERE p.id = ?"
+    ).bind(response.id).first<{ user_id: number; public_key: string; sign_count: number; transports: string | null; auth_version: number; active: number; deleted_at: number | null; totp_enabled: number | null }>();
 
     if (!cred) {
       markFailedAttempt(c);
       return c.json({ error: "Unknown credential" }, 401);
     }
+    if (boundPrincipal && (cred.user_id !== boundPrincipal.userId || cred.auth_version !== boundPrincipal.authVersion || cred.active !== 1 || cred.deleted_at !== null || cred.totp_enabled !== 1)) {
+      markFailedAttempt(c);
+      return c.json({ error: "Challenge expired" }, 401);
+    }
 
     const { verifyAuthenticationResponse } = await import("@simplewebauthn/server");
-    const { fromBase64url, getRpFromOrigin } = await import("../../lib/webauthn");
+    const { fromBase64url, getRpFromOrigin, getRegistrationOrigins } = await import("../../lib/webauthn");
     let rpID: string;
-    let expectedOrigin: string;
+    let expectedOrigin: string | string[];
     try {
       ({ rpID, expectedOrigin } = getRpFromOrigin(c.env.APP_ORIGIN));
+      if (wantsToken(c)) expectedOrigin = getRegistrationOrigins(c.env.APP_ORIGIN, c.env.ANDROID_APP_ORIGINS, true);
     } catch {
       return c.json({ error: "Passkey authentication is not configured" }, 500);
     }
@@ -335,6 +374,7 @@ export function authRoutes() {
     await updatePasskeySignCount(c.env.DB, response.id, result.authenticationInfo.newCounter);
 
     deleteCookie(c, "__Host-passkey-challenge", { path: "/", secure: true });
+    if (boundPrincipal) deleteCookie(c, "__Host-mfa-challenge", { path: "/", secure: true });
     const { token, freshAuth } = await setAuthenticatedCookies(c, cred.user_id, cred.auth_version);
 
     return c.json(wantsToken(c) ? { ok: true, userId: cred.user_id, token, fresh_auth: freshAuth } : { ok: true, userId: cred.user_id });

@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeAll, expect, test } from "vitest";
 import { createApp } from "../src/api/app";
-import { hashPassword } from "../src/lib/auth";
+import { hashPassword, signMfaChallenge, signPasskeyMfaChallenge, verifyPasskeyMfaChallenge } from "../src/lib/auth";
 import { SETTING_DEFAULTS } from "../src/config";
 
 let testEnv: any;
@@ -213,6 +213,90 @@ test("passkey challenge fails with a controlled configuration error when APP_ORI
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ error: "Passkey authentication is not configured" });
   }
+});
+
+test("account-bound passkey MFA challenge restricts credentials and rejects missing passkeys", async () => {
+  const app = createApp();
+  const db = env.DB as D1Database;
+  const requestEnv = { ...testEnv, APP_ORIGIN: "https://app.hidemyemail.dev" };
+  await db.prepare("UPDATE users SET active = 1, deleted_at = NULL, auth_version = 4 WHERE id = 1").run();
+  await db.prepare("DELETE FROM mfa WHERE user_id = 1").run();
+  await db.prepare("DELETE FROM passkey_credentials WHERE user_id = 1").run();
+  await db.prepare("INSERT INTO mfa (user_id, totp_secret, totp_enabled, totp_backup_codes) VALUES (1, 'secret', 1, '[]')").run();
+  const mfaToken = await signMfaChallenge("sek", 1, 4);
+  const cookie = `__Host-mfa-challenge=${mfaToken}`;
+
+  const missing = await app.request("/api/passkey/challenge", {
+    method: "POST", headers: { "Content-Type": "application/json", cookie }, body: JSON.stringify({ mfa: true }),
+  }, requestEnv);
+  expect(missing.status).toBe(409);
+  expect(await missing.json()).toEqual({ error: "No passkeys registered for this account" });
+
+  await db.prepare("INSERT INTO passkey_credentials (id, user_id, public_key, sign_count, transports, created_at) VALUES (?, 1, 'key', 0, ?, ?)")
+    .bind("mfa-credential", JSON.stringify(["internal"]), Date.now()).run();
+  const challenge = await app.request("/api/passkey/challenge", {
+    method: "POST", headers: { "Content-Type": "application/json", cookie }, body: JSON.stringify({ mfa: true }),
+  }, requestEnv);
+  expect(challenge.status).toBe(200);
+  const body = await challenge.json() as any;
+  expect(body.allowCredentials).toEqual([{ id: "mfa-credential", type: "public-key", transports: ["internal"] }]);
+  expect(body.passkey_token).toBeUndefined();
+  const passkeyCookie = challenge.headers.get("set-cookie")!;
+  const signed = decodeURIComponent(passkeyCookie.match(/__Host-passkey-challenge=([^;]+)/)![1]!);
+  expect(await verifyPasskeyMfaChallenge("sek", signed)).toMatchObject({ userId: 1, authVersion: 4, challenge: body.challenge });
+});
+
+test("bound passkey challenge rejects stale auth version and issues native token", async () => {
+  const app = createApp();
+  const db = env.DB as D1Database;
+  const requestEnv = { ...testEnv, APP_ORIGIN: "https://app.hidemyemail.dev" };
+  await db.prepare("UPDATE users SET active = 1, deleted_at = NULL, auth_version = 8 WHERE id = 1").run();
+  await db.prepare("DELETE FROM mfa WHERE user_id = 1").run();
+  await db.prepare("DELETE FROM passkey_credentials WHERE user_id = 1").run();
+  await db.prepare("INSERT INTO mfa (user_id, totp_secret, totp_enabled, totp_backup_codes) VALUES (1, 'secret', 1, '[]')").run();
+  await db.prepare("INSERT INTO passkey_credentials (id, user_id, public_key, sign_count, created_at) VALUES ('native-mfa-credential', 1, 'key', 0, ?)").bind(Date.now()).run();
+
+  const staleToken = await signMfaChallenge("sek", 1, 7);
+  const stale = await app.request("/api/passkey/challenge", {
+    method: "POST", headers: { "Content-Type": "application/json", "X-Auth-Mode": "token" },
+    body: JSON.stringify({ mfa: true, mfa_token: staleToken }),
+  }, requestEnv);
+  expect(stale.status).toBe(401);
+
+  const currentToken = await signMfaChallenge("sek", 1, 8);
+  const native = await app.request("/api/passkey/challenge", {
+    method: "POST", headers: { "Content-Type": "application/json", "X-Auth-Mode": "token" },
+    body: JSON.stringify({ mfa: true, mfa_token: currentToken }),
+  }, requestEnv);
+  expect(native.status).toBe(200);
+  const body = await native.json() as any;
+  expect(body.allowCredentials.map((credential: any) => credential.id)).toEqual(["native-mfa-credential"]);
+  expect(await verifyPasskeyMfaChallenge("sek", body.passkey_token)).toMatchObject({ userId: 1, authVersion: 8 });
+});
+
+test("bound passkey verification rejects another account's credential before admission", async () => {
+  const app = createApp();
+  const db = env.DB as D1Database;
+  await db.prepare("UPDATE users SET active = 1, deleted_at = NULL, auth_version = 3 WHERE id = 1").run();
+  const other = await db.prepare(
+    "INSERT INTO users (passphrase_hash, active, auth_version, created_at) VALUES (?, 1, 3, ?)"
+  ).bind(`other-passkey-user-${crypto.randomUUID()}`, Date.now()).run();
+  const otherId = Number(other.meta.last_row_id);
+  await db.prepare(
+    "INSERT INTO passkey_credentials (id, user_id, public_key, sign_count, created_at) VALUES ('other-account-credential', ?, 'key', 0, ?)"
+  ).bind(otherId, Date.now()).run();
+  const token = await signPasskeyMfaChallenge("sek", 1, 3, "challenge");
+
+  const response = await app.request("/api/passkey/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Auth-Mode": "token" },
+    body: JSON.stringify({ id: "other-account-credential", passkey_token: token }),
+  }, { ...testEnv, APP_ORIGIN: "https://app.hidemyemail.dev" });
+
+  expect(response.status).toBe(401);
+  const body = await response.json() as Record<string, unknown>;
+  expect(body.token).toBeUndefined();
+  expect(body.fresh_auth).toBeUndefined();
 });
 
 test("apple-app-site-association: 404 until APPLE_APP_ID is configured", async () => {
