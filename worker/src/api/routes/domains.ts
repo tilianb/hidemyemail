@@ -120,7 +120,11 @@ export function domainRoutes() {
     if (!DNS_LABEL.test(prefix)) return c.json({ error: "Invalid prefix" }, 400);
 
     const blockedLabels = blockedSubdomainLabels(c.env.BLOCKED_SUBDOMAINS);
-    if (!blockedLabels || blockedLabels.has(prefix)) {
+    if (!blockedLabels) {
+      console.error("Invalid BLOCKED_SUBDOMAINS configuration");
+      return c.json({ error: "Server configuration error" }, 500);
+    }
+    if (blockedLabels.has(prefix)) {
       return c.json({ error: "Subdomain is not available" }, 409);
     }
 

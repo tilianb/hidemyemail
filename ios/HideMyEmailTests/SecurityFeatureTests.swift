@@ -136,13 +136,14 @@ final class SecurityFeatureTests: XCTestCase {
 
     func testNativePasskeyRegistrationRequiresOfficialOriginAndExactRPID() throws {
         let official = try ServerOrigin("https://app.hidemyemail.dev")
+        let selfHosted = try ServerOrigin("https://self.example")
         XCTAssertNoThrow(try NativePasskeyRegistration.validate(origin: official, rpID: "app.hidemyemail.dev"))
 
         for rpID in ["APP.HIDEMYEMAIL.DEV", "App.hidemyemail.dev", "app.hidemyemail.dev.evil.example"] {
             XCTAssertThrowsError(try NativePasskeyRegistration.validate(origin: official, rpID: rpID), rpID)
         }
         XCTAssertThrowsError(try NativePasskeyRegistration.validate(
-            origin: ServerOrigin("https://self.example"), rpID: "app.hidemyemail.dev"
+            origin: selfHosted, rpID: "app.hidemyemail.dev"
         ))
     }
 
@@ -227,6 +228,30 @@ final class SecurityFeatureTests: XCTestCase {
         })
     }
 
+    func testPasskeyChallengeSemanticUnauthorizedPreservesBearerSession() async throws {
+        URLStub.handler = { request in
+            if request.url!.path == "/api/settings/passkeys/challenge" {
+                return (HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"])!,
+                    Data(#"{"error":"Passkeys are not configured"}"#.utf8))
+            }
+            return Self.response(request, #"{"enabled":false,"backupCodesRemaining":0}"#)
+        }
+        let api = client()
+
+        do {
+            _ = try await api.passkeyRegistrationChallenge()
+            XCTFail("Expected passkey configuration error")
+        } catch APIError.server(let status, let message) {
+            XCTAssertEqual(status, 401)
+            XCTAssertEqual(message, "Passkeys are not configured")
+        } catch {
+            XCTFail("Expected semantic Worker error, got \(error)")
+        }
+
+        _ = try await api.mfaStatus()
+    }
+
     func testHandoffRejectsCrossOriginURL() async throws {
         URLStub.handler = { request in Self.response(request, #"{"url":"https://evil.example/security-handoff?code=x"}"#) }
         do {
@@ -264,6 +289,8 @@ final class SecurityFeatureTests: XCTestCase {
     func testHandoffRejectsInvalidSameOriginURLs() async throws {
         let invalidURLs = [
             "https://self.example/security?code=x",
+            "https://self.example/%73ecurity-handoff?code=x",
+            "https://self.example/security%2Dhandoff?code=x",
             "https://self.example/security-handoff?code=x#fragment",
             "https://self.example/security-handoff",
             "https://self.example/security-handoff?code=",
@@ -312,9 +339,9 @@ final class SecurityFeatureTests: XCTestCase {
         XCTAssertNil(flow.consumePendingOperation())
     }
 
-    func testOnlyMFADisableRequiresANewCodeAfterReauthentication() {
+    func testMFAActionsRequireANewCodeAfterReauthentication() {
         XCTAssertTrue(SecurityOperation.disableMFA(code: "backup").requiresNewMfaCodeAfterReauthentication)
-        XCTAssertFalse(SecurityOperation.regenerateMFA(code: "123456").requiresNewMfaCodeAfterReauthentication)
+        XCTAssertTrue(SecurityOperation.regenerateMFA(code: "123456").requiresNewMfaCodeAfterReauthentication)
         XCTAssertFalse(SecurityOperation.setupMFA.requiresNewMfaCodeAfterReauthentication)
     }
 

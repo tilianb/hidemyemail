@@ -49,8 +49,10 @@ enum SecurityOperation: Equatable {
     case deletePasskey(id: String)
 
     var requiresNewMfaCodeAfterReauthentication: Bool {
-        if case .disableMFA = self { return true }
-        return false
+        switch self {
+        case .disableMFA, .regenerateMFA: return true
+        default: return false
+        }
     }
 }
 

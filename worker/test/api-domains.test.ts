@@ -155,6 +155,7 @@ test("blocked subdomain labels are normalized and rejected before external or da
   const app = createApp();
   const blockedEnv = { ...testEnv, BLOCKED_SUBDOMAINS: " admin, API " };
   const fetchMock = vi.mocked(globalThis.fetch);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
   fetchMock.mockClear();
 
   const res = await app.request("/api/domains", {
@@ -165,9 +166,11 @@ test("blocked subdomain labels are normalized and rejected before external or da
 
   expect(res.status).toBe(409);
   expect(await res.json()).toEqual({ error: "Subdomain is not available" });
+  expect(error).not.toHaveBeenCalled();
   expect(fetchMock).not.toHaveBeenCalled();
   expect((await DB().prepare("SELECT COUNT(*) AS count FROM domains").first<{ count: number }>())!.count).toBe(0);
   expect((await DB().prepare("SELECT COUNT(*) AS count FROM identifier_reservations").first<{ count: number }>())!.count).toBe(0);
+  error.mockRestore();
 });
 
 test.each([
@@ -184,6 +187,7 @@ test.each([
 ])("malformed blocked-subdomain config %j fails closed before external or database writes", async (blockedConfig) => {
   const app = createApp();
   const fetchMock = vi.mocked(globalThis.fetch);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
   fetchMock.mockClear();
 
   const res = await app.request("/api/domains", {
@@ -192,11 +196,15 @@ test.each([
     body: JSON.stringify({ domain: "shop", default_destination: "global" }),
   }, { ...testEnv, BLOCKED_SUBDOMAINS: blockedConfig });
 
-  expect(res.status).toBe(409);
-  expect(await res.json()).toEqual({ error: "Subdomain is not available" });
+  expect(res.status).toBe(500);
+  expect(await res.json()).toEqual({ error: "Server configuration error" });
+  expect(error).toHaveBeenCalledOnce();
+  expect(error).toHaveBeenCalledWith("Invalid BLOCKED_SUBDOMAINS configuration");
+  expect(error.mock.calls.flat().join(" ")).not.toContain(blockedConfig);
   expect(fetchMock).not.toHaveBeenCalled();
   expect((await DB().prepare("SELECT COUNT(*) AS count FROM domains").first<{ count: number }>())!.count).toBe(0);
   expect((await DB().prepare("SELECT COUNT(*) AS count FROM identifier_reservations").first<{ count: number }>())!.count).toBe(0);
+  error.mockRestore();
 });
 
 test("blank config blocks default infrastructure labels with exact matching", async () => {
@@ -231,6 +239,7 @@ test("blocked-label cache follows binding changes across valid and malformed val
     "INSERT INTO domains (user_id, is_global, domain, allow_subdomain_aliases, active, verified_at, created_at) VALUES (1, 1, 'hidemyemail.dev', 1, 1, 123, ?)"
   ).bind(Date.now()).run();
   const app = createApp();
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
   const create = (domain: string, blocked: unknown) => app.request("/api/domains", {
     method: "POST",
     headers: h(),
@@ -239,9 +248,14 @@ test("blocked-label cache follows binding changes across valid and malformed val
 
   expect((await create("api", "api")).status).toBe(409);
   expect((await create("api", "admin")).status).toBe(200);
-  expect((await create("broken", "api,,admin")).status).toBe(409);
+  expect((await create("broken", "api,,admin")).status).toBe(500);
   expect((await create("fixed", "admin")).status).toBe(200);
-  expect((await create("runtime", 123)).status).toBe(409);
+  expect((await create("runtime", 123)).status).toBe(500);
+  expect((await create("runtime", "runtime")).status).toBe(409);
+  expect(error).toHaveBeenCalledTimes(2);
+  expect(error).toHaveBeenCalledWith("Invalid BLOCKED_SUBDOMAINS configuration");
+  expect(error.mock.calls.flat().join(" ")).not.toContain("api,,admin");
+  error.mockRestore();
 });
 
 test("nonblank config replaces the default blocked labels", async () => {
