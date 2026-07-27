@@ -9,6 +9,8 @@ dist/
 *.log
 .DS_Store
 TODO.md
+graphify-out/
+.superpowers/
 
 # Local assistant files
 .mcp.json*

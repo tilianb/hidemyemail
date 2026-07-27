@@ -122,7 +122,9 @@ export const chromePlatform: ConfigPlatform = {
   async clear() { await chrome.storage.local.remove(["server", "key"]); },
   async contains(origin) { return chrome.permissions.contains({ origins: [origin] }); },
   async request(origin) { return chrome.permissions.request({ origins: [origin] }); },
-  async remove(origin) { return chrome.permissions.remove({ origins: [origin] }); },
+  // All HTTP(S) hosts are required install-time access in v1.3.1, so there is
+  // no optional origin grant to revoke when changing deployments.
+  async remove(_origin) { return true; },
 };
 
 export async function initializeStorage(): Promise<void> {
