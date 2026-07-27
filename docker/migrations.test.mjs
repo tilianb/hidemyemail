@@ -1,10 +1,32 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { Miniflare } from "miniflare";
+import { WORKER_FIRST_ROUTES } from "./assets-routing.mjs";
 import { applyMigrations } from "./migrations.mjs";
+
+test("all Worker migrations can be applied with comments ignored", async (t) => {
+  const mf = new Miniflare({
+    modules: true,
+    script: "export default { fetch() { return new Response('ok') } }",
+    compatibilityDate: "2026-05-01",
+    d1Databases: { DB: "all-migrations-test" },
+  });
+  t.after(() => mf.dispose());
+
+  await mf.ready;
+  const db = await mf.getD1Database("DB");
+  const migrationsDir = fileURLToPath(new URL("../worker/migrations", import.meta.url));
+  await applyMigrations(db, migrationsDir);
+
+  assert.equal(
+    (await db.prepare("SELECT COUNT(*) AS count FROM d1_migrations").first()).count,
+    (await readdir(migrationsDir)).filter((file) => file.endsWith(".sql")).length,
+  );
+});
 
 test("a failed multi-statement migration rolls back and can be retried", async (t) => {
   const migrationsDir = await mkdtemp(path.join(os.tmpdir(), "hidemyemail-migrations-"));
@@ -56,8 +78,33 @@ test("Docker startup accepts no APP_ORIGIN and migrates before listening", async
   );
   assert.doesNotMatch(requiredConfig, /APP_ORIGIN/);
   assert.match(server, /APP_ORIGIN:\s*env\.APP_ORIGIN\s*\?\?\s*["']{2}/);
+  assert.match(server, /BLOCKED_SUBDOMAINS:\s*env\.BLOCKED_SUBDOMAINS\s*\?\?\s*["']{2}/);
   assert.ok(
     server.indexOf("await applyMigrations") < server.indexOf("server.listen"),
     "pending migrations must finish before the HTTP socket listens",
   );
+});
+
+test("Docker routes all dynamic security and association requests through the Worker", () => {
+  assert.deepEqual(WORKER_FIRST_ROUTES, [
+    "/api/*",
+    "/.well-known/apple-app-site-association",
+    "/.well-known/assetlinks.json",
+    "/security-handoff",
+  ]);
+});
+
+test("Docker passes Android association configuration through to the Worker", async () => {
+  const server = await readFile(new URL("./server.mjs", import.meta.url), "utf8");
+  assert.match(server, /ANDROID_APP_ORIGINS:\s*env\.ANDROID_APP_ORIGINS\s*\?\?\s*["']{2}/);
+});
+
+test(".env.example documents the new optional subdomain-blocking and Android origin variables", async () => {
+  const envExample = await readFile(new URL("./.env.example", import.meta.url), "utf8");
+  assert.match(envExample, /^#\s*BLOCKED_SUBDOMAINS=admin,api,www$/m);
+  assert.match(envExample, /^#\s*ANDROID_APP_ORIGINS=android:apk-key-hash:base64url-sha256-certificate-digest$/m);
+  // Both remain commented out (opt-in) — an uncommented example would silently
+  // reserve subdomains or advertise a placeholder Android origin by default.
+  assert.doesNotMatch(envExample, /^BLOCKED_SUBDOMAINS=/m);
+  assert.doesNotMatch(envExample, /^ANDROID_APP_ORIGINS=/m);
 });
