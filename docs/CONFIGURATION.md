@@ -20,12 +20,14 @@ These are deployment-specific, not secrets. Store them in the Cloudflare dashboa
 | Name | Required | Purpose |
 |------|----------|---------|
 | `ENVIRONMENT` | yes | `production`, `preview`, `local`, or `self-hosted`. The Docker host sets `self-hosted` and supplies the Worker's private client-IP header after validating the socket peer. Do not expose a self-hosted Worker without that host boundary. |
+| `BLOCKED_SUBDOMAINS` | no | Comma-separated exact DNS labels that cannot be claimed as new personal subdomains. An absent or whitespace-only value uses `admin,api,www,dev,mail,smtp,imap,pop,pop3,webmail,autoconfig,autodiscover`; a nonblank value replaces that default list. Entries are trimmed and lowercased; requests are likewise trimmed and lowercased before exact matching, so `api` does not block `myapi` or `api2`. Each nonempty component must be a single 1–63 character ASCII DNS label containing only letters, digits, and interior hyphens, and starting and ending alphanumeric. Empty components, dots, wildcards, regex/glob syntax, underscores, embedded spaces, edge hyphens, and overlong labels make the configuration malformed. Malformed nonempty configuration fails closed with “Subdomain is not available” for every new claim. This affects only new claims: existing subdomains remain visible, editable, and deletable. Set this plain variable in the Cloudflare dashboard / Wrangler config or as `BLOCKED_SUBDOMAINS` in Docker. |
 | `SES_REGION` | yes for mail | AWS SES/S3/SNS region, for example `ap-southeast-2`. |
 | `S3_INBOUND_BUCKET` | yes for inbound | Bucket where SES stores raw MIME. |
 | `SNS_INBOUND_TOPIC_ARN` | yes for inbound SNS | Exact SNS topic for SES receipt notifications. |
 | `SNS_ALLOWED_TOPIC_ARN` | yes for outbound SNS | Exact SNS topic for SES bounce and complaint notifications. Topic ARNs identify webhook authority but are not secrets. |
 | `APP_ORIGIN` | required for passkeys | Exact browser-visible dashboard origin, e.g. `https://app.hidemyemail.dev`. WebAuthn always derives its RP ID and expected origin from this value, never request headers. Production origins must use HTTPS and contain no path, query, fragment, credentials, or trailing slash; HTTP is accepted only for `localhost`, `127.0.0.1`, or `::1` development. Docker deployments must set the externally visible origin explicitly in `docker/.env` to enable passkeys; ordinary authentication and mail continue to work when it is unset. |
 | `APPLE_APP_ID` | for iOS passkeys | Apple App ID `<TeamID>.<bundleId>` (e.g. `ABCDE12345.dev.hidemyemail.app`) published in `/.well-known/apple-app-site-association`. The AASA route 404s until this is set. |
+| `ANDROID_APP_ORIGINS` | for native Android passkey enrollment | Comma-separated WebAuthn APK origins in the form `android:apk-key-hash:<base64url SHA-256 signing-certificate digest>`. Values authorize native registration and publish matching colon-delimited fingerprints at `/.well-known/assetlinks.json`; malformed nonempty configuration fails closed. Include both old and new certificate origins during a signing-key rotation. This is not needed for the authenticated browser handoff used by self-hosted mobile clients. |
 | `APNS_KEY_ID` | for iOS push | 10-char Key ID of the APNs `.p8` signing key. |
 | `APNS_TEAM_ID` | for iOS push | Apple Developer Team ID. Falls back to the `<TeamID>` prefix of `APPLE_APP_ID` if unset. |
 | `APNS_BUNDLE_ID` | for iOS push | APNs topic (the app bundle id, e.g. `dev.hidemyemail.app`). Falls back to the `<bundleId>` suffix of `APPLE_APP_ID`. |
@@ -33,6 +35,21 @@ These are deployment-specific, not secrets. Store them in the Cloudflare dashboa
 | `FCM_PROJECT_ID` | optional (Android push) | Firebase project id. Falls back to the `project_id` inside `FCM_SERVICE_ACCOUNT` when unset. |
 
 `worker/wrangler.jsonc` sets `keep_vars: true` so dashboard-managed variables are preserved even when Cloudflare Git deploys run plain `wrangler deploy`.
+
+Derive an Android APK origin from the certificate that signs the release APK:
+
+```bash
+digest=$(apksigner verify --print-certs app-release.apk \
+  | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+printf 'android:apk-key-hash:'
+printf '%s' "$digest" | xxd -r -p | openssl base64 -A \
+  | tr '+/' '-_' | tr -d '='
+printf '\n'
+```
+
+After deployment, verify `/.well-known/assetlinks.json` returns package
+`dev.hidemyemail.app` with the expected release-certificate fingerprint before
+offering native Android passkey enrollment.
 
 ## Worker secrets
 
@@ -55,7 +72,7 @@ Set with `wrangler secret put`.
 From `worker/`:
 
 ```bash
-npm run setup   # interactive one-shot: generates + pushes everything
+npm run setup   # new deployments only; never key rotation
 ```
 
 Or manually:
@@ -69,6 +86,49 @@ openssl rand -base64 32  # DESTINATION_ENCRYPTION_KEY
 
 `DESTINATION_ENCRYPTION_KEY` must be base64 of exactly 32 bytes (AES-256).
 A hex string fails key import at runtime — do not use `openssl rand -hex`.
+
+## Pre-v1.3 encryption preflight
+
+Run this preflight while v1.2.1 is still deployed. First export D1 and preserve
+the original encryption key from your secure backup:
+
+```bash
+cd worker
+npx wrangler d1 export DB --remote --output ../hidemyemail-v1.2.1-backup.sql
+```
+
+Cloudflare secrets cannot be read back. If the original
+`DESTINATION_ENCRYPTION_KEY` is not available from a secure backup, stop and
+stay on v1.2.1. Validate a locally supplied key without printing or logging it:
+
+```bash
+printf 'DESTINATION_ENCRYPTION_KEY: ' >&2
+IFS= read -rs DESTINATION_ENCRYPTION_KEY
+printf '\n' >&2
+export DESTINATION_ENCRYPTION_KEY
+node -e '
+const v = process.env.DESTINATION_ENCRYPTION_KEY;
+const b = Buffer.from(v, "base64");
+if (b.length !== 32 || b.toString("base64") !== v) process.exit(1);
+'
+unset DESTINATION_ENCRYPTION_KEY
+```
+
+Exit status 0 means canonical Base64 decoding to exactly 32 bytes. Before
+continuing, verify account export succeeds, TOTP login succeeds if enabled, and
+send test mail if the `ses_secret_access_key` DB override is configured. Then
+check for legacy plaintext hashes:
+
+```bash
+npx wrangler d1 execute DB --remote --command "SELECT COUNT(*) AS plaintext_destination_hashes FROM destinations WHERE email_hash LIKE '%@%';"
+npx wrangler d1 execute DB --remote --command "SELECT COUNT(*) AS plaintext_alias_hashes FROM aliases WHERE destination_hash LIKE '%@%';"
+npx wrangler d1 execute DB --remote --command "SELECT COUNT(*) AS plaintext_domain_hashes FROM domains WHERE default_destination_hash LIKE '%@%';"
+```
+
+All three counts must be zero. Any failed check, unknown key history, or nonzero
+count means stop and remain on v1.2.1. Never generate a new key as a repair.
+Data written with one stable canonical 32-byte key remains compatible; v1.3
+does not provide automated key rotation or migration for unsupported configs.
 
 ## Database settings
 

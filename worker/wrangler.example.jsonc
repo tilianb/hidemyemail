@@ -8,7 +8,7 @@
   "assets": {
     "directory": "../dashboard/dist",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": ["/api/*", "/security-handoff", "/.well-known/apple-app-site-association", "/.well-known/assetlinks.json"]
   },
   "d1_databases": [
     {
@@ -21,11 +21,15 @@
   ],
   "vars": {
     "ENVIRONMENT": "production",
+    "BLOCKED_SUBDOMAINS": "admin,api,www",
     "SES_REGION": "paste-your-ses-region",
     "S3_INBOUND_BUCKET": "paste-your-inbound-bucket",
     // Passkeys: "<AppleTeamID>.<bundleID>" — served in the AASA file so iOS can
     // verify the webcredentials association. Omit if not shipping the iOS app.
-    "APPLE_APP_ID": "paste-your-team-id.your.bundle.id"
+    "APPLE_APP_ID": "paste-your-team-id.your.bundle.id",
+    // Optional Android WebAuthn APK origins, comma-separated for signing-key
+    // rotation. See docs/CONFIGURATION.md for the exact derivation command.
+    // "ANDROID_APP_ORIGINS": "android:apk-key-hash:replace-with-derived-value"
     // iOS push (optional): APNS_KEY_ID, and optionally APNS_TEAM_ID / APNS_BUNDLE_ID
     // (both derived from APPLE_APP_ID when omitted) and APNS_HOST. The signing
     // key APNS_AUTH_KEY is a *secret* — set it with `wrangler secret put`.
@@ -38,7 +42,7 @@
       "assets": {
         "directory": "../dashboard/dist",
         "not_found_handling": "single-page-application",
-        "run_worker_first": ["/api/*"]
+        "run_worker_first": ["/api/*", "/security-handoff", "/.well-known/apple-app-site-association", "/.well-known/assetlinks.json"]
       },
       "d1_databases": [
         {
@@ -50,6 +54,7 @@
       ],
       "vars": {
         "ENVIRONMENT": "preview",
+        "BLOCKED_SUBDOMAINS": "admin,api,www",
         "SES_REGION": "paste-your-preview-ses-region",
         "S3_INBOUND_BUCKET": "paste-your-preview-inbound-bucket"
       }

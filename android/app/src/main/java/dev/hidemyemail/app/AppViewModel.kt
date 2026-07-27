@@ -32,6 +32,13 @@ class AppViewModel(
     private val beginWebAuth: (Context, String, Long) -> WebSessionAuth.Pending = WebSessionAuth::begin,
 ) : AndroidViewModel(application) {
 
+    constructor(application: Application) : this(
+        application,
+        TokenStore(application),
+        PushManager::onLogout,
+        WebSessionAuth::begin,
+    )
+
     private val prefs = application.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val _phase = MutableStateFlow<AuthPhase>(AuthPhase.LoggedOut)
     val phase: StateFlow<AuthPhase> = _phase

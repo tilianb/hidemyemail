@@ -24,6 +24,7 @@ const PAGES = [
   { src: "docs/DEPLOY.md", slug: "deploy", title: "Deployment guide" },
   { src: "docs/AWS_SES_SETUP.md", slug: "aws-ses-setup", title: "AWS SES setup" },
   { src: "docs/CONFIGURATION.md", slug: "configuration", title: "Configuration" },
+  { src: "docs/API.md", slug: "api", title: "API" },
   { src: "docs/TROUBLESHOOTING.md", slug: "troubleshooting", title: "Troubleshooting" },
   { src: "docs/SECURITY.md", slug: "security", title: "Security notes" },
   { src: "docs/ROADMAP.md", slug: "roadmap", title: "Roadmap" },

@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { env } from "cloudflare:test";
 import { signPasskeyAuthChallenge, updatePasskeySignCount, verifyPasskeyAuthChallenge, signPasskeyRegChallenge, verifyPasskeyRegChallenge } from "../src/lib/auth";
-import { toBase64url, fromBase64url, getRpFromOrigin } from "../src/lib/webauthn";
+import { toBase64url, fromBase64url, getRegistrationOrigins, getRpFromOrigin } from "../src/lib/webauthn";
 
 // ── base64url helpers ──────────────────────────────────────────────────────
 
@@ -50,6 +50,17 @@ test("getRpFromOrigin rejects insecure production and non-origin URLs", () => {
   expect(() => getRpFromOrigin("https://example.com/path")).toThrow();
 });
 
+test("browser passkey registration accepts only canonical APP_ORIGIN", () => {
+  expect(getRegistrationOrigins("https://app.example.com", "android:apk-key-hash:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", false))
+    .toBe("https://app.example.com");
+});
+
+test("native passkey registration also accepts configured Android origins", () => {
+  const androidOrigin = "android:apk-key-hash:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  expect(getRegistrationOrigins("https://app.example.com", androidOrigin, true))
+    .toEqual(["https://app.example.com", androidOrigin]);
+});
+
 test("passkey sign counter updates are monotonic when assertions finish out of order", async () => {
   const db = env.DB as D1Database;
   await db.prepare("DELETE FROM passkey_credentials WHERE id = ?").bind("counter-test").run();
@@ -90,9 +101,10 @@ test("passkey reg challenge sign/verify round-trip", async () => {
   const secret = "test-secret";
   const challenge = toBase64url(crypto.getRandomValues(new Uint8Array(16)));
   const token = await signPasskeyRegChallenge(secret, 42, challenge);
-  expect(token).toMatch(/^preg\.\d+\.\d+\.[A-Za-z0-9\-_]+\.[a-f0-9]+$/);
+  expect(token).toMatch(/^preg2\.\d+\.\d+\.\d+\.[A-Za-z0-9\-_]+\.[a-f0-9]+$/);
   const result = await verifyPasskeyRegChallenge(secret, token);
   expect(result?.userId).toBe(42);
+  expect(result?.authVersion).toBe(0);
   expect(result?.challenge).toBe(challenge);
 });
 

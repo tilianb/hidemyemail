@@ -5,6 +5,7 @@ updates:
       - "/worker"
       - "/dashboard"
       - "/docker"
+      - "/extension"
     schedule:
       interval: "weekly"
     target-branch: "dev"

@@ -1,0 +1,26 @@
+:root { color-scheme: light; font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #142b29; background: #f6faf8; }
+* { box-sizing: border-box; }
+body { margin: 0; width: 360px; min-height: 390px; }
+main { padding: 24px; }
+header { display: flex; align-items: center; gap: 11px; padding-bottom: 22px; border-bottom: 1px solid #dce8e3; }
+.mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px 11px 11px 3px; background: #176d63; color: white; font: 700 16px Georgia, serif; }
+h1, h2, p { margin: 0; }
+h1 { font-size: 16px; letter-spacing: -.02em; }
+header p { color: #617773; font-size: 11px; margin-top: 2px; }
+h2 { margin: 22px 0 16px; font: 600 20px Georgia, serif; letter-spacing: -.02em; }
+label { display: grid; gap: 7px; margin: 13px 0; color: #405956; font-size: 12px; font-weight: 650; }
+input, select { width: 100%; height: 42px; border: 1px solid #bed0ca; border-radius: 9px; padding: 0 11px; background: #fff; color: #142b29; font: inherit; }
+input:focus, select:focus, button:focus-visible { outline: 3px solid #9bd4c8; outline-offset: 2px; }
+button { border: 0; border-radius: 9px; cursor: pointer; font: 700 13px inherit; }
+.primary { width: 100%; min-height: 43px; margin-top: 7px; color: white; background: #176d63; }
+.primary:hover { background: #105a52; }
+.primary:disabled { opacity: .58; cursor: wait; }
+.text-button { margin-left: auto; padding: 7px; color: #176d63; background: transparent; }
+.security { margin-top: 15px; padding: 11px; border-left: 3px solid #a8cbc3; background: #edf5f2; color: #526864; font-size: 11px; line-height: 1.45; }
+.result { display: flex; align-items: center; gap: 8px; margin-top: 15px; padding: 8px 8px 8px 11px; border: 1px solid #a8cbc3; border-radius: 9px; background: white; }
+.result span { min-width: 0; flex: 1; overflow-wrap: anywhere; font: 600 13px ui-monospace, SFMono-Regular, Menlo, monospace; user-select: all; }
+.result button { padding: 8px 12px; color: #176d63; background: #e2f1ed; }
+#status { min-height: 18px; margin-top: 14px; color: #617773; font-size: 12px; line-height: 1.45; }
+#status.error { color: #a52a2a; } #status.success { color: #176d63; }
+[hidden] { display: none !important; }
+@media (prefers-reduced-motion: no-preference) { button { transition: background-color .15s ease, opacity .15s ease; } }

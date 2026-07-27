@@ -3,7 +3,9 @@
 </p>
 
 <p align="center">
-  <a href="https://app.hidemyemail.dev">app.hidemyemail.dev</a>
+  <a href="https://app.hidemyemail.dev">App</a>
+  ·
+  <a href="https://tilianb.github.io/hidemyemail/">Documentation</a>
 </p>
 
 # HideMyEmail
@@ -41,16 +43,9 @@ Recipients see the alias.
 | Typical self-host cost | ~$0 + SES cents | VPS $5+/mo | VPS $5+/mo | free (limited) | $9+/mo |
 | Open source | ✅ MIT | ✅ | ✅ | ❌ | ❌ |
 
-```diagram
-╭──────────────╮   raw MIME   ╭────╮   SNS   ╭──────────────────╮
-│ AWS SES recv │─────────────▶│ S3 │────────▶│ Cloudflare Worker │
-╰──────┬───────╯              ╰────╯         ╰────────┬─────────╯
-       │                                             │
-       │                                  D1 state + dashboard API
-       │                                             │
-       │       SES SendRawEmail                      ▼
-       ╰────────────────────────────────────▶ verified inbox
-```
+<p align="center">
+  <img src="docs/assets/architecture.svg" alt="HideMyEmail architecture: AWS SES receives mail, S3 stores the raw message, SNS invokes the Cloudflare Worker, and SES forwards it to the verified inbox. Web, iOS, Android, and extension clients use the Worker API backed by encrypted D1 state." width="1100">
+</p>
 
 ## Features
 
@@ -98,7 +93,7 @@ git clone https://github.com/tilianb/hidemyemail.git
 cd hidemyemail
 cd dashboard && npm ci && npm run build
 cd ../worker && npm ci
-npx wrangler deploy
+npm run deploy
 ```
 
 You also need D1 databases, Worker secrets, SES/S3/SNS, and DNS. Follow [Getting started](docs/GETTING_STARTED.md), then [Deployment guide](docs/DEPLOY.md).

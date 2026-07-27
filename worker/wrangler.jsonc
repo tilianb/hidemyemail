@@ -9,7 +9,7 @@
   "assets": {
     "directory": "../dashboard/dist",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/.well-known/apple-app-site-association"]
+    "run_worker_first": ["/api/*", "/security-handoff", "/.well-known/apple-app-site-association", "/.well-known/assetlinks.json"]
   },
   "d1_databases": [
     { 
@@ -26,6 +26,9 @@
   "vars": {
     "ENVIRONMENT": "production",
     "APPLE_APP_ID": "3L2C79636P.dev.hidemyemail.app",
+    // WebAuthn APK origin for the certificate that signs official releases.
+    // Keep this synchronized with android/release.keystore.enc.
+    "ANDROID_APP_ORIGINS": "android:apk-key-hash:eHfS2oIphEoByv5gokzJjNbHyokgf3evNHIHeKaAuMA",
     // Production APNs gateway — TestFlight / App Store builds register here.
     "APNS_HOST": "api.push.apple.com",
     // 10-char APNs key id (not sensitive). The .p8 signing key is the secret.
@@ -41,7 +44,7 @@
       "assets": {
         "directory": "../dashboard/dist",
         "not_found_handling": "single-page-application",
-        "run_worker_first": ["/api/*", "/.well-known/apple-app-site-association"]
+        "run_worker_first": ["/api/*", "/security-handoff", "/.well-known/apple-app-site-association", "/.well-known/assetlinks.json"]
       },
       "d1_databases": [
         {

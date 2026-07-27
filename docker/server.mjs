@@ -10,6 +10,7 @@ import { createServer } from "node:http";
 import path from "node:path";
 import process from "node:process";
 import { Miniflare } from "miniflare";
+import { WORKER_FIRST_ROUTES } from "./assets-routing.mjs";
 import { trustedProxySet, workerHeaders } from "./client-ip.mjs";
 import { applyMigrations } from "./migrations.mjs";
 
@@ -28,6 +29,17 @@ const missing = REQUIRED_CONFIG.filter((k) => !env[k]);
 if (missing.length) {
   console.error(`[hidemyemail] Missing required env vars: ${missing.join(", ")}`);
   console.error(`[hidemyemail] See docker/.env.example for the full list.`);
+  process.exit(1);
+}
+try {
+  const encryptionKey = Buffer.from(env.DESTINATION_ENCRYPTION_KEY, "base64");
+  if (
+    !/^[A-Za-z0-9+/]{43}=$/.test(env.DESTINATION_ENCRYPTION_KEY)
+    || encryptionKey.length !== 32
+    || encryptionKey.toString("base64") !== env.DESTINATION_ENCRYPTION_KEY
+  ) throw new Error();
+} catch {
+  console.error("[hidemyemail] Invalid encryption key configuration");
   process.exit(1);
 }
 
@@ -72,14 +84,14 @@ const mf = new Miniflare({
   d1Persist: D1_PERSIST_DIR,
 
   // Static SPA (dashboard/dist) — Workers Assets routing parity.
-  // run_worker_first: ["/api/*"] from wrangler.jsonc becomes:
+  // run_worker_first from wrangler.jsonc becomes:
   //   has_user_worker + static_routing.user_worker
   assets: {
     directory: ASSETS_DIR,
     binding: "ASSETS",
     routerConfig: {
       has_user_worker: true,
-      static_routing: { user_worker: ["/api/*"] },
+      static_routing: { user_worker: WORKER_FIRST_ROUTES },
     },
     assetConfig: {
       not_found_handling: "single-page-application",
@@ -90,7 +102,9 @@ const mf = new Miniflare({
   // Plain vars (non-secret, mirror wrangler.jsonc top-level vars block)
   bindings: {
     ENVIRONMENT: env.ENVIRONMENT ?? "self-hosted",
+    BLOCKED_SUBDOMAINS: env.BLOCKED_SUBDOMAINS ?? "",
     APP_ORIGIN: env.APP_ORIGIN ?? "",
+    ANDROID_APP_ORIGINS: env.ANDROID_APP_ORIGINS ?? "",
     SES_REGION: env.SES_REGION ?? "ap-southeast-2",
     S3_INBOUND_BUCKET: env.S3_INBOUND_BUCKET ?? "hidemyemail-inbound-raw",
     SNS_INBOUND_TOPIC_ARN: env.SNS_INBOUND_TOPIC_ARN ?? "",

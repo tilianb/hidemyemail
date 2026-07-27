@@ -27,3 +27,30 @@ export function getRpFromOrigin(origin: string | null | undefined): { rpID: stri
   }
   return { rpID: url.hostname, expectedOrigin: url.origin };
 }
+
+export function getAndroidAssociations(config: string | null | undefined): { origins: string[]; fingerprints: string[] } {
+  if (!config?.trim()) return { origins: [], fingerprints: [] };
+  const origins = config.split(",").map(value => value.trim());
+  if (origins.some(value => !/^android:apk-key-hash:[A-Za-z0-9_-]{43}$/.test(value))) {
+    throw new Error("Invalid Android association configuration");
+  }
+  const unique = [...new Set(origins)];
+  const fingerprints = unique.map(origin => {
+    const encoded = origin.slice("android:apk-key-hash:".length).replaceAll("-", "+").replaceAll("_", "/") + "=";
+    const bytes = Uint8Array.from(atob(encoded), char => char.charCodeAt(0));
+    if (bytes.length !== 32) throw new Error("Invalid Android association configuration");
+    return [...bytes].map(byte => byte.toString(16).padStart(2, "0").toUpperCase()).join(":");
+  });
+  return { origins: unique, fingerprints };
+}
+
+export function getRegistrationOrigins(
+  appOrigin: string | null | undefined,
+  androidOrigins: string | null | undefined,
+  native: boolean,
+): string | string[] {
+  const canonical = getRpFromOrigin(appOrigin).expectedOrigin;
+  if (!native) return canonical;
+  const android = getAndroidAssociations(androidOrigins).origins;
+  return android.length ? [canonical, ...android] : canonical;
+}
