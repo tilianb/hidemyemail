@@ -299,7 +299,7 @@ actor APIClient {
               let handoffOrigin = ServerOrigin.canonicalOrigin(of: url),
               let configuredOrigin = ServerOrigin.canonicalOrigin(of: baseURL),
               handoffOrigin == configuredOrigin,
-              components.path == "/security-handoff",
+              components.percentEncodedPath == "/security-handoff",
               components.user == nil, components.password == nil,
               components.fragment == nil,
               let queryItems = components.queryItems,
@@ -484,6 +484,7 @@ actor APIClient {
             let semanticUnauthorizedEndpoints = [
                 "/api/settings/mfa/disable",
                 "/api/settings/mfa/backup-codes",
+                "/api/settings/passkeys/challenge",
                 "/api/settings/passkeys/register",
             ]
             if semanticUnauthorizedEndpoints.contains(path), let message, message != "Unauthorized" {

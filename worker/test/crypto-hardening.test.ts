@@ -12,6 +12,7 @@ const INVALID_KEYS = [
   "",
   "not-base64!",
   `${KEY}junk`,
+  `${KEY}\n`,
   "YQ==",
   KEY_16_BYTES,
   KEY_24_BYTES,
@@ -32,7 +33,10 @@ test.each(INVALID_KEYS)("encryptDestination rejects invalid key configuration %#
 });
 
 test("rejects noncanonical Base64 keys even when they decode to 32 bytes", async () => {
-  const noncanonical = `${KEY.slice(0, -1)}\n=`;
+  const noncanonical = `${KEY.slice(0, -2)}B=`;
+  expect(Uint8Array.from(atob(noncanonical), (char) => char.charCodeAt(0))).toEqual(
+    Uint8Array.from(atob(KEY), (char) => char.charCodeAt(0)),
+  );
   await expect(encryptDestination("plain@example.com", noncanonical)).rejects.toThrow(
     new Error("Invalid encryption key configuration"),
   );
