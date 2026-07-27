@@ -14,15 +14,31 @@ const repository = args.repository || process.env.GITHUB_REPOSITORY || 'tilianb/
 const notesOutput = args['notes-output']
 const stableTagPattern = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 
+/**
+ * Reports a release validation failure and terminates the process.
+ * @param {string} message - The validation failure details.
+ */
 function fail(message) {
   console.error(`Release validation failed: ${message}`)
   process.exit(1)
 }
 
+/**
+ * Reads and parses a JSON file relative to the release root.
+ * @param {string} path - The path to the JSON file.
+ * @return {Object} The parsed JSON data.
+ */
 function readJson(path) {
   return JSON.parse(readFileSync(resolve(root, path), 'utf8'))
 }
 
+/**
+ * Extracts a required value from a file using a regular expression.
+ * @param {string} path - The path to the file relative to the release root.
+ * @param {RegExp} pattern - The pattern used to extract the value.
+ * @param {string} label - The value name used in validation errors.
+ * @returns {string} The first captured value.
+ */
 function match(path, pattern, label) {
   const value = readFileSync(resolve(root, path), 'utf8').match(pattern)?.[1]
   if (!value) fail(`could not read ${label} from ${path}`)
@@ -33,6 +49,12 @@ const version = tag.match(stableTagPattern)?.[0]?.slice(1)
 if (!version) fail(`tag ${JSON.stringify(tag)} is not stable SemVer vX.Y.Z`)
 const currentParts = version.split('.').map(BigInt)
 
+/**
+ * Compares two three-part version values.
+ * @param {Array<bigint>} left - The first version to compare.
+ * @param {Array<bigint>} right - The second version to compare.
+ * @return {number} -1 if the first version is lower, 1 if it is higher, or 0 if both versions are equal.
+ */
 function compareVersions(left, right) {
   for (let index = 0; index < 3; index++) {
     if (left[index] < right[index]) return -1

@@ -11,6 +11,9 @@ let current: ExtensionConfig | null = null;
 let allowedDomains: string[] = [];
 let busy = true, permanentlyLocked = false, actionId = 0;
 
+/**
+ * Synchronizes control availability with the current UI section and action lock state.
+ */
 function syncControls() {
   const locked = busy || permanentlyLocked;
   serverInput.disabled = locked || Boolean(setup.hidden);
@@ -21,6 +24,11 @@ function syncControls() {
   generateButton.disabled = locked || Boolean(generator.hidden);
   copyButton.disabled = locked || Boolean(generator.hidden) || Boolean(result.hidden);
 }
+/**
+ * Executes a user action while preventing concurrent operations and stale UI updates.
+ *
+ * @param action - The operation to execute, receiving a guard that indicates whether its updates are still current
+ */
 async function runAction(action: (active: () => boolean) => Promise<void>) {
   if (busy || permanentlyLocked) return;
   busy = true; const id = ++actionId; syncControls();
@@ -29,7 +37,19 @@ async function runAction(action: (active: () => boolean) => Promise<void>) {
   finally { if (active()) { busy = false; syncControls(); } }
 }
 
+/**
+ * Updates the status message and its presentation style.
+ *
+ * @param text - The message to display
+ * @param kind - The presentation style for the message
+ */
 function message(text = "", kind: "error" | "success" | "" = "") { status.textContent = text; status.className = kind; }
+/**
+ * Converts an error into a user-facing message.
+ *
+ * @param error - The error to describe
+ * @returns A message describing the error
+ */
 function explain(error: unknown): string {
   if (error instanceof ApiError && error.kind === "auth") return "API key rejected. Create a new dedicated key in Settings → API Keys.";
   if (error instanceof ApiError) return error.message;
@@ -37,6 +57,12 @@ function explain(error: unknown): string {
   return "Something went wrong. Try again.";
 }
 type DomainOptions = Awaited<ReturnType<ReturnType<typeof createApi>["domains"]>>;
+/**
+ * Prepares the generator interface for a validated extension configuration.
+ *
+ * @param config - The server and API key configuration to activate
+ * @param validatedOptions - Previously fetched domain options, when available
+ */
 async function ready(config: ExtensionConfig, validatedOptions?: DomainOptions) {
   message("Checking your deployment…");
   let options = validatedOptions;
@@ -51,10 +77,16 @@ async function ready(config: ExtensionConfig, validatedOptions?: DomainOptions) 
   setup.hidden = true; generator.hidden = false; settingsButton.hidden = false;
   serverLabel.textContent = new URL(config.server).host; message("Ready"); generateButton.focus();
 }
+/**
+ * Displays the setup interface and focuses the server input.
+ */
 function showSetup() {
   setup.hidden = false; generator.hidden = true; settingsButton.hidden = true; result.hidden = true; message(); serverInput.focus();
 }
 
+/**
+ * Registers event handlers for configuration, settings, alias generation, and clipboard actions.
+ */
 function registerSecretActions() {
   byId<HTMLFormElement>("setup-form").addEventListener("submit", async (event) => {
     event.preventDefault();

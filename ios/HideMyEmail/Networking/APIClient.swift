@@ -190,10 +190,17 @@ actor APIClient {
         try await requestVoid("/api/settings/preferences", method: "PATCH", body: fields)
     }
 
+    /// Retrieves the account's multi-factor authentication status.
+    /// - Returns: The current multi-factor authentication status.
     func mfaStatus() async throws -> MfaStatus {
         try await request("/api/settings/mfa")
     }
 
+    /// Reauthenticates the account and stores the resulting fresh-authentication token.
+    /// - Parameters:
+    ///   - passphrase: The account passphrase.
+    ///   - code: An optional MFA code.
+    /// - Returns: A fresh-authentication response.
     func reauthenticate(passphrase: String, code: String?) async throws {
         var body: [String: Any] = ["passphrase": passphrase]
         if let code, !code.isEmpty { body["code"] = code }
@@ -204,14 +211,23 @@ actor APIClient {
         freshAuth = response.freshAuth
     }
 
+    /// Initiates multi-factor authentication setup.
+    /// - Returns: The MFA setup details.
     func setupMFA() async throws -> MFASetupResponse {
         try await request("/api/settings/mfa/setup", method: "POST", body: [:])
     }
 
+    /// Verifies a multi-factor authentication code.
+    /// - Parameter code: The MFA code to verify.
+    /// - Returns: The result of the MFA verification.
     func verifyMFA(code: String) async throws -> MFAVerifyResponse {
         try await request("/api/settings/mfa/verify", method: "POST", body: ["code": code])
     }
 
+    /// Regenerates the account's MFA backup codes.
+    ///
+    /// - Parameter code: The MFA verification code required to authorize regeneration.
+    /// - Returns: The newly generated MFA backup codes.
     func regenerateMFABackupCodes(code: String) async throws -> [String] {
         let response: MFABackupCodesResponse = try await request(
             "/api/settings/mfa/backup-codes", method: "POST", body: ["code": code]
@@ -219,6 +235,8 @@ actor APIClient {
         return response.backupCodes
     }
 
+    /// Disables multi-factor authentication for the account.
+    /// - Parameter code: The verification code required to disable multi-factor authentication.
     func disableMFA(code: String) async throws {
         try await requestVoid("/api/settings/mfa/disable", method: "POST", body: ["code": code])
     }
@@ -276,20 +294,32 @@ actor APIClient {
         try await requestVoid("/api/settings/passkeys/\(id)", method: "PATCH", body: ["deviceName": name])
     }
 
+    /// Deletes a passkey from the account.
+    /// - Parameter id: The identifier of the passkey to delete.
     func deletePasskey(id: String) async throws {
         try await requestVoid("/api/settings/passkeys/\(id)", method: "DELETE")
     }
 
+    /// Requests the options required to register a new passkey.
+    /// - Returns: The passkey registration options.
     func passkeyRegistrationChallenge() async throws -> PasskeyRegistrationOptions {
         try await request("/api/settings/passkeys/challenge", method: "POST", body: [:], authMode: true)
     }
 
+    /// Registers a passkey for the account.
+    /// - Parameters:
+    ///   - response: The passkey registration response.
+    ///   - deviceName: An optional name for the passkey.
+    ///   - challengeToken: The token associated with the registration challenge.
     func registerPasskey(response: [String: Any], deviceName: String?, challengeToken: String) async throws {
         var body: [String: Any] = ["response": response, "challengeToken": challengeToken]
         if let deviceName, !deviceName.isEmpty { body["deviceName"] = deviceName }
         try await requestVoid("/api/settings/passkeys/register", method: "POST", body: body, authMode: true)
     }
 
+    /// Requests a validated security handoff URL for the current account.
+    /// - Returns: A security handoff URL containing a non-empty authorization code.
+    /// - Throws: `APIError.server` if the returned URL does not match the configured server or required structure.
     func securityHandoffURL() async throws -> URL {
         let response: SecurityHandoffResponse = try await request(
             "/api/settings/security-handoff", method: "POST", body: [:], authMode: true
@@ -311,7 +341,9 @@ actor APIClient {
         return url
     }
 
-    // MARK: - API keys (addy.io-compatible /api/v1)
+    /// Retrieves the API keys for the account.
+    ///
+    /// - Returns: The account's API keys.
 
     func apiKeys() async throws -> [ApiKey] {
         try await request("/api/settings/api-keys")
@@ -399,7 +431,16 @@ actor APIClient {
         ["blocked": p.blocked, "bounce": p.bounce, "forward": p.forward, "reply": p.reply]
     }
 
-    // MARK: - Core request plumbing
+    /// Executes an API request and decodes the response into the specified type.
+    /// - Parameters:
+    ///   - path: The API endpoint path.
+    ///   - method: The HTTP method.
+    ///   - body: The optional JSON request body.
+    ///   - authMode: Whether to use token authentication mode.
+    ///   - authed: Whether the request requires authentication.
+    ///   - includeFreshAuth: Whether to include the fresh-authentication credential.
+    /// - Returns: The decoded response value.
+    /// - Throws: An `APIError` if the request fails or the response cannot be decoded.
 
     private func request<T: Decodable>(
         _ path: String,
@@ -418,6 +459,12 @@ actor APIClient {
         }
     }
 
+    /// Performs an authenticated request without decoding its response.  
+    /// - Parameters:
+    ///   - path: The API path.
+    ///   - method: The HTTP method.
+    ///   - body: The optional JSON request body.
+    ///   - authMode: Whether to include token authentication mode headers.
     private func requestVoid(
         _ path: String,
         method: String,
@@ -427,6 +474,16 @@ actor APIClient {
         _ = try await perform(path, method: method, body: body, authMode: authMode, authed: true, includeFreshAuth: true)
     }
 
+    /// Executes an API request and returns its response data.
+    /// - Parameters:
+    ///   - path: The request path relative to the base URL.
+    ///   - method: The HTTP method.
+    ///   - body: The optional JSON request body.
+    ///   - authMode: Whether to include token authentication mode.
+    ///   - authed: Whether the request requires a bearer token.
+    ///   - includeFreshAuth: Whether to include the fresh-authentication token when available.
+    /// - Returns: The response data from a successful request.
+    /// - Throws: An `APIError` if the URL is invalid, authentication is unavailable, transport fails, the response is invalid, or the server returns an error.
     private func perform(
         _ path: String,
         method: String,

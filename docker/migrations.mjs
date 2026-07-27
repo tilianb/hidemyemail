@@ -23,6 +23,11 @@ export async function applyMigrations(db, migrationsDir) {
   }
 }
 
+/**
+ * Splits SQL text into individual statements.
+ * @param {string} sql - The SQL text to split.
+ * @return {string[]} The SQL statements, excluding comment contents and empty trailing text.
+ */
 export function splitSqlStatements(sql) {
   const out = [];
   let buffer = "";

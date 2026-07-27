@@ -4,9 +4,9 @@ import type { AppEnv } from "./app";
 import { verifyFreshAuth } from "../lib/auth";
 
 /**
- * True when the caller holds a valid __Host-fresh-auth cookie for the
- * session's user. Gate for operations a stolen long-lived session must not
- * reach on its own: MFA/passkey changes, data export, account deletion.
+ * Determines whether the request includes valid fresh authentication credentials.
+ *
+ * @returns `true` if the fresh-auth credential is valid for the current user and authentication version, `false` otherwise.
  */
 export async function hasFreshAuth(c: Context<AppEnv>): Promise<boolean> {
   // Web clients hold the HttpOnly cookie; native bearer clients carry the
@@ -17,6 +17,11 @@ export async function hasFreshAuth(c: Context<AppEnv>): Promise<boolean> {
   return !!token && await verifyFreshAuth(c.env.SESSION_SECRET, token, c.get("userId"), c.get("authVersion"));
 }
 
+/**
+ * Determines whether the request uses native bearer-token authentication.
+ *
+ * @returns `true` when the request uses bearer authentication with token mode and has no `Origin` header, `false` otherwise.
+ */
 export function isAuthenticatedNative(c: Context<AppEnv>): boolean {
   return c.get("authSource") === "bearer" && c.req.header("X-Auth-Mode") === "token" && !c.req.header("Origin");
 }

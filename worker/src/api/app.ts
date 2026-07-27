@@ -38,6 +38,12 @@ export type AppEnv = {
 
 const SECURITY_HANDOFF_PATTERN = /^security1\.\d+\.\d+\.\d+\.[a-f0-9]{32}\.[a-f0-9]{64}$/;
 
+/**
+ * Retrieves the authenticated user ID from a valid session cookie.
+ *
+ * @param c - The request context containing the session secret and user database
+ * @returns The user ID if the session and account are valid, or `null` otherwise
+ */
 async function validCookieUser(c: Context<AppEnv>): Promise<number | null> {
   const token = getCookie(c, "__Host-session");
   if (!token) return null;
@@ -50,6 +56,11 @@ async function validCookieUser(c: Context<AppEnv>): Promise<number | null> {
     : null;
 }
 
+/**
+ * Creates the Hono application with security middleware, CORS policies, authentication, and API routes.
+ *
+ * @returns The configured Hono application
+ */
 export function createApp() {
   const app = new Hono<AppEnv>();
 

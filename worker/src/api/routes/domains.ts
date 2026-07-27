@@ -18,6 +18,12 @@ const DEFAULT_BLOCKED_SUBDOMAINS = new Set([
 let cachedBlockedSubdomainsRaw: unknown = Symbol("unset");
 let cachedBlockedSubdomains: Set<string> | null = DEFAULT_BLOCKED_SUBDOMAINS;
 
+/**
+ * Parses blocked subdomain labels from a configuration value.
+ *
+ * @param value - A comma-separated list of subdomain labels, or `undefined` to use the defaults
+ * @returns The parsed blocked-label set, the default set, or `null` for an invalid configuration value
+ */
 function blockedSubdomainLabels(value: unknown): Set<string> | null {
   if (value === cachedBlockedSubdomainsRaw) return cachedBlockedSubdomains;
   cachedBlockedSubdomainsRaw = value;
@@ -34,6 +40,13 @@ function blockedSubdomainLabels(value: unknown): Set<string> | null {
   return cachedBlockedSubdomains;
 }
 
+/**
+ * Resolves and encrypts a default destination after verifying user-owned destinations.
+ *
+ * @param userId - The user whose destination ownership and verification are checked
+ * @param defaultDestination - The destination to resolve, or an empty value
+ * @returns The encrypted destination details, or `null` when a non-global destination is not verified
+ */
 async function resolveDefaultDestination(
   db: D1Database,
   userId: number,
@@ -61,6 +74,11 @@ async function resolveDefaultDestination(
   };
 }
 
+/**
+ * Creates the router for domain listing, creation, update, and deletion endpoints.
+ *
+ * @returns The configured domains router
+ */
 export function domainRoutes() {
   const r = new Hono<AppEnv>();
   r.get("/domains", async (c) => {

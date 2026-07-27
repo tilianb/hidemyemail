@@ -16,7 +16,13 @@ export function fromBase64url(b64url: string): Uint8Array<ArrayBuffer> {
 
 // Parse the canonical configured application origin. Plain HTTP is permitted
 // only for loopback development; paths, credentials, query and fragments are
-// never valid WebAuthn origins.
+/**
+ * Validates an application origin for WebAuthn and derives its relying-party identifier.
+ *
+ * @param origin - The application origin to validate
+ * @returns The URL hostname as `rpID` and the normalized URL origin as `expectedOrigin`
+ * @throws If the origin is missing or is not a valid HTTPS origin, except for HTTP loopback origins
+ */
 export function getRpFromOrigin(origin: string | null | undefined): { rpID: string; expectedOrigin: string } {
   if (!origin) throw new Error("APP_ORIGIN is required");
   const url = new URL(origin);
@@ -28,6 +34,13 @@ export function getRpFromOrigin(origin: string | null | undefined): { rpID: stri
   return { rpID: url.hostname, expectedOrigin: url.origin };
 }
 
+/**
+ * Parses Android association origins and derives their SHA-256 fingerprints.
+ *
+ * @param config - A comma-separated list of `android:apk-key-hash:` origins.
+ * @returns The unique association origins and their colon-separated uppercase hexadecimal fingerprints.
+ * @throws Error if the configuration contains an invalid origin or key hash.
+ */
 export function getAndroidAssociations(config: string | null | undefined): { origins: string[]; fingerprints: string[] } {
   if (!config?.trim()) return { origins: [], fingerprints: [] };
   const origins = config.split(",").map(value => value.trim());
@@ -44,6 +57,14 @@ export function getAndroidAssociations(config: string | null | undefined): { ori
   return { origins: unique, fingerprints };
 }
 
+/**
+ * Determines the origins permitted for WebAuthn registration.
+ *
+ * @param appOrigin - The application origin used as the canonical registration origin
+ * @param androidOrigins - Optional comma-separated Android association origins
+ * @param native - Whether to include validated Android association origins
+ * @returns The canonical origin, or an array containing it and the Android origins when applicable
+ */
 export function getRegistrationOrigins(
   appOrigin: string | null | undefined,
   androidOrigins: string | null | undefined,

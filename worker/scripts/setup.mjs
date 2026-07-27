@@ -90,6 +90,11 @@ function ask(question, { hidden = false } = {}) {
   });
 }
 
+/**
+ * Sets a Wrangler secret for the selected deployment environment.
+ * @param {string} name - The name of the secret to set.
+ * @param {string} value - The secret value.
+ */
 function putSecret(name, value) {
   const cmd = ["wrangler", "secret", "put", name];
   if (wranglerEnv) cmd.push("--env", wranglerEnv);

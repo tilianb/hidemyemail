@@ -1,9 +1,22 @@
 import { toBase64, fromBase64, utf8 } from "./bytes";
 
+/**
+ * Determines whether a value resembles a legacy plaintext email address.
+ *
+ * @param value - The value to inspect
+ * @returns `true` if the value matches the expected plaintext email format, `false` otherwise.
+ */
 function looksLikeLegacyPlaintextEmail(value: string): boolean {
   return /^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/.test(value);
 }
 
+/**
+ * Validates and decodes a base64-encoded 32-byte encryption key.
+ *
+ * @param keyBase64 - The base64-encoded encryption key
+ * @returns The decoded 32-byte encryption key
+ * @throws An error if the key is invalid
+ */
 function encryptionKey(keyBase64: string): Uint8Array {
   try {
     if (typeof keyBase64 !== "string" || !/^[A-Za-z0-9+/]{43}=$/.test(keyBase64)) {
@@ -35,8 +48,12 @@ export async function hashDestination(email: string, keyBase64: string): Promise
 }
 
 /**
- * Encrypt a destination email using AES-GCM with a random IV.
- * Returns a base64 string containing the IV prepended to the ciphertext.
+ * Encrypts a destination email with AES-GCM using a randomly generated initialization vector.
+ *
+ * @param email - The destination email to encrypt.
+ * @param keyBase64 - The base64-encoded 32-byte encryption key.
+ * @returns A base64-encoded value containing the initialization vector followed by the ciphertext.
+ * @throws Error If the encryption key is invalid or encryption fails.
  */
 export async function encryptDestination(email: string, keyBase64: string): Promise<string> {
   const keyData = encryptionKey(keyBase64);
@@ -60,7 +77,11 @@ export async function encryptDestination(email: string, keyBase64: string): Prom
 }
 
 /**
- * Decrypt a base64 destination email using AES-GCM.
+ * Decrypts an encrypted destination value or preserves a legacy plaintext email.
+ *
+ * @param encryptedBase64 - The base64-encoded IV and AES-GCM ciphertext, or a legacy plaintext email
+ * @param keyBase64 - The base64-encoded AES-GCM key
+ * @returns The decrypted destination email or the unchanged legacy plaintext email
  */
 export async function decryptDestination(encryptedBase64: string, keyBase64: string): Promise<string> {
   const keyData = encryptionKey(keyBase64);

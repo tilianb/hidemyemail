@@ -220,6 +220,8 @@ struct RecoveryCodesSection: View {
         }
     }
 
+    /// Generates new recovery codes and updates the displayed code count.
+    /// - Returns: The generated recovery codes are stored for display; errors are recorded for presentation.
     private func regenerate() async {
         guard let client = app.api() else { return }
         generating = true

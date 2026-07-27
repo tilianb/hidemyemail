@@ -99,13 +99,25 @@ export async function verifyPasskeyAuthChallenge(secret: string, token: string):
 }
 
 // Passkey registration challenge (userId included, user already authenticated)
-// Format: preg.{userId}.{exp}.{challengeB64url}.{hmac}
+/**
+ * Creates a short-lived signed passkey registration challenge.
+ *
+ * @param challenge - The challenge value included in the signed token
+ * @param authVersion - The authentication state version associated with the user
+ * @returns A signed `preg2` token containing the user ID, authentication version, expiration time, and challenge
+ */
 export async function signPasskeyRegChallenge(secret: string, userId: number, challenge: string, authVersion = 0): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + 300;
   const payload = `preg2.${userId}.${authVersion}.${exp}.${challenge}`;
   return `${payload}.${await hmac(secret, payload)}`;
 }
 
+/**
+ * Verifies a passkey registration challenge token.
+ *
+ * @param token - The signed registration challenge token to verify
+ * @returns The token's user ID, authentication version, and challenge when valid and unexpired; `null` otherwise
+ */
 export async function verifyPasskeyRegChallenge(secret: string, token: string): Promise<{ userId: number; authVersion: number; challenge: string } | null> {
   const parts = token.split(".");
   if (parts.length !== 6 || parts[0] !== "preg2") return null;
@@ -119,6 +131,13 @@ export async function verifyPasskeyRegChallenge(secret: string, token: string): 
   return null;
 }
 
+/**
+ * Creates a short-lived token for transferring authenticated security context.
+ *
+ * @param userId - The identifier of the authenticated user
+ * @param authVersion - The user's authentication version
+ * @returns A signed token containing the user ID, authentication version, expiration time, and random nonce
+ */
 export async function signSecurityHandoff(secret: string, userId: number, authVersion: number): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + 120;
   const nonce = toHex(crypto.getRandomValues(new Uint8Array(16)).buffer);
@@ -126,6 +145,12 @@ export async function signSecurityHandoff(secret: string, userId: number, authVe
   return `${payload}.${await hmac(secret, payload)}`;
 }
 
+/**
+ * Validates a security handoff token and extracts its authentication context.
+ *
+ * @param token - The security handoff token to validate
+ * @returns The user ID, authentication version, and expiration time when valid; `null` otherwise
+ */
 export async function verifySecurityHandoff(secret: string, token: string): Promise<{ userId: number; authVersion: number; expiresAt: number } | null> {
   const parts = token.split(".");
   if (parts.length !== 6 || parts[0] !== "security1") return null;
@@ -137,6 +162,13 @@ export async function verifySecurityHandoff(secret: string, token: string): Prom
   return { userId: Number(userIdStr), authVersion: Number(authVersionStr), expiresAt };
 }
 
+/**
+ * Creates a signed session token containing the user identity, authentication version, and expiration time.
+ *
+ * @param ttlSeconds - The token lifetime in seconds
+ * @param authVersion - The authentication version associated with the session
+ * @returns A signed session token
+ */
 export async function signSession(secret: string, userId: number, ttlSeconds: number, authVersion = 0): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
   const payload = `v3.${userId}.${authVersion}.${exp}`;

@@ -190,8 +190,19 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
     suspend fun updatePreferences(fields: JsonObject) =
         requestVoid("/api/settings/preferences", "PATCH", fields)
 
-    suspend fun mfaStatus(): MfaStatus = request("/api/settings/mfa")
+    /**
+ * Retrieves the current multi-factor authentication status.
+ *
+ * @return The account's multi-factor authentication status.
+ */
+suspend fun mfaStatus(): MfaStatus = request("/api/settings/mfa")
 
+    /**
+     * Reauthenticates the account and stores the resulting fresh-authentication token.
+     *
+     * @param passphrase The account passphrase.
+     * @param code An optional MFA code.
+     */
     suspend fun reauthenticate(passphrase: String, code: String? = null) {
         val result: FreshAuthResponse = request(
             "/api/settings/reauth", "POST",
@@ -204,12 +215,29 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
         freshAuth = result.freshAuth
     }
 
-    suspend fun setupMfa(): MfaSetup = request("/api/settings/mfa/setup", "POST")
+    /**
+ * Starts multi-factor authentication setup.
+ *
+ * @return The MFA setup details.
+ */
+suspend fun setupMfa(): MfaSetup = request("/api/settings/mfa/setup", "POST")
 
+    /**
+     * Verifies an MFA code and returns replacement MFA codes.
+     *
+     * @param code The MFA verification code.
+     * @return The generated MFA codes.
+     */
     suspend fun verifyMfa(code: String): MfaCodes = request(
         "/api/settings/mfa/verify", "POST", buildJsonObject { put("code", code) },
     )
 
+    /**
+     * Regenerates the account's MFA backup codes.
+     *
+     * @param code The six-digit authenticator code used to authorize the request.
+     * @return The newly generated MFA backup codes.
+     */
     suspend fun regenerateMfaBackupCodes(code: String): MfaCodes {
         require(code.length == 6 && code.all(Char::isDigit)) { "A 6-digit authenticator code is required" }
         return request(
@@ -217,6 +245,11 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
         )
     }
 
+    /**
+     * Disables multi-factor authentication using a verification code.
+     *
+     * @param code The verification code required to disable multi-factor authentication.
+     */
     suspend fun disableMfa(code: String) = requestVoid(
         "/api/settings/mfa/disable", "POST", buildJsonObject { put("code", code) },
     )
@@ -259,8 +292,18 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
     suspend fun renamePasskey(id: String, name: String) =
         requestVoid("/api/settings/passkeys/$id", "PATCH", buildJsonObject { put("deviceName", name) })
 
-    suspend fun deletePasskey(id: String) = requestVoid("/api/settings/passkeys/$id", "DELETE")
+    /**
+ * Deletes a passkey from the account.
+ *
+ * @param id The identifier of the passkey to delete.
+ */
+suspend fun deletePasskey(id: String) = requestVoid("/api/settings/passkeys/$id", "DELETE")
 
+    /**
+     * Retrieves the data required to initiate passkey registration.
+     *
+     * @return The passkey challenge payload, token, and relying-party identifier.
+     */
     suspend fun passkeyChallenge(): PasskeyChallenge {
         val raw = perform(
             "/api/settings/passkeys/challenge", "POST", null,
@@ -282,6 +325,14 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
         )
     }
 
+    /**
+     * Registers a passkey credential response.
+     *
+     * @param responseJson The credential response encoded as a JSON string.
+     * @param deviceName The optional display name for the passkey.
+     * @param challengeToken The token associated with the passkey challenge.
+     * @throws IllegalArgumentException If `responseJson` is not valid JSON.
+     */
     suspend fun registerPasskey(responseJson: String, deviceName: String?, challengeToken: String) {
         val response = try {
             json.parseToJsonElement(responseJson)
@@ -299,12 +350,21 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
         )
     }
 
+    /**
+     * Creates a security handoff for the authenticated account.
+     *
+     * @return The security handoff details.
+     */
     suspend fun securityHandoff(): SecurityHandoff = request(
         "/api/settings/security-handoff", "POST", authMode = true,
     )
 
     // API keys (addy.io-compatible /api/v1). Creation/revocation is
-    // fresh-auth gated; the created token is returned exactly once.
+    /**
+ * Retrieves the API keys for the account.
+ *
+ * @return The account's API keys.
+ */
     suspend fun apiKeys(): List<ApiKey> = request("/api/settings/api-keys")
 
     suspend fun createApiKey(name: String): ApiKeyCreated =
@@ -379,7 +439,17 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
         put("reply", p.reply)
     }
 
-    // MARK: Core request plumbing
+    /**
+     * Executes an API request and decodes the response into the requested type.
+     *
+     * @param path The API endpoint path.
+     * @param method The HTTP method.
+     * @param body The optional JSON request body.
+     * @param authMode Whether to include token authentication mode headers.
+     * @param authed Whether the request requires bearer authentication.
+     * @return The decoded response value.
+     * @throws ApiException.Decoding If the response cannot be decoded.
+     */
 
     private suspend inline fun <reified T> request(
         path: String,
@@ -405,6 +475,19 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
         perform(path, method, body, authMode = authMode, authed = true)
     }
 
+    /**
+     * Executes an HTTP request and returns its response body.
+     *
+     * @param path The API path.
+     * @param method The HTTP method.
+     * @param body The optional JSON request body.
+     * @param authMode Whether to include token authentication mode.
+     * @param authed Whether the request requires bearer authentication.
+     * @return The response body as text.
+     * @throws ApiException.Unauthorized If bearer authentication is required but unavailable or rejected.
+     * @throws ApiException.Transport If the request fails due to an I/O error.
+     * @throws ApiException.Server If the server returns an error response.
+     */
     private suspend fun perform(
         path: String,
         method: String,

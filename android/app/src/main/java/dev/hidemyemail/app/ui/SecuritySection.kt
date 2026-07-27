@@ -57,22 +57,58 @@ import kotlinx.coroutines.CancellationException
 import java.text.DateFormat
 import java.util.Date
 
-internal fun shouldRequestReauthentication(error: Throwable, retryAvailable: Boolean) =
+/**
+     * Determines whether an operation should be retried after reauthentication.
+     *
+     * @param error The error that caused the operation to fail.
+     * @param retryAvailable Whether retrying the operation is allowed.
+     * @return `true` if retrying is allowed and the error indicates that fresh authentication is required, `false` otherwise.
+     */
+    internal fun shouldRequestReauthentication(error: Throwable, retryAvailable: Boolean) =
     retryAvailable && error is ApiException.Server && error.message == "Fresh authentication required"
 
 internal class SecurityOperationGate {
     private var running = false
-    @Synchronized fun tryAcquire(): Boolean = if (running) false else true.also { running = true }
-    @Synchronized fun release() { running = false }
+    /**
+ * Attempts to acquire the operation gate.
+ *
+ * @return `true` if the gate was acquired, `false` if an operation is already running.
+ */
+@Synchronized fun tryAcquire(): Boolean = if (running) false else true.also { running = true }
+    /**
+ * Releases the gate for another security operation.
+ */
+@Synchronized fun release() { running = false }
 }
 
+/**
+ * Determines whether the captured retry is still the pending retry.
+ *
+ * @param current The currently pending retry, if any.
+ * @param captured The retry to compare with the current pending retry.
+ * @return `true` if both references identify the same retry, `false` otherwise.
+ */
 internal fun isCurrentPendingRetry(current: (() -> Unit)?, captured: () -> Unit) = current === captured
 
+/**
+ * Selects the continuation to invoke after reauthentication.
+ *
+ * @param retry The default continuation.
+ * @param replacement An optional continuation that takes precedence.
+ * @return The replacement continuation, or the default retry continuation when no replacement is provided.
+ */
 internal fun reauthenticationContinuation(
     retry: () -> Unit,
     replacement: (() -> Unit)?,
 ) = replacement ?: retry
 
+/**
+ * Handles unauthorized errors and extracts the message from other exceptions.
+ *
+ * @param error The exception to process.
+ * @param onUnauthorized The callback invoked when the error indicates unauthorized access.
+ * @return The exception message, or `null` for unauthorized errors.
+ */
 internal fun securityErrorMessage(error: Exception, onUnauthorized: () -> Unit): String? {
     if (error is ApiException.Unauthorized) {
         onUnauthorized()
@@ -81,6 +117,11 @@ internal fun securityErrorMessage(error: Exception, onUnauthorized: () -> Unit):
     return error.message
 }
 
+/**
+ * Displays account security controls for two-factor authentication and passkeys.
+ *
+ * @param app The application view model used to load security data and perform account operations.
+ */
 @Composable
 fun SecuritySection(app: AppViewModel) {
     val scope = rememberCoroutineScope()
@@ -306,6 +347,14 @@ fun SecuritySection(app: AppViewModel) {
     }
 }
 
+/**
+ * Displays the MFA setup QR code and manual key, and verifies a six-digit authenticator code.
+ *
+ * @param setup MFA setup data containing the QR-code URI and manual secret.
+ * @param error An error message to display, if available.
+ * @param onDismiss Called when the dialog is dismissed.
+ * @param onVerify Called with the entered six-digit verification code.
+ */
 @Composable
 private fun MfaSetupDialog(setup: MfaSetup, error: String?, onDismiss: () -> Unit, onVerify: (String) -> Unit) {
     val clipboard = LocalClipboardManager.current
@@ -324,6 +373,12 @@ private fun MfaSetupDialog(setup: MfaSetup, error: String?, onDismiss: () -> Uni
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
+/**
+ * Displays backup codes and allows the user to copy or dismiss them.
+ *
+ * @param codes The backup codes to display.
+ * @param onDismiss Called when the dialog is dismissed.
+ */
 @Composable
 private fun BackupCodesDialog(codes: List<String>, onDismiss: () -> Unit) {
     val clipboard = LocalClipboardManager.current
@@ -334,6 +389,14 @@ private fun BackupCodesDialog(codes: List<String>, onDismiss: () -> Unit) {
         dismissButton = { TextButton(onClick = { clipboard.setText(AnnotatedString(codes.joinToString("\n"))) }) { Text("Copy codes") } })
 }
 
+/**
+ * Displays a dialog for entering the passphrase and, when required, an MFA code.
+ *
+ * @param mfa Whether an authenticator or backup code is required.
+ * @param error An error message to display, or `null` if no error is present.
+ * @param onDismiss Called when the dialog is dismissed.
+ * @param onSubmit Called with the entered passphrase and optional MFA code.
+ */
 @Composable
 private fun ReauthDialog(mfa: Boolean, error: String?, onDismiss: () -> Unit, onSubmit: (String, String?) -> Unit) {
     var passphrase by remember { mutableStateOf("") }; var code by remember { mutableStateOf("") }
@@ -344,15 +407,47 @@ private fun ReauthDialog(mfa: Boolean, error: String?, onDismiss: () -> Unit, on
         dismissButton = { TextButton(onClick = { passphrase = ""; code = ""; onDismiss() }) { Text("Cancel") } })
 }
 
-@Composable private fun CodeDialog(title: String, value: String, onValue: (String) -> Unit, totpOnly: Boolean, onDismiss: () -> Unit, onSubmit: () -> Unit) =
+/**
+     * Displays a dialog for entering an authenticator or backup code.
+     *
+     * @param title The dialog title.
+     * @param value The current code value.
+     * @param onValue Called when the code value changes.
+     * @param totpOnly Whether to restrict input to a six-digit authenticator code.
+     * @param onDismiss Called when the dialog is dismissed.
+     * @param onSubmit Called when the entered code is submitted.
+     */
+    @Composable private fun CodeDialog(title: String, value: String, onValue: (String) -> Unit, totpOnly: Boolean, onDismiss: () -> Unit, onSubmit: () -> Unit) =
     AlertDialog(onDismissRequest = onDismiss, containerColor = Theme.surface2, title = { Text(title, style = Theme.displayStyle(18.sp)) }, text = { OutlinedTextField(value, { onValue(if (totpOnly) it.filter(Char::isDigit).take(6) else it.take(64)) }, label = { Text(if (totpOnly) "6-digit authenticator code" else "Authenticator or backup code") }, singleLine = true) }, confirmButton = { TextButton(enabled = if (totpOnly) value.length == 6 else value.isNotBlank(), onClick = onSubmit) { Text("Continue") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 
-@Composable private fun NameDialog(title: String, value: String, onValue: (String) -> Unit, onDismiss: () -> Unit, onSubmit: () -> Unit) =
+/**
+     * Displays a dialog for entering an optional device name.
+     *
+     * @param title The dialog title.
+     * @param value The current device name.
+     * @param onValue Called when the device name changes.
+     * @param onDismiss Called when the dialog is dismissed.
+     * @param onSubmit Called when the user submits the device name.
+     */
+    @Composable private fun NameDialog(title: String, value: String, onValue: (String) -> Unit, onDismiss: () -> Unit, onSubmit: () -> Unit) =
     AlertDialog(onDismissRequest = onDismiss, containerColor = Theme.surface2, title = { Text(title, style = Theme.displayStyle(18.sp)) }, text = { OutlinedTextField(value, onValue, label = { Text("Device name (optional)") }, singleLine = true) }, confirmButton = { TextButton(onClick = onSubmit) { Text("Continue") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 
-@Composable private fun ConfirmDelete(name: String, onDismiss: () -> Unit, onConfirm: () -> Unit) =
+/**
+     * Displays a confirmation dialog for deleting a passkey.
+     *
+     * @param name The name of the passkey to delete.
+     * @param onDismiss Called when the dialog is dismissed or cancelled.
+     * @param onConfirm Called when deletion is confirmed.
+     */
+    @Composable private fun ConfirmDelete(name: String, onDismiss: () -> Unit, onConfirm: () -> Unit) =
     AlertDialog(onDismissRequest = onDismiss, containerColor = Theme.surface2, title = { Text("Delete Passkey", style = Theme.displayStyle(18.sp)) }, text = { Text("Delete $name? This cannot be undone.") }, confirmButton = { TextButton(onClick = onConfirm) { Text("Delete", color = Theme.red) } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 
+/**
+ * Generates a 512×512 QR code bitmap for the specified value.
+ *
+ * @param value The content to encode in the QR code.
+ * @return A bitmap containing the generated QR code.
+ */
 private fun qrBitmap(value: String): Bitmap {
     val matrix: BitMatrix = MultiFormatWriter().encode(value, BarcodeFormat.QR_CODE, 512, 512)
     val pixels = IntArray(512 * 512) { i -> if (matrix[i % 512, i / 512]) android.graphics.Color.BLACK else android.graphics.Color.WHITE }

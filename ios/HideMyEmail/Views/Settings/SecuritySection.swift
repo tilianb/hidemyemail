@@ -201,6 +201,7 @@ struct SecuritySection: View {
         }.presentationDetents([.medium])
     }
 
+    /// Loads the current multi-factor authentication status and registered passkeys.
     private func load() async {
         guard let client = app.api() else { return }
         guard operationGuard.begin() else { return }
@@ -212,6 +213,10 @@ struct SecuritySection: View {
         } catch { await handleRequestError(error, client: client) }
     }
 
+    /// Starts a guarded sensitive security operation and preserves it for reauthentication if required.
+    /// - Parameters:
+    ///   - operation: The security operation to perform.
+    ///   - fromActionSheet: Whether the operation originated from the MFA action sheet.
     private func startSensitive(_ operation: SecurityOperation, fromActionSheet: Bool = false) async {
         guard operationGuard.begin() else { return }
         defer { operationGuard.end() }
@@ -219,6 +224,7 @@ struct SecuritySection: View {
         await perform(operation)
     }
 
+    /// Handles an operation error by requesting reauthentication when fresh authentication is required or reporting the error to the user.
     private func handle(_ caught: Error, client: APIClient) async {
         if case APIError.server(let status, let message) = caught,
            status == 401, message == "Fresh authentication required", flow.pendingOperation != nil {
@@ -231,6 +237,8 @@ struct SecuritySection: View {
         }
     }
 
+    /// Reauthenticates the account and resumes the pending security operation when possible.
+    /// If the operation requires a new MFA code after reauthentication, presents the MFA code prompt.
     private func reauthenticate() async {
         guard let client = app.api() else { return }
         guard operationGuard.begin() else { return }
@@ -254,6 +262,10 @@ struct SecuritySection: View {
         }
     }
 
+    /// Verifies the MFA code and enables multi-factor authentication.
+    ///
+    /// - Updates the available backup codes and clears the setup state after successful verification. Errors are surfaced through the request error handler.
+    /// - Returns: None.
     private func verifyMFA() async {
         guard let client = app.api() else { return }
         guard operationGuard.begin() else { return }
@@ -266,12 +278,15 @@ struct SecuritySection: View {
         } catch { await handleRequestError(error, client: client) }
     }
 
+    /// Executes a security operation while coordinating its guarded execution.
     private func execute(_ operation: SecurityOperation) async {
         guard operationGuard.begin() else { return }
         defer { operationGuard.end() }
         await perform(operation)
     }
 
+    /// Executes a security operation and updates the corresponding security state on success.
+    /// - Parameter operation: The security operation to perform.
     private func perform(_ operation: SecurityOperation) async {
         guard let client = app.api() else { return }
         do {
@@ -296,10 +311,14 @@ struct SecuritySection: View {
         } catch { await handle(error, client: client) }
     }
 
+    /// Starts passkey registration using the entered device name with surrounding whitespace removed.
     private func addPasskey() async {
         await startSensitive(.addPasskey(deviceName: deviceName.trimmingCharacters(in: .whitespaces)))
     }
 
+    /// Registers a passkey with the specified device name, using the server handoff flow when supported.
+    /// - Parameter name: The name assigned to the registered passkey.
+    /// - Throws: An error if passkey registration or server submission fails, or if the registration challenge is malformed or missing attestation data.
     private func addPasskey(name: String, client: APIClient) async throws {
         guard let origin = try? ServerOrigin(app.serverURLString) else { return }
         if SecurityRegistrationMode.forServer(origin) == .handoff {
@@ -330,6 +349,7 @@ struct SecuritySection: View {
         }
     }
 
+    /// Renames a registered passkey and refreshes the passkey list.
     private func rename(_ passkey: Passkey) async {
         guard let client = app.api(), !renameDraft.isEmpty else { return }
         guard operationGuard.begin() else { return }
@@ -340,6 +360,9 @@ struct SecuritySection: View {
         } catch { await handleRequestError(error, client: client) }
     }
 
+    /// Generates a QR code image for the provided value.
+    /// - Parameter value: The text to encode in the QR code.
+    /// - Returns: A scaled QR code image, or `nil` if the QR code cannot be generated.
     private func qrImage(_ value: String) -> UIImage? {
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(value.utf8)
@@ -347,12 +370,18 @@ struct SecuritySection: View {
         return UIImage(ciImage: output.transformed(by: CGAffineTransform(scaleX: 8, y: 8)))
     }
 
-    private func clearMFASecrets() { setup = nil; backupCodes = []; verifyCode = "" }
+    /// Clears the MFA setup data and verification code.
+private func clearMFASecrets() { setup = nil; backupCodes = []; verifyCode = "" }
+    /// Resets the MFA action input and records that the action sheet was dismissed.
     private func mfaActionDidDismiss() {
         actionCode = ""
         flow.actionSheetDidDismiss()
     }
 
+    /// Handles a security request error by initiating authentication recovery or displaying its localized message.
+    /// - Parameters:
+    ///   - caught: The error produced by the security request.
+    ///   - client: The API client associated with the failed request.
     private func handleRequestError(_ caught: Error, client: APIClient) async {
         if SecurityRequestError.shouldHandleAuthFailure(caught) {
             await app.handleAuthFailure(from: client)

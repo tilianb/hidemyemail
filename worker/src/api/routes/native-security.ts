@@ -9,6 +9,11 @@ import { getRpFromOrigin } from "../../lib/webauthn";
 
 const FRESH_AUTH_TTL = 600;
 
+/**
+ * Creates a router for native-token reauthentication and security handoff.
+ *
+ * @returns A configured Hono router with native security routes.
+ */
 export function nativeSecurityRoutes() {
   const r = new Hono<AppEnv>();
   r.use("/reauth", rateLimitFailures());

@@ -14,6 +14,12 @@ export const isValidDomain = (value: unknown): value is string => {
 };
 const localPart = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 64 && /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+$/.test(value) && !value.startsWith(".") && !value.endsWith(".") && !value.includes("..");
 
+/**
+ * Classifies an HTTP status code as an API error.
+ *
+ * @param status - The HTTP response status code
+ * @returns An API error categorized by the status code
+ */
 function httpError(status: number): ApiError {
   if (status === 401) return new ApiError("auth", "API key was rejected.");
   if (status === 403) return new ApiError("permission", "The API key does not have permission for this action.");
@@ -22,6 +28,13 @@ function httpError(status: number): ApiError {
   return new ApiError("server", "The server could not complete the request.");
 }
 
+/**
+ * Creates an authenticated client for the extension API.
+ *
+ * @param config - Server and API key configuration
+ * @param fetcher - Optional request function used to communicate with the server
+ * @returns An API client with methods for probing credentials, retrieving domains, and creating aliases
+ */
 export function createApi(config: ExtensionConfig, fetcher: Fetcher = fetch) {
   async function request(path: string, init: RequestInit = {}): Promise<unknown> {
     let response: Response;

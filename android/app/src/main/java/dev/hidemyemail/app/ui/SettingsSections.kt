@@ -407,12 +407,9 @@ fun RecoveryCodesSection(app: AppViewModel) {
 }
 
 /**
- * API keys for the addy.io-compatible /api/v1 surface
- * (GET/POST/DELETE /api/settings/api-keys) — the native counterpart of the
- * dashboard Settings page's "API Keys" card. Keys plug this instance into
- * Bitwarden's username generator (forwarder "addy.io") and other addy.io
- * clients. Creation and revocation are fresh-auth gated; the token is shown
- * exactly once.
+ * Manages addy.io-compatible API keys, including loading, creation, revocation, and one-time token display.
+ *
+ * @param app The application view model used to access account API operations.
  */
 @Composable
 fun ApiKeysSection(app: AppViewModel) {
@@ -591,7 +588,9 @@ fun ApiKeysSection(app: AppViewModel) {
     }
 }
 
-/** Account export (GET /api/export) → system share sheet. */
+/**
+ * Exports account data as JSON through the system share sheet.
+ */
 @Composable
 fun ExportSection(app: AppViewModel) {
     val scope = rememberCoroutineScope()

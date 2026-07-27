@@ -7,6 +7,15 @@ import { fromBase64url, toBase64url, getAndroidAssociations, getRegistrationOrig
 import type { RegistrationResponseJSON } from "@simplewebauthn/server";
 import { consumeAuthArtifact, markFailedAttempt, rateLimitFailures } from "../../lib/auth-security";
 
+/**
+ * Creates the account settings router.
+ *
+ * The router provides endpoints for preferences, TOTP MFA, and passkey
+ * management, including rate limiting for MFA disablement and backup-code
+ * regeneration.
+ *
+ * @returns The configured settings router
+ */
 export function settingsRoutes() {
   const r = new Hono<AppEnv>();
 

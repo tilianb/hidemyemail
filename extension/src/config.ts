@@ -14,6 +14,12 @@ export interface ConfigPlatform {
   remove(originPattern: string): Promise<boolean>;
 }
 
+/**
+ * Validates and normalizes a server origin.
+ *
+ * @param input - The server URL, which must use HTTPS or loopback HTTP.
+ * @returns The canonical server origin.
+ */
 export function canonicalizeServerUrl(input: string): string {
   try {
     const url = new URL(input.trim());
@@ -25,11 +31,23 @@ export function canonicalizeServerUrl(input: string): string {
   }
 }
 
+/**
+ * Creates a Chrome host permission pattern for a server origin.
+ *
+ * @param server - The server URL
+ * @returns A host permission pattern covering the server's hostname
+ */
 export function hostPermissionPattern(server: string): string {
   const url = new URL(server);
   return `${url.protocol}//${url.hostname}/*`;
 }
 
+/**
+ * Validates stored configuration values and preserves their canonical form.
+ *
+ * @param value - The stored values to validate
+ * @returns The validated configuration, or `null` if the values are invalid
+ */
 function storedConfig(value: Partial<ExtensionConfig>): ExtensionConfig | null {
   if (typeof value.server !== "string" || typeof value.key !== "string" || !KEY_PATTERN.test(value.key)) return null;
   try {
@@ -39,6 +57,16 @@ function storedConfig(value: Partial<ExtensionConfig>): ExtensionConfig | null {
   }
 }
 
+/**
+ * Configures and persists a server connection after validating its credentials and site access.
+ *
+ * @param platform - Persistence and site-permission operations used for configuration management
+ * @param serverInput - Server origin to configure
+ * @param key - Dedicated API key for the server
+ * @param validate - Validates that the candidate configuration can connect successfully
+ * @returns The configured server origin and API key
+ * @throws ConfigError If the configuration, storage, site permission, or recovery operation fails
+ */
 export async function configure(
   platform: ConfigPlatform,
   serverInput: string,
@@ -125,10 +153,21 @@ export const chromePlatform: ConfigPlatform = {
   async remove(origin) { return chrome.permissions.remove({ origins: [origin] }); },
 };
 
+/**
+ * Configures extension storage to be accessible only from trusted contexts.
+ */
 export async function initializeStorage(): Promise<void> {
   await chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
 }
 
+/**
+ * Initializes storage and loads the persisted extension configuration.
+ *
+ * Invalid stored configuration is cleared before returning an empty configuration.
+ *
+ * @param initialize - Initializes the storage environment before reading configuration.
+ * @returns A success result containing the configuration, or a failure result with a storage error.
+ */
 export async function initializeConfig(
   platform: Pick<ConfigPlatform, "get" | "clear">,
   initialize: () => Promise<void> = initializeStorage,
