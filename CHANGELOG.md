@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Dashboard, iOS, and Android passphrase sign-in can now use an account-bound
+  registered passkey instead of a TOTP or backup code when MFA is enabled.
+
+### Fixed
+
+- The iOS MFA setup screen now renders its QR code correctly in dark mode
+  instead of showing an oversized blank area.
+
 ## [1.3.0] — 2026-07-27
 
 HideMyEmail 1.3.0 brings secure MFA and passkey setup to both mobile apps,

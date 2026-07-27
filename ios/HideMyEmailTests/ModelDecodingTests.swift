@@ -125,6 +125,14 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertNil(mfa.token)
     }
 
+    func testPasskeyChallengeDecodesAllowedCredentials() throws {
+        let challenge = try decoder.decode(PasskeyChallengeOptions.self, from: Data("""
+        {"challenge":"abc","rpId":"app.hidemyemail.dev","passkey_token":"bound","allowCredentials":[{"id":"Y3JlZGVudGlhbA","type":"public-key"}]}
+        """.utf8))
+
+        XCTAssertEqual(challenge.allowCredentials?.map(\.id), ["Y3JlZGVudGlhbA"])
+    }
+
     func testServerConfigDecodes() throws {
         let cfg = try decoder.decode(ServerConfig.self, from: Data("""
         {"main_global_domain": "example.com", "max_subdomains": 5, "max_total_aliases": 10, "alias_quota_buffer_enabled": true, "catch_all_auto_create": true, "inline_actions_default_enabled": false}

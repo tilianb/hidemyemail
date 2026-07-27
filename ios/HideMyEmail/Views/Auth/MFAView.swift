@@ -1,4 +1,5 @@
 import SwiftUI
+import AuthenticationServices
 
 struct MFAView: View {
     @Environment(AppState.self) private var app
@@ -53,6 +54,26 @@ struct MFAView: View {
                 .padding(.horizontal)
                 .disabled(busy || code.isEmpty)
 
+                if app.serverURLString == AppState.defaultServer {
+                    Button(action: usePasskey) {
+                        Label("Use Passkey", systemImage: "person.badge.key").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .padding(.horizontal)
+                    .disabled(busy)
+                } else {
+                    Button(action: webLogin) {
+                        Label("Start a Separate Web Sign-In", systemImage: "safari").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .padding(.horizontal)
+                    .disabled(busy)
+                    Text("This replaces the pending MFA sign-in; it does not complete MFA for the same account.")
+                        .font(.caption2).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
+                }
+
                 Spacer()
             }
             .padding()
@@ -76,6 +97,26 @@ struct MFAView: View {
             } catch {
                 self.error = error.localizedDescription
             }
+        }
+    }
+
+    private func usePasskey() {
+        error = nil; busy = true
+        Task {
+            defer { busy = false }
+            do { try await app.loginWithPasskey() }
+            catch let e as ASAuthorizationError where e.code == .canceled { }
+            catch { self.error = error.localizedDescription }
+        }
+    }
+
+    private func webLogin() {
+        error = nil; busy = true
+        Task {
+            defer { busy = false }
+            do { try await app.loginViaWebSession() }
+            catch let e as ASWebAuthenticationSessionError where e.code == .canceledLogin { }
+            catch { self.error = error.localizedDescription }
         }
     }
 }
