@@ -109,7 +109,52 @@ class AppViewModelSecurityTest {
     }
 
     @Test fun suspendedMfaCannotRestoreAuthAfterSignOut() = runTest {
-        assertSuspendedAuthCannotRestoreAfterSignOut("/api/mfa/complete") { app -> app.completeMfa("123456") }
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val server = MockWebServer().apply {
+            dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    if (request.path == "/api/mfa/complete") {
+                        started.countDown()
+                        release.await(5, TimeUnit.SECONDS)
+                        return MockResponse().setBody("""{"token":"stale-token","fresh_auth":"fresh"}""")
+                    }
+                    return MockResponse().setBody("""{"mfa_required":true,"mfa_token":"challenge"}""")
+                        .setHeader("Content-Type", "application/json")
+                }
+            }
+            start()
+        }
+        val store = Store()
+        val app = newApp(server, store)
+        app.login("secret")
+
+        val auth = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).async {
+            app.completeMfa("123456")
+        }
+        assertEquals(true, started.await(5, TimeUnit.SECONDS))
+        app.signOut()
+        release.countDown()
+        runCatching { auth.await() }
+
+        assertEquals(AuthPhase.LoggedOut, app.phase.value)
+        assertNull(store.token)
+        server.shutdown()
+    }
+
+    @Test fun mfaRequiredWithoutNativeChallengeFailsClosed() = runTest {
+        val server = MockWebServer().apply {
+            enqueue(MockResponse().setBody("""{"mfa_required":true}""")
+                .setHeader("Content-Type", "application/json"))
+            start()
+        }
+        val app = newApp(server, Store())
+
+        val error = runCatching { app.login("secret") }.exceptionOrNull()
+
+        assertEquals(true, error is ApiException.Decoding)
+        assertEquals(AuthPhase.LoggedOut, app.phase.value)
+        server.shutdown()
     }
 
     @Test fun suspendedRecoveryCannotRestoreAuthAfterSignOut() = runTest {
