@@ -327,7 +327,9 @@ describe("native Security browser handoff", () => {
     }, testEnv);
     expect(rejected.status).toBe(400);
 
-    const missing = await createApp().request("/.well-known/assetlinks.json", {}, testEnv);
+    const missing = await createApp().request("/.well-known/assetlinks.json", {}, {
+      ...testEnv, ANDROID_APP_ORIGINS: undefined,
+    });
     expect(missing.status).toBe(404);
     const malformed = await createApp().request("/.well-known/assetlinks.json", {}, {
       ...testEnv, ANDROID_APP_ORIGINS: "malformed",
