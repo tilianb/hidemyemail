@@ -243,7 +243,11 @@ struct SecuritySection: View {
             operationGuard.end()
             if requestNewCode {
                 actionCode = ""
-                disabling = true
+                if case .disableMFA = retry {
+                    disabling = true
+                } else if case .regenerateMFA = retry {
+                    disabling = false
+                }
                 showMFAAction = true
             } else if let retry {
                 await execute(retry)

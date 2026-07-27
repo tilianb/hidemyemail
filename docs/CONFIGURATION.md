@@ -20,7 +20,7 @@ These are deployment-specific, not secrets. Store them in the Cloudflare dashboa
 | Name | Required | Purpose |
 |------|----------|---------|
 | `ENVIRONMENT` | yes | `production`, `preview`, `local`, or `self-hosted`. The Docker host sets `self-hosted` and supplies the Worker's private client-IP header after validating the socket peer. Do not expose a self-hosted Worker without that host boundary. |
-| `BLOCKED_SUBDOMAINS` | no | Comma-separated exact DNS labels that cannot be claimed as new personal subdomains. An absent or whitespace-only value uses `admin,api,www,dev,mail,smtp,imap,pop,pop3,webmail,autoconfig,autodiscover`; a nonblank value replaces that default list. Entries are trimmed and lowercased; requests are likewise trimmed and lowercased before exact matching, so `api` does not block `myapi` or `api2`. Each nonempty component must be a single 1–63 character ASCII DNS label containing only letters, digits, and interior hyphens, and starting and ending alphanumeric. Empty components, dots, wildcards, regex/glob syntax, underscores, embedded spaces, edge hyphens, and overlong labels make the configuration malformed. Malformed nonempty configuration fails closed with “Subdomain is not available” for every new claim. This affects only new claims: existing subdomains remain visible, editable, and deletable. Set this plain variable in the Cloudflare dashboard / Wrangler config or as `BLOCKED_SUBDOMAINS` in Docker. |
+| `BLOCKED_SUBDOMAINS` | no | Comma-separated exact DNS labels that cannot be claimed as new personal subdomains. An absent or whitespace-only value uses `admin,api,www,dev,mail,smtp,imap,pop,pop3,webmail,autoconfig,autodiscover`; a nonblank value replaces that default list. Entries are trimmed and lowercased; requests are likewise trimmed and lowercased before exact matching, so `api` does not block `myapi` or `api2`. Each nonempty component must be a single 1–63 character ASCII DNS label containing only letters, digits, and interior hyphens, and starting and ending alphanumeric. Empty components, dots, wildcards, regex/glob syntax, underscores, embedded spaces, edge hyphens, and overlong labels make the configuration malformed. Malformed nonempty configuration fails closed: new claims return a server configuration error until the value is corrected, while the raw value is never logged. Valid blocked labels return “Subdomain is not available.” This affects only new claims: existing subdomains remain visible, editable, and deletable. Set this plain variable in the Cloudflare dashboard / Wrangler config or as `BLOCKED_SUBDOMAINS` in Docker. |
 | `SES_REGION` | yes for mail | AWS SES/S3/SNS region, for example `ap-southeast-2`. |
 | `S3_INBOUND_BUCKET` | yes for inbound | Bucket where SES stores raw MIME. |
 | `SNS_INBOUND_TOPIC_ARN` | yes for inbound SNS | Exact SNS topic for SES receipt notifications. |
@@ -94,8 +94,14 @@ the original encryption key from your secure backup:
 
 ```bash
 cd worker
-npx wrangler d1 export DB --remote --output ../hidemyemail-v1.2.1-backup.sql
+umask 077
+backup_dir="$HOME/hidemyemail-backups"
+mkdir -p "$backup_dir"
+npx wrangler d1 export DB --remote --output "$backup_dir/hidemyemail-v1.2.1-backup.sql"
 ```
+
+Keep this protected backup directory outside the repository and outside version
+control.
 
 Cloudflare secrets cannot be read back. If the original
 `DESTINATION_ENCRYPTION_KEY` is not available from a secure backup, stop and

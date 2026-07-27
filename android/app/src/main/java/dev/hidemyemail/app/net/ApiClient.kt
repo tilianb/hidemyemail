@@ -266,12 +266,13 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
             "/api/settings/passkeys/challenge", "POST", null,
             authMode = true, authed = true,
         )
-        val objectValue = json.parseToJsonElement(raw) as? JsonObject
-            ?: throw ApiException.Decoding()
-        val challengeToken = (objectValue["challengeToken"] as? JsonPrimitive)?.content
-            ?: throw ApiException.Decoding()
-        val rpId = try {
-            objectValue.getValue("rp").jsonObject.getValue("id").jsonPrimitive.content
+        val (objectValue, challengeToken, rpId) = try {
+            val objectValue = json.parseToJsonElement(raw) as? JsonObject
+                ?: throw ApiException.Decoding()
+            val challengeToken = (objectValue["challengeToken"] as? JsonPrimitive)?.content
+                ?: throw ApiException.Decoding()
+            val rpId = objectValue.getValue("rp").jsonObject.getValue("id").jsonPrimitive.content
+            Triple(objectValue, challengeToken, rpId)
         } catch (_: Exception) {
             throw ApiException.Decoding()
         }
