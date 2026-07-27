@@ -128,8 +128,10 @@ test("port change retains shared host permission", async () => {
 });
 
 test.each([false, "throw"])("failed old permission removal (%s) restores old config and revokes new grant", async (failure) => {
-  const p = platform({ remove: vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true) });
-  if (failure === "throw") p.remove.mockRejectedValueOnce(new Error("private detail")).mockResolvedValueOnce(true);
+  const remove = failure === "throw"
+    ? vi.fn().mockRejectedValueOnce(new Error("private detail")).mockResolvedValueOnce(true)
+    : vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+  const p = platform({ remove });
   await expect(configure(p, "https://new.example", "hme_new", async () => undefined)).rejects.toThrow("previous site access");
   expect(p.remove.mock.calls).toEqual([["https://old.example/*"], ["https://new.example/*"]]);
   expect(p.set.mock.calls).toEqual([[{ server: "https://new.example", key: "hme_new" }], [{ server: "https://old.example:8443", key: "hme_old" }]]);
