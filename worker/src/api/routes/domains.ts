@@ -11,15 +11,18 @@ type ResolvedDefaultDestination = {
 };
 
 const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const DEFAULT_BLOCKED_SUBDOMAINS = new Set([
+  "admin", "api", "www", "dev", "mail", "smtp", "imap", "pop", "pop3", "webmail", "autoconfig", "autodiscover",
+]);
 
-let cachedBlockedSubdomainsRaw: unknown;
-let cachedBlockedSubdomains: Set<string> | null = new Set();
+let cachedBlockedSubdomainsRaw: unknown = Symbol("unset");
+let cachedBlockedSubdomains: Set<string> | null = DEFAULT_BLOCKED_SUBDOMAINS;
 
 function blockedSubdomainLabels(value: unknown): Set<string> | null {
   if (value === cachedBlockedSubdomainsRaw) return cachedBlockedSubdomains;
   cachedBlockedSubdomainsRaw = value;
   if (value === undefined || (typeof value === "string" && !value.trim())) {
-    cachedBlockedSubdomains = new Set();
+    cachedBlockedSubdomains = DEFAULT_BLOCKED_SUBDOMAINS;
     return cachedBlockedSubdomains;
   }
   if (typeof value !== "string") {
@@ -115,7 +118,6 @@ export function domainRoutes() {
 
     const prefix = domain.trim().toLowerCase();
     if (!DNS_LABEL.test(prefix)) return c.json({ error: "Invalid prefix" }, 400);
-    if (prefix === "dev") return c.json({ error: "The 'dev' subdomain is reserved" }, 400);
 
     const blockedLabels = blockedSubdomainLabels(c.env.BLOCKED_SUBDOMAINS);
     if (!blockedLabels || blockedLabels.has(prefix)) {

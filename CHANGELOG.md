@@ -29,7 +29,9 @@ encryption, deployment, and release safety for every installation.
   Chrome's host match permission is host-scoped.
 - Operators can optionally reserve exact personal-subdomain labels with
   `BLOCKED_SUBDOMAINS`. Reservations affect only new claims; existing
-  subdomains continue to work.
+  subdomains continue to work. Blank or unset configuration reserves common
+  infrastructure labels including `admin`, `api`, `www`, and `dev`; a nonblank
+  operator list replaces those defaults.
 
 ### Security
 
@@ -93,9 +95,10 @@ encryption, deployment, and release safety for every installation.
   upgrade. Stay on v1.2.1: v1.3 does not migrate unsupported configurations.
 - `npm run deploy` now applies remote D1 migrations before Worker publication
   and uses Wrangler's normal retry behavior.
-- `BLOCKED_SUBDOMAINS` is optional. When set, use exact comma-separated labels;
-  it affects only new personal-subdomain claims, and malformed values fail
-  closed.
+- `BLOCKED_SUBDOMAINS` is optional. Blank or unset values reserve common
+  infrastructure labels by default. A nonblank exact comma-separated list
+  replaces those defaults, affects only new personal-subdomain claims, and
+  fails closed when malformed.
 - Native Android passkey enrollment requires `ANDROID_APP_ORIGINS` containing
   the release signing-certificate APK origin. Verify the generated
   `/.well-known/assetlinks.json` response before release. Self-hosted app

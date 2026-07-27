@@ -199,19 +199,28 @@ test.each([
   expect((await DB().prepare("SELECT COUNT(*) AS count FROM identifier_reservations").first<{ count: number }>())!.count).toBe(0);
 });
 
-test("blocked labels use exact matching and blank config adds no restrictions", async () => {
+test("blank config blocks default infrastructure labels with exact matching", async () => {
   await DB().prepare("UPDATE settings SET value = 'hidemyemail.dev' WHERE key = 'main_global_domain'").run();
   await DB().prepare(
     "INSERT INTO domains (user_id, is_global, domain, allow_subdomain_aliases, active, verified_at, created_at) VALUES (1, 1, 'hidemyemail.dev', 1, 1, 123, ?)"
   ).bind(Date.now()).run();
   const app = createApp();
 
-  for (const [domain, blockedConfig] of [["myapi", "api"], ["api2", "api"], ["other", "   "]] as const) {
+  for (const domain of ["admin", "api", "www", "dev", "mail", "smtp", "imap", "pop", "pop3", "webmail", "autoconfig", "autodiscover"]) {
     const res = await app.request("/api/domains", {
       method: "POST",
       headers: h(),
       body: JSON.stringify({ domain, default_destination: "global" }),
-    }, { ...testEnv, BLOCKED_SUBDOMAINS: blockedConfig });
+    }, { ...testEnv, BLOCKED_SUBDOMAINS: domain === "admin" ? undefined : "   " });
+    expect(res.status).toBe(409);
+  }
+
+  for (const domain of ["myapi", "api2", "other"]) {
+    const res = await app.request("/api/domains", {
+      method: "POST",
+      headers: h(),
+      body: JSON.stringify({ domain, default_destination: "global" }),
+    }, { ...testEnv, BLOCKED_SUBDOMAINS: "   " });
     expect(res.status).toBe(200);
   }
 });
@@ -233,6 +242,22 @@ test("blocked-label cache follows binding changes across valid and malformed val
   expect((await create("broken", "api,,admin")).status).toBe(409);
   expect((await create("fixed", "admin")).status).toBe(200);
   expect((await create("runtime", 123)).status).toBe(409);
+});
+
+test("nonblank config replaces the default blocked labels", async () => {
+  await DB().prepare("UPDATE settings SET value = 'hidemyemail.dev' WHERE key = 'main_global_domain'").run();
+  await DB().prepare(
+    "INSERT INTO domains (user_id, is_global, domain, allow_subdomain_aliases, active, verified_at, created_at) VALUES (1, 1, 'hidemyemail.dev', 1, 1, 123, ?)"
+  ).bind(Date.now()).run();
+  const app = createApp();
+  const create = (domain: string) => app.request("/api/domains", {
+    method: "POST",
+    headers: h(),
+    body: JSON.stringify({ domain, default_destination: "global" }),
+  }, { ...testEnv, BLOCKED_SUBDOMAINS: "reserved" });
+
+  expect((await create("reserved")).status).toBe(409);
+  expect((await create("dev")).status).toBe(200);
 });
 
 test.each(["api.name", "api_name", "api name", "-api", "api-"])("invalid requested label %j is not silently cleaned", async (domain) => {
