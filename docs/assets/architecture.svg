@@ -81,15 +81,15 @@
   </g>
 
   <g fill="none" stroke="#5eead4" stroke-width="2" marker-end="url(#mailArrow)">
-    <path d="M184 228H201"/>
-    <path d="M368 228H385"/>
-    <path d="M552 228H569"/>
-    <path d="M760 228H777"/>
-    <path d="M944 228H961"/>
+    <path d="M184 228H226"/>
+    <path d="M368 228H410"/>
+    <path d="M552 228H594"/>
+    <path d="M760 228H802"/>
+    <path d="M944 228H986"/>
   </g>
   <text class="edge-label" x="573" y="216">SNS</text>
 
-  <path d="M1072 276C1072 339 297 339 297 306" fill="none" stroke="#315f69" stroke-width="1.6" stroke-dasharray="6 6" marker-end="url(#mailArrow)"/>
+  <path d="M1072 276C1072 339 297 339 297 278" fill="none" stroke="#315f69" stroke-width="1.6" stroke-dasharray="6 6" marker-end="url(#mailArrow)"/>
   <rect x="505" y="313" width="358" height="25" rx="12" fill="#081421"/>
   <text class="edge-label" x="684" y="329">replies return through the reverse alias</text>
 
