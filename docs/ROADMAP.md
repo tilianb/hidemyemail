@@ -6,43 +6,42 @@ removed when shipped; see CHANGELOG.md for what already landed.
 
 ## Recently shipped
 
-- [x] **Push notifications — iOS APNs + Android FCM.** Worker dispatch routes
-  per `push_devices.platform` (APNs for iOS, FCM HTTP v1 for Android); enable
-  with the platform credentials (`APNS_*`, or `FCM_SERVICE_ACCOUNT` +
-  `google-services.json`). Blocked / paused-destination on by default; forward /
-  reply opt-in.
+- [x] **v1.2.1 security and reliability hardening.** Added durable SNS/SES
+  delivery claims, account-wide recovery revocation, canonical HTTPS-bound
+  native credentials, Android Keystore token protection, trusted Docker proxy
+  routing, and transactional pre-listen Docker migrations.
+
+---
+
+## v1.3.0 — Secure foundations + aliases on demand
+
+- [ ] **Fail closed when destination encryption is unavailable** _(security)_.
+  Reject startup or destination operations when `DESTINATION_ENCRYPTION_KEY` is
+  absent, empty, malformed, or not exactly 32 bytes; never fall back to storing
+  plaintext email or a plaintext lookup value. Preserve read compatibility for
+  intentionally migrated legacy rows only when a valid key is configured.
+- [ ] **Migration-safe manual production deploys** _(deployment)_. Make the
+  supported production command apply D1 migrations before publishing, align
+  setup/deploy docs on that command, and document safe retry behavior after a
+  migration or deploy failure.
+- [ ] **Finish Docker AASA routing parity** _(security / self-hosting)_. Route
+  `/.well-known/apple-app-site-association` through the Worker instead of the
+  dashboard SPA and add configured/unconfigured integration checks.
+- [ ] **Gate releases on versions and artifacts** _(release engineering)_. Check
+  that the tag matches every product version; publish the GitHub release only
+  after APK, TestFlight, and container jobs succeed; use curated release notes.
+- [ ] **Chromium alias extension** _(product)_. Ship a minimal Manifest V3 popup
+  that uses a dedicated API key to generate and copy an alias. No content
+  scripts, form injection, autofill, analytics, or broad permanent host access.
+- [ ] **Stretch: operator-defined blocked subdomains** _(security /
+  self-hosting)_. Support a strict comma-separated list of exact labels only;
+  reject malformed configuration and block before DNS, quota, or reservation
+  work. Cut this item before delaying the release.
 
 ---
 
 ## P1 — Now (highest leverage)
 
-- [ ] **SNS delivery idempotency** _(security / reliability)_. Persist and
-  atomically deduplicate SNS `MessageId` values before processing inbound mail,
-  bounces, or complaints. Duplicate delivery must not forward a message twice,
-  increment counters twice, or let one transient bounce reach the destination
-  suppression threshold. Add replay tests for both SNS endpoints and define a
-  bounded retention period for deduplication records.
-- [ ] **Fail closed when destination encryption is unavailable** _(security)_.
-  Reject startup or destination operations when `DESTINATION_ENCRYPTION_KEY` is
-  absent, empty, malformed, or not exactly 32 bytes; never fall back to storing
-  plaintext email or a plaintext lookup value. Preserve read compatibility for
-  intentionally migrated legacy rows without allowing new plaintext writes.
-- [ ] **Revoke existing sessions during account recovery** _(security)_. Add a
-  per-user session version or revocation timestamp to signed sessions and fresh-
-  auth tokens. Both email-token and username/recovery-code resets must invalidate
-  every previously issued browser and native bearer token before issuing the new
-  recovery session.
-- [ ] **Migration-safe manual production deploys** _(deployment)_. Ensure the
-  supported manual deploy command applies D1 migrations before publishing code,
-  and update README/setup/deploy instructions to use that command. Keep the
-  Cloudflare automatic-build path aligned and document recovery behavior when a
-  migration or deploy fails halfway through.
-- [ ] **Fix Docker authentication and platform routing parity** _(security /
-  self-hosting)_. Forward `APP_ORIGIN` into Miniflare so native passkeys use the
-  self-hosted relying party; route `/.well-known/apple-app-site-association`
-  through the Worker; and derive rate-limit IPs from a deliberately configured,
-  trusted proxy path instead of putting every Docker client in the shared
-  `unknown` bucket. Add focused Docker integration checks for all three.
 - [ ] Request a listing in Bitwarden's forwarder docs now that the
   addy.io-compatible API surface has shipped (see docs/API.md).
 - [ ] **Hosted push relay for self-hosters** _(push / self-hosting)_. Let
@@ -106,33 +105,6 @@ order (the abstraction is the enabler; later items get cheaper once it lands):
 
 ## P2 — Next
 
-- [ ] **Require transport-safe native server URLs** _(security / native apps)_.
-  Restrict iOS and Android server configuration to HTTPS for non-development
-  use, reject arbitrary URL schemes, and make any explicit local-development
-  HTTP exception narrow and visibly unsafe. Bearer and fresh-auth credentials
-  must never be sent over accidental cleartext transport.
-- [ ] **Harden Android bearer-token storage** _(security / Android)_. Store the
-  seven-day session token with Android Keystore-backed protection rather than
-  ordinary plaintext `SharedPreferences`, while preserving backup exclusion,
-  logout deletion, and upgrade behavior for existing installs.
-- [ ] **Gate releases on versions and artifacts** _(release engineering)_. Check
-  that the tag matches Worker, dashboard, Android, and iOS versions before
-  publishing; create the public GitHub release only after APK, TestFlight, and
-  container workflows succeed; and publish the curated release notes required
-  by the release policy instead of leaving generated notes in place.
-- [ ] **Make Docker migrations interruption-safe** _(reliability /
-  self-hosting)_. Apply each migration and its tracking row atomically where the
-  runtime permits, or make recovery from a partially applied migration explicit
-  and tested so a container restart cannot become stuck on duplicate DDL.
-- [ ] **Operator-defined blocked subdomains** _(security / self-hosting)_. Add
-  an environment variable containing a comma-separated denylist of subdomain
-  names or patterns that users may not claim (for example reserved service,
-  brand, and infrastructure names). Normalize entries and requested names
-  before matching, validate malformed patterns at startup, and apply the check
-  before creating an ownership reservation.
-- [ ] **Browser extension** (or interim bookmarklet) _(product)_. Generate an
-  alias in signup forms without opening the dashboard. The daily-driver feature
-  of SimpleLogin/addy.
 - [ ] **In-dashboard "setup doctor"** _(self-hosting)_. An admin-panel health
   check that reports which secrets, DNS records, and AWS resources are missing
   or misconfigured, so onboarding is guided rather than doc-driven.
