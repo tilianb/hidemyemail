@@ -3,7 +3,7 @@ import Observation
 
 enum AuthPhase: Equatable {
     case loggedOut
-    case awaitingMFA(token: String?)
+    case awaitingMFA(token: String)
     case loggedIn
 }
 
@@ -114,7 +114,10 @@ final class AppState {
         let res = try await client.login(password: password)
         try requireCurrent(snapshot, client: client)
         if res.mfaRequired == true {
-            phase = .awaitingMFA(token: res.mfaToken)
+            guard let token = res.mfaToken, !token.isEmpty else {
+                throw APIError.server(status: -1, message: "Server returned an invalid MFA challenge")
+            }
+            phase = .awaitingMFA(token: token)
             return
         }
         try await finishLogin(token: res.token, freshAuth: res.freshAuth, snapshot: snapshot, client: client)
@@ -147,15 +150,27 @@ final class AppState {
         let snapshot = binding.snapshot()
         let client = client ?? makeClient(baseURL, nil)
         self.client = client
+        let mfaToken: String?
+        if case .awaitingMFA(let token) = phase { mfaToken = token } else { mfaToken = nil }
 
-        let opts = try await client.passkeyChallenge()
+        let opts = try await client.passkeyChallenge(mfaToken: mfaToken)
         try requireCurrent(snapshot)
         guard let challengeData = Data(base64urlEncoded: opts.challenge) else {
             throw APIError.server(status: -1, message: "Malformed challenge")
         }
+        let allowedCredentialIDs = try opts.allowCredentials?.map { credential in
+            guard let id = Data(base64urlEncoded: credential.id) else {
+                throw APIError.server(status: -1, message: "Malformed passkey credential")
+            }
+            return id
+        }
         let rp = opts.rpId ?? baseURL.host ?? "app.hidemyemail.dev"
+        try NativePasskey.validate(origin: ServerOrigin(snapshot.origin), rpID: rp)
 
-        let assertion = try await PasskeyAuthenticator().assert(relyingParty: rp, challenge: challengeData)
+        let assertion = try await PasskeyAuthenticator().assert(
+            relyingParty: rp, challenge: challengeData,
+            allowedCredentialIDs: allowedCredentialIDs
+        )
         try requireCurrent(snapshot)
 
         var response: [String: Any] = [
@@ -179,8 +194,9 @@ final class AppState {
     func completeMFA(code: String) async throws {
         let snapshot = binding.snapshot()
         guard let client else { throw APIError.notConfigured }
-        let mfaToken: String?
-        if case .awaitingMFA(let t) = phase { mfaToken = t } else { mfaToken = nil }
+        guard case .awaitingMFA(let mfaToken) = phase else {
+            throw APIError.server(status: -1, message: "No pending MFA challenge")
+        }
         let res = try await client.completeMFA(code: code, mfaToken: mfaToken)
         try await finishLogin(token: res.token, freshAuth: res.freshAuth, snapshot: snapshot, client: client)
     }

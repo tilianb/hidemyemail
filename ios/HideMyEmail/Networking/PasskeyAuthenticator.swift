@@ -25,10 +25,16 @@ final class PasskeyAuthenticator: NSObject {
     private var controller: ASAuthorizationController?
     private var lifecycle = PasskeyCeremonyLifecycle()
 
-    func assert(relyingParty: String, challenge: Data) async throws -> ASAuthorizationPlatformPublicKeyCredentialAssertion {
+    func assert(relyingParty: String, challenge: Data,
+                allowedCredentialIDs: [Data]? = nil) async throws -> ASAuthorizationPlatformPublicKeyCredentialAssertion {
         guard lifecycle.begin(.assertion) else { throw APIError.server(status: -1, message: "Passkey ceremony already in progress") }
         let provider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: relyingParty)
         let request = provider.createCredentialAssertionRequest(challenge: challenge)
+        if let allowedCredentialIDs, !allowedCredentialIDs.isEmpty {
+            request.allowedCredentials = allowedCredentialIDs.map {
+                ASAuthorizationPlatformPublicKeyCredentialDescriptor(credentialID: $0)
+            }
+        }
         let controller = ASAuthorizationController(authorizationRequests: [request])
         self.controller = controller
         controller.delegate = self
@@ -99,7 +105,7 @@ enum SecurityRegistrationMode: Equatable {
     }
 }
 
-enum NativePasskeyRegistration {
+enum NativePasskey {
     static func validate(origin: ServerOrigin, rpID: String) throws {
         guard origin.string == "https://app.hidemyemail.dev",
               rpID == "app.hidemyemail.dev" else {
@@ -107,6 +113,8 @@ enum NativePasskeyRegistration {
         }
     }
 }
+
+typealias NativePasskeyRegistration = NativePasskey
 
 enum PasskeyRegistrationResponse {
     static func make(credentialID: Data, clientDataJSON: Data, attestationObject: Data,

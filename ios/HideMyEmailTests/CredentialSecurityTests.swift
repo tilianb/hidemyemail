@@ -163,6 +163,21 @@ final class CredentialSecurityTests: XCTestCase {
     }
 
     @MainActor
+    func testMFARequiredWithoutNativeChallengeFailsClosed() async {
+        URLStub.handler = { request in
+            Self.response(request, #"{"mfa_required":true}"#)
+        }
+        let app = state(token: { _ in nil }, delete: {})
+
+        do {
+            try await app.login(password: "secret")
+            XCTFail("Expected malformed MFA response to fail")
+        } catch {
+            XCTAssertEqual(app.phase, .loggedOut)
+        }
+    }
+
+    @MainActor
     func testPendingRecoveryCannotAuthenticateReplacementAfterSameOriginSignOutAndRelogin() async throws {
         var storedToken: String?
         var savedTokens: [String] = []

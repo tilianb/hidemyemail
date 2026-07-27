@@ -269,12 +269,15 @@ struct ServerConfig: Decodable {
 // the challenge (base64url), the relying-party id, and the signed challenge
 // token the native flow echoes back on verify (since we hold no cookie).
 struct PasskeyChallengeOptions: Decodable {
+    struct Credential: Decodable { let id: String }
+
     let challenge: String
     let rpId: String?
     let passkeyToken: String?
+    let allowCredentials: [Credential]?
 
     enum CodingKeys: String, CodingKey {
-        case challenge, rpId
+        case challenge, rpId, allowCredentials
         case passkeyToken = "passkey_token"
     }
 }

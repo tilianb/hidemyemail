@@ -163,6 +163,12 @@ data class PasskeyChallenge(
     val rpId: String,
 )
 
+data class PasskeyAuthenticationChallenge(
+    val requestOptionsJson: String,
+    val passkeyToken: String,
+    val rpId: String,
+)
+
 @Serializable
 data class SecurityHandoff(val url: String)
 

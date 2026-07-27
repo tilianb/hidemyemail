@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { env } from "cloudflare:test";
-import { signPasskeyAuthChallenge, updatePasskeySignCount, verifyPasskeyAuthChallenge, signPasskeyRegChallenge, verifyPasskeyRegChallenge } from "../src/lib/auth";
+import { signPasskeyAuthChallenge, updatePasskeySignCount, verifyPasskeyAuthChallenge, signPasskeyMfaChallenge, verifyPasskeyMfaChallenge, signPasskeyRegChallenge, verifyPasskeyRegChallenge } from "../src/lib/auth";
 import { toBase64url, fromBase64url, getRegistrationOrigins, getRpFromOrigin } from "../src/lib/webauthn";
 
 // ── base64url helpers ──────────────────────────────────────────────────────
@@ -93,6 +93,14 @@ test("passkey auth challenge rejects wrong secret", async () => {
 
 test("passkey auth challenge rejects bad prefix", async () => {
   expect(await verifyPasskeyAuthChallenge("s", "preg.1.9999999999.abc.deadbeef")).toBeNull();
+});
+
+test("account-bound passkey MFA challenge cannot downgrade or be tampered with", async () => {
+  const token = await signPasskeyMfaChallenge("secret", 42, 7, "abc123");
+  expect(token).toMatch(/^pauthmfa\.42\.7\.\d+\.abc123\.[a-f0-9]+$/);
+  expect(await verifyPasskeyMfaChallenge("secret", token)).toMatchObject({ userId: 42, authVersion: 7, challenge: "abc123" });
+  expect(await verifyPasskeyAuthChallenge("secret", token)).toBeNull();
+  expect(await verifyPasskeyMfaChallenge("secret", token.replace(".42.7.", ".43.7."))).toBeNull();
 });
 
 // ── Passkey reg challenge ──────────────────────────────────────────────────

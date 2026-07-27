@@ -76,6 +76,26 @@ class ApiClientSecurityTest {
         assertEquals("challenge-token", body["challengeToken"]?.toString()?.trim('"'))
     }
 
+    @Test fun mfaPasskeyChallengeAndVerifyUseBoundTokenShapes() = runTest {
+        server.enqueue(json("""{"challenge":"abc","rpId":"app.hidemyemail.dev","allowCredentials":[],"passkey_token":"bound"}"""))
+        server.enqueue(json("""{"ok":true,"userId":2,"token":"bearer2","fresh_auth":"fresh2"}"""))
+
+        val challenge = client.passkeyAuthenticationChallenge("mfa-token")
+        assertFalse(json.parseToJsonElement(challenge.requestOptionsJson).jsonObject.containsKey("passkey_token"))
+        assertEquals("app.hidemyemail.dev", challenge.rpId)
+        client.verifyPasskeyAuthentication("""{"id":"credential","response":{"signature":"sig"}}""", challenge.passkeyToken)
+
+        val challengeRequest = server.takeRequest()
+        assertEquals("token", challengeRequest.getHeader("X-Auth-Mode"))
+        assertEquals(
+            json.parseToJsonElement("""{"mfa":true,"mfa_token":"mfa-token"}"""),
+            json.parseToJsonElement(challengeRequest.body.readUtf8()),
+        )
+        val verify = json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+        assertEquals("bound", verify["passkey_token"]?.jsonPrimitive?.content)
+        assertFalse(verify.containsKey("mfa_token"))
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun passkeyRegistrationRejectsInvalidResponseJson() = runTest {
         client.registerPasskey("not json", null, "challenge")
