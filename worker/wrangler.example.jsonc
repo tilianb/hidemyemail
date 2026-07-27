@@ -21,6 +21,7 @@
   ],
   "vars": {
     "ENVIRONMENT": "production",
+    "BLOCKED_SUBDOMAINS": "admin,api,www",
     "SES_REGION": "paste-your-ses-region",
     "S3_INBOUND_BUCKET": "paste-your-inbound-bucket",
     // Passkeys: "<AppleTeamID>.<bundleID>" — served in the AASA file so iOS can
@@ -50,6 +51,7 @@
       ],
       "vars": {
         "ENVIRONMENT": "preview",
+        "BLOCKED_SUBDOMAINS": "admin,api,www",
         "SES_REGION": "paste-your-preview-ses-region",
         "S3_INBOUND_BUCKET": "paste-your-preview-inbound-bucket"
       }

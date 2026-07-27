@@ -78,6 +78,7 @@ test("Docker startup accepts no APP_ORIGIN and migrates before listening", async
   );
   assert.doesNotMatch(requiredConfig, /APP_ORIGIN/);
   assert.match(server, /APP_ORIGIN:\s*env\.APP_ORIGIN\s*\?\?\s*["']{2}/);
+  assert.match(server, /BLOCKED_SUBDOMAINS:\s*env\.BLOCKED_SUBDOMAINS\s*\?\?\s*["']{2}/);
   assert.ok(
     server.indexOf("await applyMigrations") < server.indexOf("server.listen"),
     "pending migrations must finish before the HTTP socket listens",

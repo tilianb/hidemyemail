@@ -2,6 +2,7 @@ export interface Env {
   // In self-hosted mode the deployment wrapper must overwrite
   // X-HideMyEmail-Client-IP from its trusted socket/proxy boundary.
   ENVIRONMENT: string;
+  BLOCKED_SUBDOMAINS?: string;
   DB: D1Database;
   SES_REGION: string;
   SES_ACCESS_KEY_ID: string;

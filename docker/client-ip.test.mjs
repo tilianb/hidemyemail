@@ -156,7 +156,7 @@ test("release publications depend on the validated tag and required artifacts", 
     assert.match(block.split(/\n  [a-z-]+:/, 1)[0], /needs: validate/);
   }
   const releaseJob = release.slice(release.indexOf("  release:"));
-  assert.match(releaseJob, /needs: \[validate, android, testflight, containers\]/);
+  assert.match(releaseJob, /needs: \[validate, android, extension, testflight, containers\]/);
   assert.doesNotMatch(releaseJob, /--clobber/);
   const upload = releaseJob.indexOf("gh release upload");
   const cleanup = releaseJob.indexOf("gh release delete-asset");

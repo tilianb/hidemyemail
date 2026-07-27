@@ -102,6 +102,7 @@ const mf = new Miniflare({
   // Plain vars (non-secret, mirror wrangler.jsonc top-level vars block)
   bindings: {
     ENVIRONMENT: env.ENVIRONMENT ?? "self-hosted",
+    BLOCKED_SUBDOMAINS: env.BLOCKED_SUBDOMAINS ?? "",
     APP_ORIGIN: env.APP_ORIGIN ?? "",
     SES_REGION: env.SES_REGION ?? "ap-southeast-2",
     S3_INBOUND_BUCKET: env.S3_INBOUND_BUCKET ?? "hidemyemail-inbound-raw",
