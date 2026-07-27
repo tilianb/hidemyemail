@@ -136,10 +136,16 @@ jobs:
           if (manifest.manifest_version !== 3 || JSON.stringify(manifest.optional_host_permissions) !== JSON.stringify(allowed)) process.exit(1)
           if (manifest.content_scripts || manifest.web_accessible_resources || manifest.host_permissions) process.exit(1)
           NODE
-          if unzip -p "$archive" popup.html | grep -Eqi 'https?://'; then
-            echo "Packaged popup references remote executable content." >&2
-            exit 1
-          fi
+          unzip -p "$archive" popup.html > packaged-popup.html
+          node - <<'NODE'
+          const fs = require('node:fs')
+          const html = fs.readFileSync('packaged-popup.html', 'utf8')
+          const executableURLs = [...html.matchAll(/<(?:script|link)\b[^>]*\b(?:src|href)=["']([^"']+)["']/gi)].map((match) => match[1])
+          if (executableURLs.some((url) => /^(?:https?:)?\/\//i.test(url))) {
+            console.error('Packaged popup references remote executable content.')
+            process.exit(1)
+          }
+          NODE
           mv "$archive" "HideMyEmail-${GITHUB_REF_NAME}-chromium.zip"
       - name: Upload extension artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -219,16 +225,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           source_asset="release-assets/HideMyEmail-${GITHUB_REF_NAME}.apk"
-          short_sha="${GITHUB_SHA:0:7}"
-          asset_name="HideMyEmail-${GITHUB_REF_NAME}-${short_sha}-run${GITHUB_RUN_ID}.apk"
-          asset="release-assets/$asset_name"
+          asset_name="HideMyEmail-${GITHUB_REF_NAME}.apk"
+          asset="$source_asset"
           extension_source="release-assets/HideMyEmail-${GITHUB_REF_NAME}-chromium.zip"
-          extension_name="HideMyEmail-${GITHUB_REF_NAME}-${short_sha}-run${GITHUB_RUN_ID}-chromium.zip"
-          extension_asset="release-assets/$extension_name"
+          extension_name="HideMyEmail-${GITHUB_REF_NAME}-chromium.zip"
+          extension_asset="$extension_source"
           test -f "$source_asset"
           test -f "$extension_source"
-          cp "$source_asset" "$asset"
-          cp "$extension_source" "$extension_asset"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             if ! gh release view "$GITHUB_REF_NAME" --json assets \
               --jq '.assets[].name' | grep -Fxq "$asset_name"; then

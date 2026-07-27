@@ -32,4 +32,8 @@ test("ZIP is deterministic and contains only built extension files", () => {
   expect(entries.join("\n")).not.toMatch(/(?:src|test|node_modules|\.map)/);
   const packagedManifest = JSON.parse(execFileSync("unzip", ["-p", archive, "manifest.json"], { encoding: "utf8" }));
   expect(packagedManifest.minimum_chrome_version).toBe("102");
+  const packagedPopup = execFileSync("unzip", ["-p", archive, "popup.html"], { encoding: "utf8" });
+  const executableURLs = [...packagedPopup.matchAll(/<(?:script|link)\b[^>]*\b(?:src|href)=["']([^"']+)["']/gi)].map((match) => match[1]);
+  expect(executableURLs).not.toEqual(expect.arrayContaining([expect.stringMatching(/^(?:https?:)?\/\//i)]));
+  expect(packagedPopup).toContain('placeholder="https://mail.example.com"');
 }, 120_000);
