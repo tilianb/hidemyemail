@@ -137,6 +137,27 @@ struct MfaStatus: Decodable {
     let backupCodesRemaining: Int
 }
 
+struct MFASetupResponse: Decodable {
+    let secret: String
+    let uri: String
+}
+
+struct MFAVerifyResponse: Decodable {
+    let ok: Bool
+    let backupCodes: [String]
+}
+
+struct MFABackupCodesResponse: Decodable {
+    let backupCodes: [String]
+}
+
+struct FreshAuthResponse: Decodable {
+    let freshAuth: String
+    enum CodingKeys: String, CodingKey { case freshAuth = "fresh_auth" }
+}
+
+struct SecurityHandoffResponse: Decodable { let url: String }
+
 // GET /api/passkeys — registered WebAuthn credentials.
 struct Passkey: Identifiable, Decodable, Hashable {
     let id: String
@@ -256,6 +277,18 @@ struct PasskeyChallengeOptions: Decodable {
         case challenge, rpId
         case passkeyToken = "passkey_token"
     }
+}
+
+struct PasskeyRegistrationOptions: Decodable {
+    struct RelyingParty: Decodable { let id: String; let name: String }
+    struct User: Decodable { let id: String; let name: String; let displayName: String }
+    struct Parameter: Decodable { let type: String; let alg: Int }
+
+    let challenge: String
+    let rp: RelyingParty
+    let user: User
+    let pubKeyCredParams: [Parameter]
+    let challengeToken: String
 }
 
 // GET /api/account/profile — username + self-service recovery status.
