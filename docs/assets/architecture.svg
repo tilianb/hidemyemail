@@ -135,6 +135,6 @@
   <g transform="translate(42 570)">
     <rect width="1116" height="50" rx="12" fill="#0b1d2e" stroke="#163249"/>
     <circle cx="28" cy="25" r="7" fill="#48bb78"/>
-    <text x="47" y="30" fill="#a9bfd0" font="13px system-ui,-apple-system,sans-serif">One Worker serves the API, dashboard assets, mail webhooks, scheduled retention, and Docker self-hosting through Miniflare.</text>
+    <text x="47" y="30" fill="#a9bfd0" font-family="system-ui,-apple-system,sans-serif" font-size="13">One Worker serves the API, dashboard assets, mail webhooks, scheduled retention, and Docker self-hosting through Miniflare.</text>
   </g>
 </svg>
