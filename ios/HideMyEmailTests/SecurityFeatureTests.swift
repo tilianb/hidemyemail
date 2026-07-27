@@ -237,6 +237,30 @@ final class SecurityFeatureTests: XCTestCase {
         }
     }
 
+    func testHandoffAcceptsCanonicalIPv6LoopbackOrigin() async throws {
+        URLStub.handler = { request in
+            Self.response(request, #"{"url":"http://[::1]:8787/security-handoff?code=x"}"#)
+        }
+
+        let url = try await client(baseURL: "http://[::1]:8787").securityHandoffURL()
+
+        XCTAssertEqual(url.host, "::1")
+        XCTAssertEqual(ServerOrigin.canonicalOrigin(of: url), "http://[::1]:8787")
+    }
+
+    func testHandoffRejectsUncanonicalizableCrossOriginIPv6URL() async throws {
+        URLStub.handler = { request in
+            Self.response(request, #"{"url":"http://[::2]:8788/security-handoff?code=x"}"#)
+        }
+
+        do {
+            _ = try await client(baseURL: "http://[::1]:8787").securityHandoffURL()
+            XCTFail("Expected cross-origin URL rejection")
+        } catch APIError.server(_, let message) {
+            XCTAssertEqual(message, "Invalid security handoff URL")
+        }
+    }
+
     func testHandoffRejectsInvalidSameOriginURLs() async throws {
         let invalidURLs = [
             "https://self.example/security?code=x",

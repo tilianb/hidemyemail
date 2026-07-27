@@ -296,7 +296,9 @@ actor APIClient {
         )
         guard let url = URL(string: response.url),
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              ServerOrigin.canonicalOrigin(of: url) == ServerOrigin.canonicalOrigin(of: baseURL),
+              let handoffOrigin = ServerOrigin.canonicalOrigin(of: url),
+              let configuredOrigin = ServerOrigin.canonicalOrigin(of: baseURL),
+              handoffOrigin == configuredOrigin,
               components.path == "/security-handoff",
               components.user == nil, components.password == nil,
               components.fragment == nil,

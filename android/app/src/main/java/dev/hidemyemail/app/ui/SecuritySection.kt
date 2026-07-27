@@ -250,7 +250,7 @@ fun SecuritySection(app: AppViewModel) {
             reload++
         }
     } }
-    pending?.let { retry -> ReauthDialog(mfa?.enabled == true, onDismiss = { pending = null }) { passphrase, mfaCode ->
+    pending?.let { retry -> ReauthDialog(mfa?.enabled == true, error, onDismiss = { pending = null }) { passphrase, mfaCode ->
         scope.launch {
             if (!operationGate.tryAcquire()) return@launch
             busy = true
@@ -260,6 +260,7 @@ fun SecuritySection(app: AppViewModel) {
                 if (client != null) client.reauthenticate(passphrase, mfaCode)
                 if (client != null && isCurrentPendingRetry(pending, retry)) {
                     pending = null
+                    error = null
                     succeeded = true
                 }
             } catch (e: CancellationException) {
@@ -333,11 +334,11 @@ private fun BackupCodesDialog(codes: List<String>, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun ReauthDialog(mfa: Boolean, onDismiss: () -> Unit, onSubmit: (String, String?) -> Unit) {
+private fun ReauthDialog(mfa: Boolean, error: String?, onDismiss: () -> Unit, onSubmit: (String, String?) -> Unit) {
     var passphrase by remember { mutableStateOf("") }; var code by remember { mutableStateOf("") }
     AlertDialog(onDismissRequest = { passphrase = ""; code = ""; onDismiss() }, containerColor = Theme.surface2,
         title = { Text("Confirm it's you", style = Theme.displayStyle(18.sp)) },
-        text = { Column { OutlinedTextField(passphrase, { passphrase = it }, label = { Text("Passphrase") }, visualTransformation = PasswordVisualTransformation(), singleLine = true); if (mfa) OutlinedTextField(code, { code = it.take(64) }, label = { Text("Authenticator or backup code") }, singleLine = true, modifier = Modifier.padding(top = 8.dp)) } },
+        text = { Column { OutlinedTextField(passphrase, { passphrase = it }, label = { Text("Passphrase") }, visualTransformation = PasswordVisualTransformation(), singleLine = true); if (mfa) OutlinedTextField(code, { code = it.take(64) }, label = { Text("Authenticator or backup code") }, singleLine = true, modifier = Modifier.padding(top = 8.dp)); error?.let { Text(it, color = Theme.red, style = Theme.bodyStyle(13.sp), modifier = Modifier.padding(top = 8.dp)) } } },
         confirmButton = { TextButton(enabled = passphrase.isNotEmpty() && (!mfa || code.isNotBlank()), onClick = { val p = passphrase; val c = code.takeIf { it.isNotBlank() }; passphrase = ""; code = ""; onSubmit(p, c) }) { Text("Continue") } },
         dismissButton = { TextButton(onClick = { passphrase = ""; code = ""; onDismiss() }) { Text("Cancel") } })
 }

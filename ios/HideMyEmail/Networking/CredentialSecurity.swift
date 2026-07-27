@@ -5,28 +5,33 @@ struct ServerOrigin: Equatable {
     var string: String { url.absoluteString }
 
     static func canonicalOrigin(of url: URL) -> String? {
-        guard let scheme = url.scheme, let host = url.host else { return nil }
-        var value = "\(scheme)://\(host)"
-        if let port = url.port { value += ":\(port)" }
-        return try? ServerOrigin(value).string
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              parts.user == nil, parts.password == nil else { return nil }
+        parts.path = ""
+        parts.query = nil
+        parts.fragment = nil
+        guard let origin = parts.url else { return nil }
+        return try? ServerOrigin(origin.absoluteString).string
     }
 
     init(_ input: String) throws {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard var parts = URLComponents(string: trimmed),
               let scheme = parts.scheme?.lowercased(),
-              let host = parts.host?.lowercased(),
+              let componentHost = parts.host?.lowercased(),
               parts.user == nil, parts.password == nil,
               parts.query == nil, parts.fragment == nil,
               parts.path.isEmpty || parts.path == "/" else {
             throw APIError.notConfigured
         }
+        let host = componentHost.hasPrefix("[") && componentHost.hasSuffix("]")
+            ? String(componentHost.dropFirst().dropLast()) : componentHost
         let local = host == "localhost" || host == "127.0.0.1" || host == "::1"
         guard scheme == "https" || (scheme == "http" && local) else {
             throw APIError.notConfigured
         }
         parts.scheme = scheme
-        parts.host = host
+        parts.host = componentHost
         parts.path = ""
         if (scheme == "https" && parts.port == 443) || (scheme == "http" && parts.port == 80) {
             parts.port = nil

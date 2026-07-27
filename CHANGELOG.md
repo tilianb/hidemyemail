@@ -61,6 +61,10 @@ encryption, deployment, and release safety for every installation.
 - Native MFA disable now asks for a new operation code after fresh
   reauthentication, avoiding replay of a backup code consumed while confirming
   the user's identity.
+- iOS security handoffs now canonicalize bracketed IPv6 origins and reject the
+  handoff unless both configured and returned origins normalize successfully.
+- Android now displays failed reauthentication messages inside the open
+  confirmation dialog.
 - Docker now ignores SQL comments when splitting migration files, so comment
   text containing semicolons cannot break startup migrations.
 - Restored the Android application-only view-model constructor required by the
