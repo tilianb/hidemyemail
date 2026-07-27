@@ -10,6 +10,14 @@ All notable changes to this project are documented here. The format follows
 
 - Dashboard, iOS, and Android passphrase sign-in can now use an account-bound
   registered passkey instead of a TOTP or backup code when MFA is enabled.
+- Chromium extension v1.3.1 can search, copy, activate, deactivate, and delete
+  aliases from a new manager tab. Alias creation now supports random, UUID,
+  and custom local parts plus optional descriptions.
+- Focused email fields on web pages now show a HideMyEmail button that can
+  generate and fill an alias after an explicit click. Detection uses semantic
+  field attributes and conservative email-label matching; the extension never
+  submits the form automatically. Inline-created aliases use the page hostname
+  (and no other page URL or content) as their server-visible description.
 
 ### Changed
 
@@ -17,11 +25,25 @@ All notable changes to this project are documented here. The format follows
   GitHub Actions, while iOS changes on `main` continue to upload automatically.
   Branch builds use the project marketing version and a globally unique CI
   build number; tagged releases continue to derive their version from the tag.
+- Chromium extension v1.3.1 now matches the native app and dashboard branding
+  with local product fonts, the app envelope icon, and a clearer connected
+  alias generator and setup flow. New connections default to
+  `https://app.hidemyemail.dev` while self-hosted deployments remain supported.
 
 ### Fixed
 
 - The iOS MFA setup screen now renders its QR code correctly in dark mode
   instead of showing an oversized blank area.
+- Inline alias controls now move away from existing autofill controls such as
+  Bitwarden and 1Password, and stay hidden when a field is too narrow to fit a
+  separate control without overlap.
+
+### Security
+
+- Browser field integration requires install-time access to HTTP and HTTPS
+  pages. Page code receives no API key or alias inventory: a trusted extension
+  service worker owns authenticated API calls, while the content script reads
+  only candidate field metadata and geometry and fills only after user action.
 
 ## [1.3.0] — 2026-07-27
 
