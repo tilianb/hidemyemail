@@ -88,6 +88,33 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
         authMode = true, authed = false,
     )
 
+    suspend fun passkeyAuthenticationChallenge(mfaToken: String? = null): PasskeyAuthenticationChallenge {
+        val raw = perform(
+            "/api/passkey/challenge", "POST",
+            buildJsonObject {
+                if (mfaToken != null) { put("mfa", true); put("mfa_token", mfaToken) }
+            }, authMode = true, authed = false,
+        )
+        try {
+            val value = json.parseToJsonElement(raw).jsonObject
+            val token = value["passkey_token"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+                ?: throw ApiException.Decoding()
+            val rpId = value["rpId"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+                ?: throw ApiException.Decoding()
+            return PasskeyAuthenticationChallenge(JsonObject(value - "passkey_token").toString(), token, rpId)
+        } catch (e: ApiException.Decoding) { throw e }
+        catch (_: Exception) { throw ApiException.Decoding() }
+    }
+
+    suspend fun verifyPasskeyAuthentication(responseJson: String, passkeyToken: String): LoginResponse {
+        val response = try { json.parseToJsonElement(responseJson).jsonObject }
+        catch (e: Exception) { throw IllegalArgumentException("Invalid credential response", e) }
+        return request(
+            "/api/passkey/verify", "POST", JsonObject(response + ("passkey_token" to JsonPrimitive(passkeyToken))),
+            authMode = true, authed = false,
+        )
+    }
+
     // MARK: Resources
 
     suspend fun stats(): Stats = request("/api/stats")

@@ -59,8 +59,13 @@ actor APIClient {
     /// Request a WebAuthn assertion challenge for passwordless passkey login.
     /// Token mode (no Origin) makes the Worker echo the signed challenge token in
     /// the body so the cookieless native client can return it on verify.
-    func passkeyChallenge() async throws -> PasskeyChallengeOptions {
-        try await request("/api/passkey/challenge", method: "POST", body: [:], authMode: true, authed: false)
+    func passkeyChallenge(mfaToken: String? = nil) async throws -> PasskeyChallengeOptions {
+        var body: [String: Any] = [:]
+        if let mfaToken {
+            body["mfa"] = true
+            body["mfa_token"] = mfaToken
+        }
+        return try await request("/api/passkey/challenge", method: "POST", body: body, authMode: true, authed: false)
     }
 
     /// Submit the signed assertion (plus the echoed challenge token) to complete
