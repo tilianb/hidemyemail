@@ -145,6 +145,7 @@ struct SecuritySection: View {
                         TextField("Six-digit code", text: $verifyCode)
                             .keyboardType(.numberPad).textContentType(.oneTimeCode)
                             .accessibilityLabel("Six-digit authenticator code")
+                        if let error { Text(error).foregroundStyle(Theme.red) }
                         Button("Verify and Enable") { Task { await verifyMFA() } }
                             .disabled(verifyCode.count != 6 || busy)
                     }
@@ -165,6 +166,7 @@ struct SecuritySection: View {
                 Section {
                     SecureField("Authenticator or backup code", text: $actionCode)
                         .textContentType(.oneTimeCode).accessibilityLabel("Authenticator or backup code")
+                    if let error { Text(error).foregroundStyle(Theme.red) }
                     Button(disabling ? "Disable MFA" : "Regenerate Codes", role: disabling ? .destructive : nil) {
                         let operation: SecurityOperation = disabling
                             ? .disableMFA(code: actionCode) : .regenerateMFA(code: actionCode)

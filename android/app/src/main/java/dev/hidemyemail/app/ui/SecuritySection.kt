@@ -228,7 +228,7 @@ fun SecuritySection(app: AppViewModel) {
     }
     SectionFooter(error ?: "Protect your account with an authenticator app and device-bound passkeys.")
 
-    setup?.let { value -> MfaSetupDialog(value, onDismiss = ::clearSecrets) { entered ->
+    setup?.let { value -> MfaSetupDialog(value, error, onDismiss = ::clearSecrets) { entered ->
         operation { client ->
                 codes = client.verifyMfa(entered).backupCodes
                 setup = null
@@ -307,7 +307,7 @@ fun SecuritySection(app: AppViewModel) {
 }
 
 @Composable
-private fun MfaSetupDialog(setup: MfaSetup, onDismiss: () -> Unit, onVerify: (String) -> Unit) {
+private fun MfaSetupDialog(setup: MfaSetup, error: String?, onDismiss: () -> Unit, onVerify: (String) -> Unit) {
     val clipboard = LocalClipboardManager.current
     var code by remember { mutableStateOf("") }
     val qr = remember(setup.uri) { qrBitmap(setup.uri).asImageBitmap() }
@@ -318,6 +318,7 @@ private fun MfaSetupDialog(setup: MfaSetup, onDismiss: () -> Unit, onVerify: (St
             Text(setup.secret, style = Theme.monoStyle(13.sp), modifier = Modifier.padding(top = 10.dp))
             TextButton(onClick = { clipboard.setText(AnnotatedString(setup.secret)) }) { Text("Copy manual key") }
             OutlinedTextField(code, { code = it.filter(Char::isDigit).take(6) }, label = { Text("6-digit code") }, singleLine = true)
+            error?.let { Text(it, color = Theme.red, style = Theme.bodyStyle(13.sp), modifier = Modifier.padding(top = 8.dp)) }
         } },
         confirmButton = { TextButton(enabled = code.length == 6, onClick = { onVerify(code); code = "" }) { Text("Verify") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })

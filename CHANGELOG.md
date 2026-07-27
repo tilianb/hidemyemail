@@ -65,6 +65,8 @@ encryption, deployment, and release safety for every installation.
   handoff unless both configured and returned origins normalize successfully.
 - Android now displays failed reauthentication messages inside the open
   confirmation dialog.
+- Native MFA setup and management dialogs now display rejected-code errors
+  without requiring users to dismiss the active modal.
 - Docker now ignores SQL comments when splitting migration files, so comment
   text containing semicolons cannot break startup migrations.
 - Restored the Android application-only view-model constructor required by the
