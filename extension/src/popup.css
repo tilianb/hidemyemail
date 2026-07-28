@@ -11,8 +11,8 @@
   overflow: hidden;
 }
 * { box-sizing: border-box; }
-body { margin: 0; width: 390px; min-height: 420px; max-height: 600px; overflow: hidden auto; border-radius: inherit; background: #0d0d0f; }
-main { padding: 20px; }
+body { margin: 0; width: 390px; min-height: 420px; max-height: 600px; overflow: hidden; border-radius: inherit; background: transparent; }
+main { min-height: inherit; max-height: inherit; overflow: hidden auto; border-radius: inherit; padding: 20px; background: #0d0d0f; }
 header { display: flex; align-items: center; gap: 11px; min-height: 48px; padding-bottom: 17px; border-bottom: 1px solid #26262f; }
 .mark { width: 38px; height: 38px; border-radius: 10px; }
 .identity { min-width: 0; }
