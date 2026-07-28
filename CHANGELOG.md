@@ -12,7 +12,8 @@ All notable changes to this project are documented here. The format follows
   registered passkey instead of a TOTP or backup code when MFA is enabled.
 - Chromium extension v1.3.1 can search, copy, activate, deactivate, and delete
   aliases from a new manager tab. Alias creation now supports random, UUID,
-  and custom local parts plus optional descriptions.
+  and custom local parts plus optional descriptions, and the popup can select
+  which verified destination receives each new alias's mail.
 - Focused email fields on web pages now show a HideMyEmail button that can
   generate and fill an alias after an explicit click. Detection uses semantic
   field attributes and conservative email-label matching; the extension never

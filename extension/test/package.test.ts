@@ -10,7 +10,7 @@ const hash = () => createHash("sha256").update(readFileSync(archive)).digest("he
 
 test("secret-consuming popup controls start disabled", () => {
   const popup = readFileSync(resolve(root, "popup.html"), "utf8");
-  for (const id of ["server", "key", "connect", "domain", "generate"]) expect(popup).toMatch(new RegExp(`id="${id}"[^>]*disabled`));
+  for (const id of ["server", "key", "connect", "domain", "destination", "generate"]) expect(popup).toMatch(new RegExp(`id="${id}"[^>]*disabled`));
 });
 
 test("source manifest requires Chrome 102 for trusted-context storage", () => {
