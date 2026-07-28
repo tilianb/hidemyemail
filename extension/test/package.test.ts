@@ -39,6 +39,7 @@ test("v1.3.1 popup uses local app branding assets and product copy", () => {
   expect(popup).toContain("Generate alias");
   expect(styles).toContain("#0d0d0f");
   expect(styles).toContain("#ffb300");
+  expect(styles).toContain("border-radius: 16px");
   for (const font of ["Bricolage Grotesque", "IBM Plex Sans", "JetBrains Mono"]) expect(styles).toContain(`font-family: "${font}"`);
   expect(styles).not.toMatch(/https?:\/\//);
 });

@@ -4,12 +4,16 @@ import { ApiError, createApi } from "../src/api";
 const config = { server: "https://mail.example", key: "hme_secret" };
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-test("probes and loads validated domains with bearer header", async () => {
-  const fetcher = vi.fn().mockResolvedValueOnce(response({ name: "Extension", created_at: "2026-01-01 00:00:00", expires_at: null })).mockResolvedValueOnce(response({ data: ["one.example"], defaultAliasDomain: "one.example", defaultAliasFormat: "random_characters" }));
+test("probes and loads validated domains and destinations with bearer header", async () => {
+  const fetcher = vi.fn()
+    .mockResolvedValueOnce(response({ name: "Extension", created_at: "2026-01-01 00:00:00", expires_at: null }))
+    .mockResolvedValueOnce(response({ data: ["one.example"], defaultAliasDomain: "one.example", defaultAliasFormat: "random_characters" }))
+    .mockResolvedValueOnce(response({ data: [{ id: "7", email: "real@me.example", isDefault: true }], defaultDestinationId: "7" }));
   const api = createApi(config, fetcher);
   await api.probe();
   expect(await api.domains()).toEqual({ domains: ["one.example"], defaultDomain: "one.example" });
-  expect(fetcher.mock.calls.map(([url]) => url)).toEqual(["https://mail.example/api/v1/api-token-details", "https://mail.example/api/v1/domain-options"]);
+  expect(await api.destinations()).toEqual({ destinations: [{ id: "7", email: "real@me.example", isDefault: true }], defaultDestinationId: "7" });
+  expect(fetcher.mock.calls.map(([url]) => url)).toEqual(["https://mail.example/api/v1/api-token-details", "https://mail.example/api/v1/domain-options", "https://mail.example/api/v1/destination-options"]);
   for (const [, init] of fetcher.mock.calls) expect(new Headers(init.headers).get("Authorization")).toBe("Bearer hme_secret");
 });
 
@@ -54,8 +58,8 @@ test.each([
     { id: "1", email: "abc@one.example", local_part: "abc", domain: "one.example", active: true, description: null },
   ],
   [
-    { domain: "one.example", description: "Login", format: "uuid" as const },
-    { domain: "one.example", description: "Login", format: "uuid" },
+    { domain: "one.example", description: "Login", format: "uuid" as const, destination_id: "7" },
+    { domain: "one.example", description: "Login", format: "uuid", destination_id: "7" },
     { id: "2", email: "123e4567-e89b-12d3-a456-426614174000@one.example", local_part: "123e4567-e89b-12d3-a456-426614174000", domain: "one.example", active: true, description: "Login" },
   ],
   [
@@ -123,6 +127,8 @@ test.each([
   { domain: "one.example", format: "custom", local_part: "shop+news" },
   { domain: "one.example", format: "custom", local_part: "r.reply" },
   { domain: "one.example", format: "custom", local_part: "R.reply" },
+  { domain: "one.example", format: "random_characters", destination_id: "0" },
+  { domain: "one.example", format: "random_characters", destination_id: "01" },
 ])("rejects invalid rich create input %# before fetching", async (input) => {
   const fetcher = vi.fn();
   await expect(createApi(config, fetcher).createAlias(input as never)).rejects.toMatchObject({ kind: "validation", message: "The alias request is invalid." });
@@ -178,6 +184,15 @@ test.each([
   { data: ["one.example"], defaultAliasDomain: "other.example", defaultAliasFormat: "random_characters" },
 ])("rejects malformed domain options %#", async (body) => {
   await expect(createApi(config, vi.fn(async () => response(body))).domains()).rejects.toMatchObject({ kind: "malformed" });
+});
+
+test.each([
+  { data: [{ id: "0", email: "real@me.example", isDefault: true }], defaultDestinationId: "0" },
+  { data: [{ id: "7", email: "not-an-email", isDefault: true }], defaultDestinationId: "7" },
+  { data: [{ id: "7", email: "real@me.example", isDefault: 1 }], defaultDestinationId: "7" },
+  { data: [{ id: "7", email: "real@me.example", isDefault: true }], defaultDestinationId: "8" },
+])("rejects malformed destination options %#", async (body) => {
+  await expect(createApi(config, vi.fn(async () => response(body))).destinations()).rejects.toMatchObject({ kind: "malformed" });
 });
 
 test.each([

@@ -3,6 +3,8 @@ import { afterEach, expect, test, vi } from "vitest";
 import { fillField, mountContent, requestAliasOnClick, unmountContent } from "../src/content";
 
 const SAFE_ERROR = "HideMyEmail could not complete the request. Try again.";
+const destination = { id: "7", email: "real@me.example", isDefault: true };
+const inlineOptions = (domains = ["one.example"], defaultDomain = domains[0]!) => ({ ok: true as const, domains, defaultDomain, destinations: [destination], defaultDestinationId: destination.id });
 const originalInnerWidth = innerWidth;
 const originalInnerHeight = innerHeight;
 
@@ -24,7 +26,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-async function mounted(send = vi.fn(async () => ({ ok: true as const, domains: ["one.example"], defaultDomain: "one.example" }))) {
+async function mounted(send: (message: unknown) => Promise<unknown> = vi.fn(async () => inlineOptions())) {
   const input = document.createElement("input"); input.type = "email";
   vi.spyOn(input, "getBoundingClientRect").mockReturnValue(rect(100, 100, 250, 40));
   document.body.append(input);
@@ -40,11 +42,11 @@ test("generation and filling occur only after an explicit click", async () => {
   const events: string[] = [];
   input.addEventListener("input", () => events.push("input")); input.addEventListener("change", () => events.push("change"));
   const button = document.createElement("button");
-  requestAliasOnClick(button, input, "one.example", send);
+  requestAliasOnClick(button, input, "one.example", "7", send);
   expect(send).not.toHaveBeenCalled(); expect(input.value).toBe("");
   button.click();
   await vi.waitFor(() => expect(input.value).toBe("new@one.example"));
-  expect(send).toHaveBeenCalledExactlyOnceWith({ type: "hme:generate", domain: "one.example" });
+  expect(send).toHaveBeenCalledExactlyOnceWith({ type: "hme:generate", domain: "one.example", destinationId: "7" });
   expect(events).toEqual(["input", "change"]);
 });
 
@@ -61,7 +63,7 @@ test.each([
   () => Promise.resolve({ ok: true, alias: 42 }),
 ])("keeps the chooser open and shows a fixed safe error for failed or invalid generation", async (generate) => {
   const send = vi.fn()
-    .mockResolvedValueOnce({ ok: true, domains: ["one.example"], defaultDomain: "one.example" })
+    .mockResolvedValueOnce(inlineOptions())
     .mockImplementationOnce(generate);
   const { input, shadow } = await mounted(send);
   shadow.querySelector<HTMLButtonElement>(".trigger")!.click();
@@ -74,7 +76,7 @@ test.each([
 
 test("fills through native events, restores target focus, then removes the chooser on validated success", async () => {
   const send = vi.fn()
-    .mockResolvedValueOnce({ ok: true, domains: ["one.example"], defaultDomain: "one.example" })
+    .mockResolvedValueOnce(inlineOptions())
     .mockResolvedValueOnce({ ok: true, alias: "new@one.example" });
   const { input, shadow } = await mounted(send);
   const events: string[] = [];
@@ -88,20 +90,22 @@ test("fills through native events, restores target focus, then removes the choos
 
 test("validates generation against the domain selected in the mounted chooser", async () => {
   const send = vi.fn()
-    .mockResolvedValueOnce({ ok: true, domains: ["one.example", "two.example"], defaultDomain: "one.example" })
+    .mockResolvedValueOnce(inlineOptions(["one.example", "two.example"], "one.example"))
     .mockResolvedValueOnce({ ok: true, alias: "new@two.example" });
   const { input, shadow } = await mounted(send);
   shadow.querySelector<HTMLButtonElement>(".trigger")!.click();
   await vi.waitFor(() => expect(shadow.querySelector("select")).not.toBeNull());
   shadow.querySelector<HTMLSelectElement>("select")!.value = "two.example";
+  shadow.querySelector<HTMLSelectElement>("select[aria-label='Forward to destination']")!.value = "7";
   shadow.querySelector<HTMLButtonElement>(".panel button")!.click();
   await vi.waitFor(() => expect(input.value).toBe("new@two.example"));
+  expect(send).toHaveBeenLastCalledWith({ type: "hme:generate", domain: "two.example", destinationId: "7" });
 });
 
 test("a generation response cannot fill after its chooser closes", async () => {
   const pending = deferred<unknown>();
   const send = vi.fn()
-    .mockResolvedValueOnce({ ok: true, domains: ["one.example"], defaultDomain: "one.example" })
+    .mockResolvedValueOnce(inlineOptions())
     .mockReturnValueOnce(pending.promise);
   const { input, shadow } = await mounted(send);
   shadow.querySelector<HTMLButtonElement>(".trigger")!.click();
@@ -117,7 +121,7 @@ test("a generation response cannot fill after its chooser closes", async () => {
 test("a generation response cannot fill either field after retargeting", async () => {
   const pending = deferred<unknown>();
   const send = vi.fn()
-    .mockResolvedValueOnce({ ok: true, domains: ["one.example"], defaultDomain: "one.example" })
+    .mockResolvedValueOnce(inlineOptions())
     .mockReturnValueOnce(pending.promise);
   const { input: first, shadow } = await mounted(send);
   const second = visibleEmailInput();
@@ -139,11 +143,11 @@ test("an out-of-order domain response cannot populate a reopened chooser", async
   trigger.click();
   document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   trigger.click();
-  old.resolve({ ok: true, domains: ["old.example"], defaultDomain: "old.example" });
+  old.resolve(inlineOptions(["old.example"], "old.example"));
   await Promise.resolve(); await Promise.resolve();
   expect(shadow.querySelector("select")).toBeNull();
 
-  current.resolve({ ok: true, domains: ["new.example"], defaultDomain: "new.example" });
+  current.resolve(inlineOptions(["new.example"], "new.example"));
   await vi.waitFor(() => expect(shadow.querySelector<HTMLSelectElement>("select")?.value).toBe("new.example"));
   expect(shadow.querySelector<HTMLSelectElement>("select")?.value).toBe("new.example");
 });
@@ -157,7 +161,7 @@ test.each(["Escape", "outside"])("closes on %s and restores focus to the target"
   expect(shadow.querySelector(".panel")).toBeNull(); expect(document.activeElement).toBe(input);
 });
 
-test("clamps the trigger and 230px chooser to the viewport and chooses the side with space", async () => {
+test("clamps the trigger and 250px chooser to the viewport and chooses the side with space", async () => {
   Object.defineProperty(window, "innerWidth", { configurable: true, value: 320 });
   Object.defineProperty(window, "innerHeight", { configurable: true, value: 240 });
   const { input, host, shadow } = await mounted();
@@ -166,9 +170,9 @@ test("clamps the trigger and 230px chooser to the viewport and chooses the side 
   await vi.waitFor(() => expect(host.style.left).toBe("292px"));
   expect(host.style.top).toBe("211px");
   shadow.querySelector<HTMLButtonElement>(".trigger")!.click();
-  await vi.waitFor(() => expect(shadow.querySelector<HTMLElement>(".panel")?.style.top).toBe("14px"));
+  await vi.waitFor(() => expect(shadow.querySelector<HTMLElement>(".panel")?.style.top).toBe("0px"));
   const panel = shadow.querySelector<HTMLElement>(".panel")!;
-  expect(panel.style.left).toBe("90px"); expect(getComputedStyle(panel).width).toBe("230px");
+  expect(panel.style.left).toBe("70px"); expect(getComputedStyle(panel).width).toBe("250px");
 });
 
 test("uses the branded trigger at the padded trailing edge when no other autofill control is present", async () => {
@@ -176,7 +180,20 @@ test("uses the branded trigger at the padded trailing edge when no other autofil
 
   await vi.waitFor(() => expect(host.style.left).toBe("318px"));
   expect(shadow.querySelector(".trigger svg")).not.toBeNull();
+  expect(shadow.querySelector(".trigger svg")?.innerHTML).toContain("#0d0d0f");
+  expect(shadow.querySelector(".trigger svg")?.innerHTML).toContain("#ffb300");
   expect(shadow.querySelector(".trigger")?.textContent).toBe("");
+});
+
+test("shows verified destinations and blocks generation when none are available", async () => {
+  const send = vi.fn(async () => ({ ...inlineOptions(), destinations: [], defaultDestinationId: null }));
+  const { shadow } = await mounted(send);
+
+  shadow.querySelector<HTMLButtonElement>(".trigger")!.click();
+
+  await vi.waitFor(() => expect(shadow.querySelector(".status")?.textContent).toContain("Add and verify"));
+  expect(shadow.querySelector<HTMLSelectElement>("select[aria-label='Forward to destination']")?.disabled).toBe(true);
+  expect(shadow.querySelector(".panel button")).toBeNull();
 });
 
 test("moves left of 1Password and Bitwarden-style inline controls without changing them", async () => {

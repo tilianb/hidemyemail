@@ -3,6 +3,7 @@ import type { Env } from "../../types";
 import { authenticateApiKey } from "../../lib/api-keys";
 import { getMainGlobalDomain } from "../../lib/settings";
 import { isValidLocalPart, randomLocalPart, escapeLike } from "../../lib/alias-format";
+import { decryptDestination } from "../../lib/crypto";
 import { aliasQuotaExceeded, resolveDefaultDestination } from "../../db/aliases";
 import { canUseIdentifier, isIdentifierReservationError, reserveIdentifierAndRun } from "../../db/reservations";
 
@@ -16,6 +17,7 @@ import { canUseIdentifier, isIdentifierReservationError, reserveIdentifierAndRun
  * Implemented endpoints (the subset those integrations use):
  *   GET    /api-token-details    — token validity check
  *   GET    /domain-options       — domains available for alias creation
+ *   GET    /destination-options  — verified destinations available for aliases
  *   GET    /aliases              — list aliases
  *   POST   /aliases              — create an alias (the Bitwarden call)
  *   GET    /aliases/:id          — fetch one alias
@@ -129,6 +131,18 @@ export function v1Routes() {
     });
   });
 
+  r.get("/destination-options", async (c) => {
+    const rows = await c.env.DB.prepare(
+      "SELECT id, email, is_default FROM destinations WHERE user_id = ? AND verified_at IS NOT NULL ORDER BY is_default DESC, created_at"
+    ).bind(c.get("userId")).all<{ id: number; email: string; is_default: number }>();
+    const data = await Promise.all((rows.results ?? []).map(async (row) => ({
+      id: String(row.id),
+      email: await decryptDestination(row.email, c.env.DESTINATION_ENCRYPTION_KEY),
+      isDefault: row.is_default === 1,
+    })));
+    return c.json({ data, defaultDestinationId: data.find((destination) => destination.isDefault)?.id ?? data[0]?.id ?? null });
+  });
+
   r.get("/aliases", async (c) => {
     const userId = c.get("userId");
     const search = c.req.query("filter[search]");
@@ -154,8 +168,8 @@ export function v1Routes() {
   // addy.io extension additionally sends format (+ local_part for "custom").
   r.post("/aliases", async (c) => {
     const userId = c.get("userId");
-    const b = await c.req.json<{ domain?: string; description?: string; format?: string; local_part?: string }>()
-      .catch(() => ({} as { domain?: string; description?: string; format?: string; local_part?: string }));
+    const b = await c.req.json<{ domain?: string; description?: string; format?: string; local_part?: string; destination_id?: number | string }>()
+      .catch(() => ({} as { domain?: string; description?: string; format?: string; local_part?: string; destination_id?: number | string }));
 
     // Resolve the target domain: explicit name, else the main global domain.
     let dom: DomainDbRow | null = null;
@@ -193,12 +207,23 @@ export function v1Routes() {
       }
     }
 
-    // Global-domain aliases forward to the caller's default verified
-    // destination; user-owned (subdomain) domains fall back to the domain's
-    // own default destination at delivery time.
+    // Explicit destinations must be verified and owned by the API-key user.
+    // Otherwise global aliases use the user's default; personal domains fall
+    // back to the domain's own default destination at delivery time.
     let destEnc: string | null = null;
     let destHash: string | null = null;
-    if (dom.is_global === 1) {
+    if (b.destination_id !== undefined) {
+      const destinationId = Number(b.destination_id);
+      if (!Number.isInteger(destinationId) || destinationId <= 0 || String(destinationId) !== String(b.destination_id)) {
+        return c.json({ message: "The chosen destination is not available." }, 422);
+      }
+      const destination = await c.env.DB.prepare(
+        "SELECT email, email_hash FROM destinations WHERE id = ? AND user_id = ? AND verified_at IS NOT NULL"
+      ).bind(destinationId, userId).first<{ email: string; email_hash: string }>();
+      if (!destination) return c.json({ message: "The chosen destination is not available." }, 422);
+      destEnc = destination.email;
+      destHash = destination.email_hash;
+    } else if (dom.is_global === 1) {
       const pair = await resolveDefaultDestination(c.env.DB, c.env.DESTINATION_ENCRYPTION_KEY, userId);
       if (!pair) {
         return c.json({ message: "Set a verified default destination in the dashboard first." }, 422);

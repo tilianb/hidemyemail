@@ -14,11 +14,13 @@ export type Alias = {
   local_part: string;
 };
 export type AliasFormat = "random_characters" | "uuid" | "custom";
+export type DestinationOption = { id: string; email: string; isDefault: boolean };
 export type CreateAliasInput = {
   domain: string;
   description?: string;
   format: AliasFormat;
   local_part?: string;
+  destination_id?: string;
 };
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -31,6 +33,7 @@ export const isValidDomain = (value: unknown): value is string => {
 const localPart = (value: unknown): value is string => typeof value === "string" && value.length <= 64 && /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(value) && !value.includes("..");
 export const creatableLocalPart = (value: unknown): value is string => localPart(value) && !value.toLowerCase().startsWith("r.");
 const aliasId = (value: unknown): value is string => typeof value === "string" && /^[1-9]\d*$/.test(value);
+const destinationEmail = (value: unknown): value is string => typeof value === "string" && value.length <= 254 && /^[^\s@]+@[^\s@]+$/.test(value);
 export const inputDescription = (value: unknown): value is string => typeof value === "string" && value.length <= 255;
 
 function parseAlias(value: unknown): Alias | null {
@@ -80,7 +83,8 @@ export function createApi(config: ExtensionConfig, fetcher: Fetcher = fetch) {
     const validFormat = record(input) && (input.format === "random_characters" || input.format === "uuid" || input.format === "custom");
     const validDescription = record(input) && (input.description === undefined || inputDescription(input.description));
     const validLocal = record(input) && (input.format === "custom" ? creatableLocalPart(input.local_part) : input.local_part === undefined);
-    if (!record(input) || !isValidDomain(input.domain) || !validFormat || !validDescription || !validLocal || keys.some((key) => !["domain", "description", "format", "local_part"].includes(key))) {
+    const validDestination = record(input) && (input.destination_id === undefined || aliasId(input.destination_id));
+    if (!record(input) || !isValidDomain(input.domain) || !validFormat || !validDescription || !validLocal || !validDestination || keys.some((key) => !["domain", "description", "format", "local_part", "destination_id"].includes(key))) {
       throw new ApiError("validation", "The alias request is invalid.");
     }
     const normalizedInput = { ...input, domain: input.domain.toLowerCase() };
@@ -105,6 +109,15 @@ export function createApi(config: ExtensionConfig, fetcher: Fetcher = fetch) {
       const body = await request("/api/v1/domain-options");
       if (!record(body) || !Array.isArray(body.data) || body.data.length === 0 || !body.data.every(isValidDomain) || new Set(body.data).size !== body.data.length || !(body.defaultAliasDomain === null || (isValidDomain(body.defaultAliasDomain) && body.data.includes(body.defaultAliasDomain))) || body.defaultAliasFormat !== "random_characters") throw new ApiError("malformed", "The server returned invalid domain options.");
       return { domains: body.data as string[], defaultDomain: typeof body.defaultAliasDomain === "string" ? body.defaultAliasDomain : body.data[0] as string };
+    },
+    async destinations() {
+      const body = await request("/api/v1/destination-options");
+      if (!record(body) || !Array.isArray(body.data) || body.data.length > 100 || !(body.defaultDestinationId === null || aliasId(body.defaultDestinationId))) throw new ApiError("malformed", "The server returned invalid destination options.");
+      const destinations = body.data.filter(record).map((value) => ({ id: value.id, email: value.email, isDefault: value.isDefault }));
+      if (destinations.length !== body.data.length || !destinations.every((value): value is DestinationOption => aliasId(value.id) && destinationEmail(value.email) && typeof value.isDefault === "boolean") || new Set(destinations.map(({ id }) => id)).size !== destinations.length || (body.defaultDestinationId !== null && !destinations.some(({ id }) => id === body.defaultDestinationId))) {
+        throw new ApiError("malformed", "The server returned invalid destination options.");
+      }
+      return { destinations, defaultDestinationId: body.defaultDestinationId as string | null };
     },
     async listAliases(search?: string) {
       if (!(search === undefined || typeof search === "string")) throw new ApiError("validation", "The alias search is invalid.");

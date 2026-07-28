@@ -31,12 +31,13 @@ beforeEach(async () => {
   ).run();
 });
 
-async function addDefaultDestination(email = "real@me.com") {
+async function addDefaultDestination(email = "real@me.com"): Promise<number> {
   const enc = await encryptDestination(email, testEnv.DESTINATION_ENCRYPTION_KEY);
   const hash = await hashDestination(email, testEnv.DESTINATION_ENCRYPTION_KEY);
   await db().prepare(
     "INSERT INTO destinations (user_id, email, email_hash, token, verified_at, created_at, is_default) VALUES (1, ?, ?, ?, 123, 123, 1)"
   ).bind(enc, hash, crypto.randomUUID()).run();
+  return (await db().prepare("SELECT id FROM destinations WHERE user_id = 1 AND email_hash = ?").bind(hash).first<{ id: number }>())!.id;
 }
 
 async function createKey(app = createApp(), name = "Bitwarden"): Promise<string> {
@@ -124,6 +125,63 @@ test("Bitwarden flow: POST /api/v1/aliases with domain+description creates a ran
     .bind(data.email).first<{ destination: string; source: string; label: string }>();
   expect(row!.source).toBe("api");
   expect(await decryptDestination(row!.destination, testEnv.DESTINATION_ENCRYPTION_KEY)).toBe("real@me.com");
+});
+
+test("destination options expose only verified owned addresses and alias creation uses the selected destination", async () => {
+  const app = createApp();
+  const defaultId = await addDefaultDestination();
+  const selectedEmail = "other@me.com";
+  const selectedEnc = await encryptDestination(selectedEmail, testEnv.DESTINATION_ENCRYPTION_KEY);
+  const selectedHash = await hashDestination(selectedEmail, testEnv.DESTINATION_ENCRYPTION_KEY);
+  await db().prepare(
+    "INSERT INTO destinations (user_id, email, email_hash, token, verified_at, created_at, is_default) VALUES (1, ?, ?, ?, 456, 456, 0)"
+  ).bind(selectedEnc, selectedHash, crypto.randomUUID()).run();
+  const selectedId = (await db().prepare("SELECT id FROM destinations WHERE email_hash = ?").bind(selectedHash).first<{ id: number }>())!.id;
+  const unverifiedEnc = await encryptDestination("pending@me.com", testEnv.DESTINATION_ENCRYPTION_KEY);
+  const unverifiedHash = await hashDestination("pending@me.com", testEnv.DESTINATION_ENCRYPTION_KEY);
+  await db().prepare(
+    "INSERT INTO destinations (user_id, email, email_hash, token, verified_at, created_at, is_default) VALUES (1, ?, ?, ?, NULL, 789, 0)"
+  ).bind(unverifiedEnc, unverifiedHash, crypto.randomUUID()).run();
+  const unverifiedId = (await db().prepare("SELECT id FROM destinations WHERE email_hash = ?").bind(unverifiedHash).first<{ id: number }>())!.id;
+  await db().prepare("INSERT INTO users (id, passphrase_hash, created_at) VALUES (2, 'other', 123)").run();
+  const foreignEnc = await encryptDestination("foreign@other.com", testEnv.DESTINATION_ENCRYPTION_KEY);
+  const foreignHash = await hashDestination("foreign@other.com", testEnv.DESTINATION_ENCRYPTION_KEY);
+  await db().prepare(
+    "INSERT INTO destinations (user_id, email, email_hash, token, verified_at, created_at, is_default) VALUES (2, ?, ?, ?, 123, 123, 1)"
+  ).bind(foreignEnc, foreignHash, crypto.randomUUID()).run();
+  const foreignId = (await db().prepare("SELECT id FROM destinations WHERE email_hash = ?").bind(foreignHash).first<{ id: number }>())!.id;
+  const token = await createKey(app);
+  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+
+  const options = await app.request("/api/v1/destination-options", { headers }, testEnv);
+  expect(options.status).toBe(200);
+  expect(await options.json()).toEqual({
+    data: [
+      { id: String(defaultId), email: "real@me.com", isDefault: true },
+      { id: String(selectedId), email: selectedEmail, isDefault: false },
+    ],
+    defaultDestinationId: String(defaultId),
+  });
+
+  const created = await app.request("/api/v1/aliases", {
+    method: "POST", headers, body: JSON.stringify({ domain: "hidemyemail.dev", destination_id: String(selectedId) }),
+  }, testEnv);
+  expect(created.status).toBe(201);
+  const alias = await created.json<{ data: { id: string } }>();
+  const row = await db().prepare("SELECT destination, destination_hash FROM aliases WHERE id = ?").bind(alias.data.id).first<{ destination: string; destination_hash: string }>();
+  expect(await decryptDestination(row!.destination, testEnv.DESTINATION_ENCRYPTION_KEY)).toBe(selectedEmail);
+  expect(row!.destination_hash).toBe(selectedHash);
+
+  const rejected = await app.request("/api/v1/aliases", {
+    method: "POST", headers, body: JSON.stringify({ domain: "hidemyemail.dev", destination_id: String(unverifiedId) }),
+  }, testEnv);
+  expect(rejected.status).toBe(422);
+  const foreignRejected = await app.request("/api/v1/aliases", {
+    method: "POST", headers, body: JSON.stringify({ domain: "hidemyemail.dev", destination_id: String(foreignId) }),
+  }, testEnv);
+  expect(foreignRejected.status).toBe(422);
+  await db().prepare("DELETE FROM destinations WHERE user_id = 2").run();
+  await db().prepare("DELETE FROM users WHERE id = 2").run();
 });
 
 test("v1 custom alias cannot claim another user's reserved address", async () => {

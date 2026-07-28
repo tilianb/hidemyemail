@@ -17,7 +17,8 @@ All notable changes to this project are documented here. The format follows
   generate and fill an alias after an explicit click. Detection uses semantic
   field attributes and conservative email-label matching; the extension never
   submits the form automatically. Inline-created aliases use the page hostname
-  (and no other page URL or content) as their server-visible description.
+  (and no other page URL or content) as their server-visible description, and
+  users can choose which verified destination receives the alias's mail.
 
 ### Changed
 
@@ -25,6 +26,7 @@ All notable changes to this project are documented here. The format follows
   with local product fonts, the app envelope icon, and a clearer connected
   alias generator and setup flow. New connections default to
   `https://app.hidemyemail.dev` while self-hosted deployments remain supported.
+  The popup now clips its dark surface to rounded outer corners.
 
 ### Fixed
 
