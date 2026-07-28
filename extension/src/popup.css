@@ -7,9 +7,11 @@
   font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   color: #e8e8ec;
   background: transparent;
+  border-radius: 16px;
+  overflow: hidden;
 }
 * { box-sizing: border-box; }
-body { margin: 0; width: 390px; min-height: 420px; max-height: 600px; overflow-y: auto; border-radius: 16px; background: #0d0d0f; }
+body { margin: 0; width: 390px; min-height: 420px; max-height: 600px; overflow: hidden auto; border-radius: inherit; background: #0d0d0f; }
 main { padding: 20px; }
 header { display: flex; align-items: center; gap: 11px; min-height: 48px; padding-bottom: 17px; border-bottom: 1px solid #26262f; }
 .mark { width: 38px; height: 38px; border-radius: 10px; }
