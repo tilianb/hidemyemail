@@ -171,10 +171,12 @@ test("clamps the trigger and 230px chooser to the viewport and chooses the side 
   expect(panel.style.left).toBe("90px"); expect(getComputedStyle(panel).width).toBe("230px");
 });
 
-test("uses the trailing edge when no other autofill control is present", async () => {
-  const { host } = await mounted();
+test("uses the branded trigger at the padded trailing edge when no other autofill control is present", async () => {
+  const { host, shadow } = await mounted();
 
-  await vi.waitFor(() => expect(host.style.left).toBe("322px"));
+  await vi.waitFor(() => expect(host.style.left).toBe("318px"));
+  expect(shadow.querySelector(".trigger svg")).not.toBeNull();
+  expect(shadow.querySelector(".trigger")?.textContent).toBe("");
 });
 
 test("moves left of 1Password and Bitwarden-style inline controls without changing them", async () => {
@@ -187,7 +189,7 @@ test("moves left of 1Password and Bitwarden-style inline controls without changi
 
   const { host } = await mounted();
 
-  await vi.waitFor(() => expect(host.style.left).toBe("288px"));
+  await vi.waitFor(() => expect(host.style.left).toBe("291px"));
   expect(onePassword.isConnected).toBe(true);
   expect(bitwarden.isConnected).toBe(true);
   expect(onePassword.getAttribute("style")).toBeNull();
@@ -202,12 +204,12 @@ test("moves dynamically for late closed-shadow autofill UI with mismatched host 
   Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: elementsFromPoint });
   try {
     const { host } = await mounted();
-    expect(host.style.left).toBe("322px");
+    expect(host.style.left).toBe("318px");
 
     elementsFromPoint.mockImplementation((x) => x >= 322 ? [host, shadowHost] : [host]);
     await vi.advanceTimersByTimeAsync(120);
 
-    expect(host.style.left).toBe("288px");
+    expect(host.style.left).toBe("293px");
   } finally {
     Reflect.deleteProperty(document, "elementsFromPoint");
     vi.useRealTimers();

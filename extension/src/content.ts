@@ -5,7 +5,10 @@ type Send = (message: ContentRequest) => Promise<unknown>;
 const SAFE_ERROR = "HideMyEmail could not complete the request. Try again.";
 const teardowns = new WeakMap<HTMLDivElement, () => void>();
 const TRIGGER_SIZE = 28;
-const OVERLAY_GAP = 6;
+const OVERLAY_GAP = 3;
+const FIELD_EDGE_PADDING = 4;
+const OVERLAY_SCAN_WIDTH = 96;
+const OVERLAY_SCAN_STEP = 4;
 
 function aliasResponse(value: unknown, domain: string): value is { ok: true; alias: string } {
   if (typeof value !== "object" || value === null || !("ok" in value) || !("alias" in value)) return false;
@@ -40,17 +43,18 @@ export function requestAliasOnClick(button: HTMLButtonElement, input: HTMLInputE
   });
 }
 
-function overlaps(left: number, top: number, rect: DOMRect): boolean {
-  return rect.right > left && rect.left < left + TRIGGER_SIZE && rect.bottom > top && rect.top < top + TRIGGER_SIZE;
+function overlaps(left: number, top: number, width: number, rect: DOMRect): boolean {
+  return rect.right > left && rect.left < left + width && rect.bottom > top && rect.top < top + TRIGGER_SIZE;
 }
 
-function foreignOverlayRects(input: HTMLInputElement, host: HTMLDivElement, left: number, top: number): DOMRect[] {
+function foreignOverlayRects(input: HTMLInputElement, host: HTMLDivElement, left: number, top: number, width: number): DOMRect[] {
   const candidates = new Set<Element>(document.querySelectorAll("com-1password-button, [popover='manual']"));
-  const pointHits = new Set<Element>();
+  const pointHits = new Map<Element, number>();
   if (typeof document.elementsFromPoint === "function") {
-    for (const x of [left + 2, left + TRIGGER_SIZE / 2, left + TRIGGER_SIZE - 2]) {
+    for (let x = left + 2; x < left + width; x += OVERLAY_SCAN_STEP) {
       for (const element of document.elementsFromPoint(x, top + TRIGGER_SIZE / 2)) {
-        candidates.add(element); pointHits.add(element);
+        candidates.add(element);
+        if (!pointHits.has(element)) pointHits.set(element, x);
       }
     }
   }
@@ -60,11 +64,11 @@ function foreignOverlayRects(input: HTMLInputElement, host: HTMLDivElement, left
     const style = getComputedStyle(element);
     if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") continue;
     const rect = element.getBoundingClientRect();
-    if (style.pointerEvents !== "none" && rect.width > 0 && rect.height > 0 && overlaps(left, top, rect)) rects.push(rect);
+    if (style.pointerEvents !== "none" && rect.width > 0 && rect.height > 0 && overlaps(left, top, width, rect)) rects.push(rect);
     else if (pointHits.has(element) && element.localName.includes("-")) {
       // Closed shadow content is reported as its custom-element host, whose box
       // may not match the visible control. The hit point still proves the lane is occupied.
-      rects.push(new DOMRect(left, top, TRIGGER_SIZE, TRIGGER_SIZE));
+      rects.push(new DOMRect(pointHits.get(element)!, top, OVERLAY_SCAN_STEP, TRIGGER_SIZE));
     }
   }
   return rects;
@@ -72,21 +76,22 @@ function foreignOverlayRects(input: HTMLInputElement, host: HTMLDivElement, left
 
 export function triggerLeft(input: HTMLInputElement, host: HTMLDivElement, top: number): number | null {
   const field = input.getBoundingClientRect();
-  let left = field.right - TRIGGER_SIZE;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const collisions = foreignOverlayRects(input, host, left, top);
-    if (collisions.length === 0) return left >= field.left ? left : null;
-    left = Math.min(...collisions.map((rect) => rect.left)) - OVERLAY_GAP - TRIGGER_SIZE;
-  }
-  return null;
+  const trailingEdge = field.right - FIELD_EDGE_PADDING;
+  const scanLeft = Math.max(field.left, trailingEdge - OVERLAY_SCAN_WIDTH);
+  const collisions = foreignOverlayRects(input, host, scanLeft, top, trailingEdge - scanLeft);
+  const left = collisions.length === 0
+    ? trailingEdge - TRIGGER_SIZE
+    : Math.min(...collisions.map((rect) => rect.left)) - OVERLAY_GAP - TRIGGER_SIZE;
+  return left >= field.left + FIELD_EDGE_PADDING ? left : null;
 }
 
 export function mountContent(send: Send, shadowMode: ShadowRootMode = "closed"): HTMLDivElement {
   const host = document.createElement("div"); host.dataset.hmeExtension = "true";
   const shadow = host.attachShadow({ mode: shadowMode });
   const style = document.createElement("style");
-  style.textContent = `:host{all:initial;position:fixed;z-index:2147483647;color-scheme:dark;font:13px system-ui,sans-serif}.trigger{width:28px;height:28px;padding:0;border:1px solid #7a5700;border-radius:7px;background:#ffb300;color:#111;cursor:pointer;font-size:16px;line-height:26px}.trigger:focus-visible,button:focus-visible,select:focus-visible{outline:3px solid CanvasText;outline-offset:2px}.panel{box-sizing:border-box;position:fixed;width:230px;padding:14px;border:1px solid #45454f;border-radius:12px;background:#111114;color:#eee;box-shadow:0 8px 30px #0008}.brand{margin:0 0 10px;font-weight:700}.panel label{display:grid;gap:5px;color:#bbb}.panel select,.panel button{box-sizing:border-box;width:100%;min-height:38px;margin-top:5px;border:1px solid #555;border-radius:8px;padding:0 9px;background:#202026;color:#eee;font:inherit}.panel button{margin-top:10px;border-color:#ffb300;background:#ffb300;color:#111;font-weight:700;cursor:pointer}.status{min-height:16px;margin:8px 0 0;color:#ffcf5c;font-size:12px}@media(forced-colors:active){.trigger,.panel button{forced-color-adjust:none}}@media(prefers-reduced-motion:reduce){*{transition:none!important}}`;
-  const trigger = document.createElement("button"); trigger.className = "trigger"; trigger.type = "button"; trigger.setAttribute("aria-label", "Generate a HideMyEmail alias"); trigger.textContent = "✉";
+  style.textContent = `:host{all:initial;position:fixed;z-index:2147483647;color-scheme:dark;font:13px system-ui,sans-serif}.trigger{display:grid;place-items:center;width:28px;height:28px;padding:0;border:1px solid #7a5700;border-radius:7px;background:#ffb300;color:#111;cursor:pointer}.trigger svg{width:19px;height:19px}.trigger:focus-visible,button:focus-visible,select:focus-visible{outline:3px solid CanvasText;outline-offset:2px}.panel{box-sizing:border-box;position:fixed;width:230px;padding:14px;border:1px solid #45454f;border-radius:12px;background:#111114;color:#eee;box-shadow:0 8px 30px #0008}.brand{margin:0 0 10px;font-weight:700}.panel label{display:grid;gap:5px;color:#bbb}.panel select,.panel button{box-sizing:border-box;width:100%;min-height:38px;margin-top:5px;border:1px solid #555;border-radius:8px;padding:0 9px;background:#202026;color:#eee;font:inherit}.panel button{margin-top:10px;border-color:#ffb300;background:#ffb300;color:#111;font-weight:700;cursor:pointer}.status{min-height:16px;margin:8px 0 0;color:#ffcf5c;font-size:12px}@media(forced-colors:active){.trigger,.panel button{forced-color-adjust:none}}@media(prefers-reduced-motion:reduce){*{transition:none!important}}`;
+  const trigger = document.createElement("button"); trigger.className = "trigger"; trigger.type = "button"; trigger.setAttribute("aria-label", "Generate a HideMyEmail alias");
+  trigger.innerHTML = `<svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M6 10a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V10Z" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><path d="m6 10 10 6.5L26 10" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><rect x="9.5" y="14" width="13" height="4.5" rx="1" fill="currentColor"/></svg>`;
   shadow.append(style, trigger); host.hidden = true; document.documentElement.append(host);
   let target: HTMLInputElement | null = null; let panel: HTMLDivElement | null = null; let frame = 0; let generation = 0; let placementTimers: number[] = [];
   const place = () => {
