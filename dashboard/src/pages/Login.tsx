@@ -69,11 +69,11 @@ export function Login() {
     }
   }
 
-  async function loginWithPasskey() {
+  async function loginWithPasskey(mfa = false) {
     setErr("");
     setLoading(true);
     try {
-      const options = await api.passkeyLoginChallenge();
+      const options = await api.passkeyLoginChallenge(mfa);
       const { startAuthentication } = await import("@simplewebauthn/browser");
       const response = await startAuthentication({ optionsJSON: options as unknown as Parameters<typeof startAuthentication>[0]["optionsJSON"] });
       await api.passkeyLoginVerify(response);
@@ -174,6 +174,17 @@ export function Login() {
                   Enter the 6-digit code from your authenticator app, or one of your backup codes.
                 </p>
               </div>
+              {typeof window !== "undefined" && window.PublicKeyCredential && (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-full btn-center"
+                  onClick={() => loginWithPasskey(true)}
+                  disabled={loading}
+                >
+                  <Fingerprint size={16} />
+                  {loading ? "Verifying…" : "Use a Passkey"}
+                </button>
+              )}
               <div className="field">
                 <label className="field-label" htmlFor="mfa-code">Authentication code</label>
                 <input
@@ -259,7 +270,7 @@ export function Login() {
                   <button
                     type="button"
                     className="btn btn-primary btn-full btn-center"
-                    onClick={loginWithPasskey}
+                    onClick={() => loginWithPasskey(false)}
                     disabled={loading}
                   >
                     <Fingerprint size={16} />

@@ -4,12 +4,17 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.credentials.CredentialManager
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.GetPublicKeyCredentialOption
+import androidx.credentials.PublicKeyCredential
 import dev.hidemyemail.app.auth.TokenStore
 import dev.hidemyemail.app.auth.AuthTokenStore
 import dev.hidemyemail.app.auth.WebSessionAuth
 import dev.hidemyemail.app.auth.ServerOrigin
 import dev.hidemyemail.app.net.ApiClient
 import dev.hidemyemail.app.net.ApiException
+import dev.hidemyemail.app.net.isValidNativePasskeyChallenge
 import dev.hidemyemail.app.push.PushManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,7 +22,7 @@ import kotlinx.coroutines.launch
 
 sealed interface AuthPhase {
     data object LoggedOut : AuthPhase
-    data class AwaitingMfa(val mfaToken: String?) : AuthPhase
+    data class AwaitingMfa(val mfaToken: String) : AuthPhase
     data object LoggedIn : AuthPhase
 }
 
@@ -131,7 +136,9 @@ class AppViewModel(
         val res = client.login(password)
         requireCurrent(binding.first, binding.second)
         if (res.mfaRequired == true) {
-            _phase.value = AuthPhase.AwaitingMfa(res.mfaToken)
+            val mfaToken = res.mfaToken?.takeIf { it.isNotBlank() }
+                ?: throw ApiException.Decoding()
+            _phase.value = AuthPhase.AwaitingMfa(mfaToken)
             return
         }
         finishLogin(res.token, res.freshAuth, binding, client)
@@ -141,8 +148,33 @@ class AppViewModel(
         val binding = currentBinding()
         val client = client ?: throw ApiException.NotConfigured()
         val mfaToken = (_phase.value as? AuthPhase.AwaitingMfa)?.mfaToken
+            ?: throw ApiException.Unauthorized()
         val res = client.completeMfa(code, mfaToken)
         finishLogin(res.token, res.freshAuth, binding, client)
+    }
+
+    /** Native standalone or account-bound MFA passkey authentication. */
+    suspend fun loginWithPasskey(context: Context) {
+        val binding = currentBinding()
+        val operationClient = ensureClient()
+        val mfaToken = when (val current = _phase.value) {
+            is AuthPhase.AwaitingMfa -> current.mfaToken
+            AuthPhase.LoggedOut -> null
+            AuthPhase.LoggedIn -> throw ApiException.Unauthorized()
+        }
+        val challenge = operationClient.passkeyAuthenticationChallenge(mfaToken)
+        requireCurrent(binding.first, binding.second)
+        check(isValidNativePasskeyChallenge(binding.first, challenge.rpId)) {
+            "Server returned an invalid passkey RP ID"
+        }
+        val result = CredentialManager.create(context).getCredential(
+            context,
+            GetCredentialRequest(listOf(GetPublicKeyCredentialOption(challenge.requestOptionsJson))),
+        ).credential as? PublicKeyCredential
+            ?: error("Credential provider returned an unexpected response")
+        requireCurrent(binding.first, binding.second)
+        val response = operationClient.verifyPasskeyAuthentication(result.authenticationResponseJson, challenge.passkeyToken)
+        finishLogin(response.token, response.freshAuth, binding, operationClient)
     }
 
     /** Step 1 of web sign-in: open the server's dashboard login in a Custom Tab. */

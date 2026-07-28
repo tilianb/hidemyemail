@@ -8,6 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Dashboard, iOS, and Android passphrase sign-in can now use an account-bound
+  registered passkey instead of a TOTP or backup code when MFA is enabled.
 - Chromium extension v1.3.1 can search, copy, activate, deactivate, and delete
   aliases from a new manager tab. Alias creation now supports random, UUID,
   and custom local parts plus optional descriptions.
@@ -26,6 +28,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The iOS MFA setup screen now renders its QR code correctly in dark mode
+  instead of showing an oversized blank area.
 - Inline alias controls now reserve the trailing autofill lane and move farther
   away from detectable controls, preventing overlap with isolated Bitwarden and
   1Password UI. They stay hidden when a field is too narrow to fit separately.

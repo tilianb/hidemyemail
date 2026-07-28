@@ -198,7 +198,7 @@ export const api = {
   passkeyRegister: (body: { response: unknown; deviceName?: string }) => req<{ ok: true; id: string }>("/api/settings/passkeys/register", { method: "POST", body: JSON.stringify(body) }),
   passkeyRename: (id: string, deviceName: string) => req<{ ok: true }>(`/api/settings/passkeys/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ deviceName }) }),
   passkeyDelete: (id: string) => req<{ ok: true }>(`/api/settings/passkeys/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  passkeyLoginChallenge: () => req<Record<string, unknown>>("/api/passkey/challenge", { method: "POST" }),
+  passkeyLoginChallenge: (mfa = false) => req<Record<string, unknown>>("/api/passkey/challenge", { method: "POST", body: JSON.stringify(mfa ? { mfa: true } : {}) }),
   passkeyLoginVerify: (response: unknown) => req<{ ok: true; userId: number }>("/api/passkey/verify", { method: "POST", body: JSON.stringify(response) }),
 
   // User preferences
