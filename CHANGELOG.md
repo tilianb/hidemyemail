@@ -30,9 +30,9 @@ All notable changes to this project are documented here. The format follows
 
 - The iOS MFA setup screen now renders its QR code correctly in dark mode
   instead of showing an oversized blank area.
-- Inline alias controls now move away from existing autofill controls such as
-  Bitwarden and 1Password, and stay hidden when a field is too narrow to fit a
-  separate control without overlap.
+- Inline alias controls now reserve the trailing autofill lane and move farther
+  away from detectable controls, preventing overlap with isolated Bitwarden and
+  1Password UI. They stay hidden when a field is too narrow to fit separately.
 
 ### Security
 
