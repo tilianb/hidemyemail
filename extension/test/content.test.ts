@@ -167,17 +167,23 @@ test("clamps the trigger and 230px chooser to the viewport and chooses the side 
   expect(panel.style.left).toBe("90px"); expect(getComputedStyle(panel).width).toBe("230px");
 });
 
+test("reserves the trailing autofill lane when password-manager shadow UI is undetectable", async () => {
+  const { host } = await mounted();
+
+  await vi.waitFor(() => expect(host.style.left).toBe("288px"));
+});
+
 test("moves left of 1Password and Bitwarden-style inline controls without changing them", async () => {
   const onePassword = document.createElement("com-1password-button");
-  vi.spyOn(onePassword, "getBoundingClientRect").mockReturnValue(rect(322, 106, 28, 28));
+  vi.spyOn(onePassword, "getBoundingClientRect").mockReturnValue(rect(288, 106, 28, 28));
   document.body.append(onePassword);
   const bitwarden = document.createElement("bw-random-host"); bitwarden.setAttribute("popover", "manual");
-  vi.spyOn(bitwarden, "getBoundingClientRect").mockReturnValue(rect(322, 106, 28, 28));
+  vi.spyOn(bitwarden, "getBoundingClientRect").mockReturnValue(rect(288, 106, 28, 28));
   document.body.append(bitwarden);
 
   const { host } = await mounted();
 
-  await vi.waitFor(() => expect(host.style.left).toBe("288px"));
+  await vi.waitFor(() => expect(host.style.left).toBe("254px"));
   expect(onePassword.isConnected).toBe(true);
   expect(bitwarden.isConnected).toBe(true);
   expect(onePassword.getAttribute("style")).toBeNull();
