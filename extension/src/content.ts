@@ -6,6 +6,7 @@ const SAFE_ERROR = "HideMyEmail could not complete the request. Try again.";
 const teardowns = new WeakMap<HTMLDivElement, () => void>();
 const TRIGGER_SIZE = 28;
 const OVERLAY_GAP = 6;
+const TRAILING_CONTROL_LANE = TRIGGER_SIZE + OVERLAY_GAP;
 
 function aliasResponse(value: unknown, domain: string): value is { ok: true; alias: string } {
   if (typeof value !== "object" || value === null || !("ok" in value) || !("alias" in value)) return false;
@@ -64,7 +65,9 @@ function foreignOverlayRects(input: HTMLInputElement, host: HTMLDivElement, left
 
 export function triggerLeft(input: HTMLInputElement, host: HTMLDivElement, top: number): number | null {
   const field = input.getBoundingClientRect();
-  let left = field.right - TRIGGER_SIZE;
+  // Password-manager controls can be hidden behind extension-owned shadow roots,
+  // so leave their conventional trailing lane free even when they are undetectable.
+  let left = field.right - TRIGGER_SIZE - TRAILING_CONTROL_LANE;
   for (let attempt = 0; attempt < 4; attempt++) {
     const collisions = foreignOverlayRects(input, host, left, top);
     if (collisions.length === 0) return left >= field.left ? left : null;
