@@ -3,10 +3,14 @@ import { afterEach, expect, test, vi } from "vitest";
 import { fillField, mountContent, requestAliasOnClick, unmountContent } from "../src/content";
 
 const SAFE_ERROR = "HideMyEmail could not complete the request. Try again.";
+const originalInnerWidth = innerWidth;
+const originalInnerHeight = innerHeight;
 
 afterEach(() => {
   document.documentElement.querySelectorAll<HTMLDivElement>("[data-hme-extension]").forEach(unmountContent);
   document.body.replaceChildren();
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: originalInnerWidth });
+  Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });
   vi.restoreAllMocks();
 });
 
@@ -167,27 +171,47 @@ test("clamps the trigger and 230px chooser to the viewport and chooses the side 
   expect(panel.style.left).toBe("90px"); expect(getComputedStyle(panel).width).toBe("230px");
 });
 
-test("reserves the trailing autofill lane when password-manager shadow UI is undetectable", async () => {
+test("uses the trailing edge when no other autofill control is present", async () => {
   const { host } = await mounted();
 
-  await vi.waitFor(() => expect(host.style.left).toBe("288px"));
+  await vi.waitFor(() => expect(host.style.left).toBe("322px"));
 });
 
 test("moves left of 1Password and Bitwarden-style inline controls without changing them", async () => {
   const onePassword = document.createElement("com-1password-button");
-  vi.spyOn(onePassword, "getBoundingClientRect").mockReturnValue(rect(288, 106, 28, 28));
+  vi.spyOn(onePassword, "getBoundingClientRect").mockReturnValue(rect(322, 106, 28, 28));
   document.body.append(onePassword);
   const bitwarden = document.createElement("bw-random-host"); bitwarden.setAttribute("popover", "manual");
-  vi.spyOn(bitwarden, "getBoundingClientRect").mockReturnValue(rect(288, 106, 28, 28));
+  vi.spyOn(bitwarden, "getBoundingClientRect").mockReturnValue(rect(322, 106, 28, 28));
   document.body.append(bitwarden);
 
   const { host } = await mounted();
 
-  await vi.waitFor(() => expect(host.style.left).toBe("254px"));
+  await vi.waitFor(() => expect(host.style.left).toBe("288px"));
   expect(onePassword.isConnected).toBe(true);
   expect(bitwarden.isConnected).toBe(true);
   expect(onePassword.getAttribute("style")).toBeNull();
   expect(bitwarden.getAttribute("style")).toBeNull();
+});
+
+test("moves dynamically for late closed-shadow autofill UI with mismatched host geometry", async () => {
+  vi.useFakeTimers();
+  const shadowHost = document.createElement("password-manager-root");
+  vi.spyOn(shadowHost, "getBoundingClientRect").mockReturnValue(rect(0, 0, 0, 0));
+  const elementsFromPoint = vi.fn<(x: number, y: number) => Element[]>(() => []);
+  Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: elementsFromPoint });
+  try {
+    const { host } = await mounted();
+    expect(host.style.left).toBe("322px");
+
+    elementsFromPoint.mockImplementation((x) => x >= 322 ? [host, shadowHost] : [host]);
+    await vi.advanceTimersByTimeAsync(120);
+
+    expect(host.style.left).toBe("288px");
+  } finally {
+    Reflect.deleteProperty(document, "elementsFromPoint");
+    vi.useRealTimers();
+  }
 });
 
 test("hides the trigger when a narrow field has no non-overlapping icon lane", async () => {

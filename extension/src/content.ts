@@ -6,7 +6,6 @@ const SAFE_ERROR = "HideMyEmail could not complete the request. Try again.";
 const teardowns = new WeakMap<HTMLDivElement, () => void>();
 const TRIGGER_SIZE = 28;
 const OVERLAY_GAP = 6;
-const TRAILING_CONTROL_LANE = TRIGGER_SIZE + OVERLAY_GAP;
 
 function aliasResponse(value: unknown, domain: string): value is { ok: true; alias: string } {
   if (typeof value !== "object" || value === null || !("ok" in value) || !("alias" in value)) return false;
@@ -47,27 +46,33 @@ function overlaps(left: number, top: number, rect: DOMRect): boolean {
 
 function foreignOverlayRects(input: HTMLInputElement, host: HTMLDivElement, left: number, top: number): DOMRect[] {
   const candidates = new Set<Element>(document.querySelectorAll("com-1password-button, [popover='manual']"));
+  const pointHits = new Set<Element>();
   if (typeof document.elementsFromPoint === "function") {
     for (const x of [left + 2, left + TRIGGER_SIZE / 2, left + TRIGGER_SIZE - 2]) {
-      for (const element of document.elementsFromPoint(x, top + TRIGGER_SIZE / 2)) candidates.add(element);
+      for (const element of document.elementsFromPoint(x, top + TRIGGER_SIZE / 2)) {
+        candidates.add(element); pointHits.add(element);
+      }
     }
   }
   const rects: DOMRect[] = [];
   for (const element of candidates) {
     if (!(element instanceof HTMLElement) || element === host || host.contains(element) || element === input || element.contains(input)) continue;
     const style = getComputedStyle(element);
-    if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0" || style.pointerEvents === "none") continue;
+    if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") continue;
     const rect = element.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0 && overlaps(left, top, rect)) rects.push(rect);
+    if (style.pointerEvents !== "none" && rect.width > 0 && rect.height > 0 && overlaps(left, top, rect)) rects.push(rect);
+    else if (pointHits.has(element) && element.localName.includes("-")) {
+      // Closed shadow content is reported as its custom-element host, whose box
+      // may not match the visible control. The hit point still proves the lane is occupied.
+      rects.push(new DOMRect(left, top, TRIGGER_SIZE, TRIGGER_SIZE));
+    }
   }
   return rects;
 }
 
 export function triggerLeft(input: HTMLInputElement, host: HTMLDivElement, top: number): number | null {
   const field = input.getBoundingClientRect();
-  // Password-manager controls can be hidden behind extension-owned shadow roots,
-  // so leave their conventional trailing lane free even when they are undetectable.
-  let left = field.right - TRIGGER_SIZE - TRAILING_CONTROL_LANE;
+  let left = field.right - TRIGGER_SIZE;
   for (let attempt = 0; attempt < 4; attempt++) {
     const collisions = foreignOverlayRects(input, host, left, top);
     if (collisions.length === 0) return left >= field.left ? left : null;
@@ -83,7 +88,7 @@ export function mountContent(send: Send, shadowMode: ShadowRootMode = "closed"):
   style.textContent = `:host{all:initial;position:fixed;z-index:2147483647;color-scheme:dark;font:13px system-ui,sans-serif}.trigger{width:28px;height:28px;padding:0;border:1px solid #7a5700;border-radius:7px;background:#ffb300;color:#111;cursor:pointer;font-size:16px;line-height:26px}.trigger:focus-visible,button:focus-visible,select:focus-visible{outline:3px solid CanvasText;outline-offset:2px}.panel{box-sizing:border-box;position:fixed;width:230px;padding:14px;border:1px solid #45454f;border-radius:12px;background:#111114;color:#eee;box-shadow:0 8px 30px #0008}.brand{margin:0 0 10px;font-weight:700}.panel label{display:grid;gap:5px;color:#bbb}.panel select,.panel button{box-sizing:border-box;width:100%;min-height:38px;margin-top:5px;border:1px solid #555;border-radius:8px;padding:0 9px;background:#202026;color:#eee;font:inherit}.panel button{margin-top:10px;border-color:#ffb300;background:#ffb300;color:#111;font-weight:700;cursor:pointer}.status{min-height:16px;margin:8px 0 0;color:#ffcf5c;font-size:12px}@media(forced-colors:active){.trigger,.panel button{forced-color-adjust:none}}@media(prefers-reduced-motion:reduce){*{transition:none!important}}`;
   const trigger = document.createElement("button"); trigger.className = "trigger"; trigger.type = "button"; trigger.setAttribute("aria-label", "Generate a HideMyEmail alias"); trigger.textContent = "✉";
   shadow.append(style, trigger); host.hidden = true; document.documentElement.append(host);
-  let target: HTMLInputElement | null = null; let panel: HTMLDivElement | null = null; let frame = 0; let generation = 0;
+  let target: HTMLInputElement | null = null; let panel: HTMLDivElement | null = null; let frame = 0; let generation = 0; let placementTimers: number[] = [];
   const place = () => {
     if (!target) return;
     cancelAnimationFrame(frame); frame = requestAnimationFrame(() => {
@@ -115,7 +120,7 @@ export function mountContent(send: Send, shadowMode: ShadowRootMode = "closed"):
     if (active) attributeObserver.observe(document.documentElement, activeObservation);
     else { attributeObserver.disconnect(); recoveryObserver.observe(document.documentElement, inactiveObservation); }
   };
-  const hide = () => { close(false); target = null; host.hidden = true; observe(false); };
+  const hide = () => { close(false); target = null; host.hidden = true; placementTimers.forEach(clearTimeout); placementTimers = []; observe(false); };
   const open = async () => {
     if (!target || panel) return;
     panel = document.createElement("div"); panel.className = "panel"; panel.setAttribute("role", "dialog"); panel.setAttribute("aria-label", "HideMyEmail alias generator");
@@ -136,7 +141,11 @@ export function mountContent(send: Send, shadowMode: ShadowRootMode = "closed"):
   const onTriggerClick = () => { void open(); };
   const onFocusIn = (event: FocusEvent) => {
     const input = event.composedPath().find(isEmailField);
-    if (input) { target = input; host.hidden = false; close(false); observe(true); place(); }
+    if (input) {
+      target = input; host.hidden = false; close(false); observe(true); place();
+      placementTimers.forEach(clearTimeout);
+      placementTimers = [100, 300, 1000].map((delay) => window.setTimeout(place, delay));
+    }
     else if (event.composedPath().includes(host)) return;
     else if (!panel) hide();
   };
@@ -159,7 +168,7 @@ export function mountContent(send: Send, shadowMode: ShadowRootMode = "closed"):
   observe(false);
   teardowns.set(host, () => {
     generation++;
-    recoveryObserver.disconnect(); attributeObserver.disconnect(); clearTimeout(mutationTimer); cancelAnimationFrame(frame);
+    recoveryObserver.disconnect(); attributeObserver.disconnect(); clearTimeout(mutationTimer); placementTimers.forEach(clearTimeout); cancelAnimationFrame(frame);
     trigger.removeEventListener("click", onTriggerClick);
     document.removeEventListener("focusin", onFocusIn, true);
     document.removeEventListener("pointerdown", onPointerDown, true);
