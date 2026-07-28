@@ -7,11 +7,11 @@ const response = (body: unknown, status = 200) => new Response(JSON.stringify(bo
 test("probes and loads validated domains and destinations with bearer header", async () => {
   const fetcher = vi.fn()
     .mockResolvedValueOnce(response({ name: "Extension", created_at: "2026-01-01 00:00:00", expires_at: null }))
-    .mockResolvedValueOnce(response({ data: ["one.example"], defaultAliasDomain: "one.example", defaultAliasFormat: "random_characters" }))
+    .mockResolvedValueOnce(response({ data: ["one.example"], defaultAliasDomain: "one.example", defaultAliasFormat: "random_characters", customAliasDomains: ["one.example"] }))
     .mockResolvedValueOnce(response({ data: [{ id: "7", email: "real@me.example", isDefault: true }], defaultDestinationId: "7" }));
   const api = createApi(config, fetcher);
   await api.probe();
-  expect(await api.domains()).toEqual({ domains: ["one.example"], defaultDomain: "one.example" });
+  expect(await api.domains()).toEqual({ domains: ["one.example"], defaultDomain: "one.example", customAliasDomains: ["one.example"] });
   expect(await api.destinations()).toEqual({ destinations: [{ id: "7", email: "real@me.example", isDefault: true }], defaultDestinationId: "7" });
   expect(fetcher.mock.calls.map(([url]) => url)).toEqual(["https://mail.example/api/v1/api-token-details", "https://mail.example/api/v1/domain-options", "https://mail.example/api/v1/destination-options"]);
   for (const [, init] of fetcher.mock.calls) expect(new Headers(init.headers).get("Authorization")).toBe("Bearer hme_secret");
@@ -179,9 +179,11 @@ test.each([
 });
 
 test.each([
-  { data: ["one.example", "one.example"], defaultAliasDomain: "one.example", defaultAliasFormat: "random_characters" },
-  { data: ["-bad.example"], defaultAliasDomain: null, defaultAliasFormat: "random_characters" },
-  { data: ["one.example"], defaultAliasDomain: "other.example", defaultAliasFormat: "random_characters" },
+  { data: ["one.example", "one.example"], defaultAliasDomain: "one.example", defaultAliasFormat: "random_characters", customAliasDomains: [] },
+  { data: ["-bad.example"], defaultAliasDomain: null, defaultAliasFormat: "random_characters", customAliasDomains: [] },
+  { data: ["one.example"], defaultAliasDomain: "other.example", defaultAliasFormat: "random_characters", customAliasDomains: [] },
+  { data: ["one.example"], defaultAliasDomain: "one.example", defaultAliasFormat: "random_characters", customAliasDomains: ["other.example"] },
+  { data: ["one.example"], defaultAliasDomain: "one.example", defaultAliasFormat: "random_characters", customAliasDomains: ["one.example", "one.example"] },
 ])("rejects malformed domain options %#", async (body) => {
   await expect(createApi(config, vi.fn(async () => response(body))).domains()).rejects.toMatchObject({ kind: "malformed" });
 });

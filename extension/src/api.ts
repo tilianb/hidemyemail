@@ -107,8 +107,11 @@ export function createApi(config: ExtensionConfig, fetcher: Fetcher = fetch) {
     },
     async domains() {
       const body = await request("/api/v1/domain-options");
-      if (!record(body) || !Array.isArray(body.data) || body.data.length === 0 || !body.data.every(isValidDomain) || new Set(body.data).size !== body.data.length || !(body.defaultAliasDomain === null || (isValidDomain(body.defaultAliasDomain) && body.data.includes(body.defaultAliasDomain))) || body.defaultAliasFormat !== "random_characters") throw new ApiError("malformed", "The server returned invalid domain options.");
-      return { domains: body.data as string[], defaultDomain: typeof body.defaultAliasDomain === "string" ? body.defaultAliasDomain : body.data[0] as string };
+      if (!record(body) || !Array.isArray(body.data) || !Array.isArray(body.customAliasDomains)) throw new ApiError("malformed", "The server returned invalid domain options.");
+      const domains = body.data;
+      const customAliasDomains = body.customAliasDomains;
+      if (domains.length === 0 || !domains.every(isValidDomain) || new Set(domains).size !== domains.length || !(body.defaultAliasDomain === null || (isValidDomain(body.defaultAliasDomain) && domains.includes(body.defaultAliasDomain))) || body.defaultAliasFormat !== "random_characters" || !customAliasDomains.every((domain) => isValidDomain(domain) && domains.includes(domain)) || new Set(customAliasDomains).size !== customAliasDomains.length) throw new ApiError("malformed", "The server returned invalid domain options.");
+      return { domains: domains as string[], defaultDomain: typeof body.defaultAliasDomain === "string" ? body.defaultAliasDomain : domains[0] as string, customAliasDomains: customAliasDomains as string[] };
     },
     async destinations() {
       const body = await request("/api/v1/destination-options");

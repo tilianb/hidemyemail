@@ -48,6 +48,10 @@ All endpoints require the bearer key. Errors use addy.io's
 | POST | `/api/v1/active-aliases` | Activate an alias (`{"id": …}`) |
 | DELETE | `/api/v1/active-aliases/:id` | Deactivate an alias (204) |
 
+`GET /api/v1/domain-options` includes `customAliasDomains`, the subset of
+returned domains on which the authenticated user may create a chosen local
+part. Clients should only offer the `custom` format for those domains.
+
 ### POST /api/v1/aliases
 
 ```json

@@ -118,16 +118,18 @@ export function v1Routes() {
     const userId = c.get("userId");
     const [rows, main] = await Promise.all([
       c.env.DB.prepare(
-        "SELECT domain FROM domains WHERE (is_global = 1 AND active = 1 AND verified_at IS NOT NULL) " +
+        "SELECT domain, is_global, allow_custom_aliases FROM domains WHERE (is_global = 1 AND active = 1 AND verified_at IS NOT NULL) " +
         "OR (is_global = 0 AND user_id = ?) ORDER BY is_global DESC, domain"
-      ).bind(userId).all<{ domain: string }>(),
+      ).bind(userId).all<{ domain: string; is_global: number; allow_custom_aliases: number }>(),
       getMainGlobalDomain(c.env.DB, c.env),
     ]);
-    const options = (rows.results ?? []).map((d) => d.domain);
+    const domains = rows.results ?? [];
+    const options = domains.map((domain) => domain.domain);
     return c.json({
       data: options,
       defaultAliasDomain: options.includes(main) ? main : (options[0] ?? null),
       defaultAliasFormat: "random_characters",
+      customAliasDomains: domains.filter((domain) => domain.is_global !== 1 || domain.allow_custom_aliases === 1).map((domain) => domain.domain),
     });
   });
 

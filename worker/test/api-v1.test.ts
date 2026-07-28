@@ -377,12 +377,13 @@ test("domain-options lists usable domains with the main domain as default", asyn
     headers: { Authorization: `Bearer ${token}` },
   }, testEnv);
   expect(res.status).toBe(200);
-  const body = await res.json<{ data: string[]; defaultAliasDomain: string; defaultAliasFormat: string }>();
+  const body = await res.json<{ data: string[]; defaultAliasDomain: string; defaultAliasFormat: string; customAliasDomains: string[] }>();
   expect(body.data).toContain("hidemyemail.dev");
   expect(body.data).toContain("mine.hidemyemail.dev");
   expect(body.data).not.toContain("unverified.example");
   expect(body.defaultAliasDomain).toBe("hidemyemail.dev");
   expect(body.defaultAliasFormat).toBe("random_characters");
+  expect(body.customAliasDomains).toEqual(["mine.hidemyemail.dev"]);
 });
 
 test("disabled account's API key stops authenticating", async () => {

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, expect, test, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ configure: vi.fn(), domains: vi.fn(async () => ({ domains: ["one.example"], defaultDomain: "one.example" })), destinations: vi.fn(async () => ({ destinations: [{ id: "7", email: "real@me.example", isDefault: true }], defaultDestinationId: "7" as string | null })), writeText: vi.fn(), send: vi.fn() }));
+const mocks = vi.hoisted(() => ({ configure: vi.fn(), domains: vi.fn(async () => ({ domains: ["one.example"], defaultDomain: "one.example", customAliasDomains: ["one.example"] })), destinations: vi.fn(async () => ({ destinations: [{ id: "7", email: "real@me.example", isDefault: true }], defaultDestinationId: "7" as string | null })), writeText: vi.fn(), send: vi.fn() }));
 vi.mock("../src/api", () => ({ ApiError: class extends Error {}, isValidDomain: (value: unknown) => typeof value === "string" && value.includes("."), createApi: () => ({ probe: vi.fn(), domains: mocks.domains, destinations: mocks.destinations }) }));
 vi.mock("../src/config", () => ({ ConfigError: class extends Error {}, chromePlatform: {}, configure: mocks.configure, initializeConfig: vi.fn(async () => ({ ok: true, config: { server: "https://mail.example", key: "hme_key" } })) }));
 
@@ -21,7 +21,7 @@ async function loadPopup() {
   await vi.waitFor(() => expect(document.querySelector<HTMLElement>("#app")!.hidden).toBe(false));
 }
 
-beforeEach(() => { vi.clearAllMocks(); vi.resetModules(); mocks.domains.mockResolvedValue({ domains: ["one.example"], defaultDomain: "one.example" }); mocks.destinations.mockResolvedValue({ destinations: [{ id: "7", email: "real@me.example", isDefault: true }], defaultDestinationId: "7" }); mocks.send.mockResolvedValue({ ok: true, aliases: [alias("1")] }); });
+beforeEach(() => { vi.clearAllMocks(); vi.resetModules(); mocks.domains.mockResolvedValue({ domains: ["one.example"], defaultDomain: "one.example", customAliasDomains: ["one.example"] }); mocks.destinations.mockResolvedValue({ destinations: [{ id: "7", email: "real@me.example", isDefault: true }], defaultDestinationId: "7" }); mocks.send.mockResolvedValue({ ok: true, aliases: [alias("1")] }); });
 
 test("tabs implement keyboard semantics and load aliases", async () => {
   await loadPopup(); const create = document.querySelector<HTMLButtonElement>("#tab-create")!; const aliases = document.querySelector<HTMLButtonElement>("#tab-aliases")!;
@@ -55,6 +55,23 @@ test("blocks creation when no verified destination is available", async () => {
   expect(document.querySelector<HTMLSelectElement>("#destination")!.disabled).toBe(true);
   expect(document.querySelector<HTMLButtonElement>("#generate")!.disabled).toBe(true);
   expect(document.querySelector("#create-status")!.textContent).toContain("Add and verify a destination");
+});
+
+test("only shows custom format for domains that permit chosen local parts", async () => {
+  mocks.domains.mockResolvedValueOnce({ domains: ["one.example", "managed.example"], defaultDomain: "one.example", customAliasDomains: ["one.example"] });
+  await loadPopup();
+  const domain = document.querySelector<HTMLSelectElement>("#domain")!;
+  const format = document.querySelector<HTMLSelectElement>("#format")!;
+  expect(format.querySelector('option[value="custom"]')).not.toBeNull();
+  format.value = "custom";
+  format.dispatchEvent(new Event("change"));
+
+  domain.value = "managed.example";
+  domain.dispatchEvent(new Event("change"));
+
+  expect(format.querySelector('option[value="custom"]')).toBeNull();
+  expect(format.value).toBe("random_characters");
+  expect(document.querySelector<HTMLElement>("#local-label")!.hidden).toBe(true);
 });
 
 test("invalid custom local part leaves no loading message and keeps controls unlocked", async () => {
