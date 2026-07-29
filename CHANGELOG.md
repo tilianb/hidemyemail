@@ -27,8 +27,9 @@ All notable changes to this project are documented here. The format follows
   with local product fonts, the app envelope icon, and a clearer connected
   alias generator and setup flow. New connections default to
   `https://app.hidemyemail.dev` while self-hosted deployments remain supported.
-  The popup now clips its dark surface to rounded outer corners and only shows
-  the custom alias format for domains whose policy permits chosen local parts.
+  The toolbar icon and popup surface now have rounded outer corners, and the
+  popup only shows the custom alias format for domains whose policy permits
+  chosen local parts.
 
 ### Fixed
 
