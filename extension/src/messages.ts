@@ -1,9 +1,9 @@
-import { creatableLocalPart, inputDescription, isValidDomain, type Alias, type CreateAliasInput } from "./api";
+import { creatableLocalPart, inputDescription, isValidDomain, type Alias, type CreateAliasInput, type DestinationOption } from "./api";
 import type { ExtensionConfig } from "./config";
 
-export type ContentRequest = { type: "hme:domain-options" } | { type: "hme:generate"; domain: string };
+export type ContentRequest = { type: "hme:domain-options" } | { type: "hme:generate"; domain: string; destinationId: string };
 export type ContentResponse =
-  | { ok: true; domains: string[]; defaultDomain: string }
+  | { ok: true; domains: string[]; defaultDomain: string; destinations: DestinationOption[]; defaultDestinationId: string | null }
   | { ok: true; alias: string }
   | { ok: false; error: string };
 export type PopupRequest =
@@ -16,6 +16,7 @@ type Dependencies = {
   extensionId: string;
   loadConfig(): Promise<ExtensionConfig | null>;
   domains(config: ExtensionConfig): Promise<{ domains: string[]; defaultDomain: string }>;
+  destinations(config: ExtensionConfig): Promise<{ destinations: DestinationOption[]; defaultDestinationId: string | null }>;
   createRich(config: ExtensionConfig, input: CreateAliasInput): Promise<Alias>;
   list(config: ExtensionConfig, search?: string): Promise<Alias[]>;
   activate(config: ExtensionConfig, id: string): Promise<void>;
@@ -29,7 +30,7 @@ function request(value: unknown): ContentRequest | null {
   if (!record(value)) return null;
   const keys = Object.keys(value);
   if (value.type === "hme:domain-options" && keys.length === 1) return { type: value.type };
-  if (value.type === "hme:generate" && keys.length === 2 && isValidDomain(value.domain)) return { type: value.type, domain: value.domain };
+  if (value.type === "hme:generate" && keys.length === 3 && isValidDomain(value.domain) && validId(value.destinationId)) return { type: value.type, domain: value.domain, destinationId: value.destinationId };
   return null;
 }
 
@@ -47,7 +48,8 @@ function popupRequest(value: unknown): PopupRequest | null {
     const format = input.format;
     const descriptionOk = input.description === undefined || inputDescription(input.description);
     const localOk = format === "custom" ? creatableLocalPart(input.local_part) : input.local_part === undefined;
-    if (isValidDomain(input.domain) && (format === "random_characters" || format === "uuid" || format === "custom") && descriptionOk && localOk && inputKeys.every((key) => ["domain", "format", "description", "local_part"].includes(key))) return value as PopupRequest;
+    const destinationOk = input.destination_id === undefined || validId(input.destination_id);
+    if (isValidDomain(input.domain) && (format === "random_characters" || format === "uuid" || format === "custom") && descriptionOk && localOk && destinationOk && inputKeys.every((key) => ["domain", "format", "description", "local_part", "destination_id"].includes(key))) return value as PopupRequest;
   }
   if ((value.type === "hme:aliases:activate" || value.type === "hme:aliases:deactivate" || value.type === "hme:aliases:delete") && keys.length === 2 && validId(value.id)) return value as PopupRequest;
   return null;
@@ -91,11 +93,11 @@ export async function handleContentMessage(value: unknown, sender: chrome.runtim
       return { ok: true };
     }
     const message = content!;
-    const options = await deps.domains(config);
-    if (message.type === "hme:domain-options") return { ok: true, domains: [...options.domains], defaultDomain: options.defaultDomain };
-    if (!options.domains.includes(message.domain)) return unsupported();
+    const [options, destinationOptions] = await Promise.all([deps.domains(config), deps.destinations(config)]);
+    if (message.type === "hme:domain-options") return { ok: true, domains: [...options.domains], defaultDomain: options.defaultDomain, destinations: destinationOptions.destinations.map((destination) => ({ ...destination })), defaultDestinationId: destinationOptions.defaultDestinationId };
+    if (!options.domains.includes(message.domain) || !destinationOptions.destinations.some(({ id }) => id === message.destinationId)) return unsupported();
     const description = senderHostname(sender);
-    const alias = await deps.createRich(config, { domain: message.domain, format: "random_characters", ...(description ? { description } : {}) });
+    const alias = await deps.createRich(config, { domain: message.domain, destination_id: message.destinationId, format: "random_characters", ...(description ? { description } : {}) });
     if (alias.domain !== message.domain || !alias.email.endsWith(`@${message.domain}`)) throw new Error("Unexpected alias domain");
     return { ok: true, alias: alias.email };
   } catch (error) {

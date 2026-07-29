@@ -15,6 +15,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
     extensionId: chrome.runtime.id,
     loadConfig,
     domains: (config) => createApi(config).domains(),
+    destinations: (config) => createApi(config).destinations(),
     createRich: (config, input) => createApi(config).createAlias(input),
     list: (config, search) => createApi(config).listAliases(search),
     activate: async (config, id) => { await createApi(config).activateAlias(id); },
