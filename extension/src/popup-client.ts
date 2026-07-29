@@ -24,8 +24,8 @@ export async function popupRequest(message: PopupRequest): Promise<{ aliases?: A
   return {};
 }
 
-export function createInput(domain: string, format: CreateAliasInput["format"], description: string, localPart: string): CreateAliasInput {
-  const input: CreateAliasInput = { domain, format };
+export function createInput(domain: string, destinationId: string, format: CreateAliasInput["format"], description: string, localPart: string): CreateAliasInput {
+  const input: CreateAliasInput = { domain, destination_id: destinationId, format };
   if (description.trim()) input.description = description.trim();
   if (format === "custom") input.local_part = localPart.trim();
   return input;
