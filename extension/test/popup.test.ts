@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { beforeEach, expect, test, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ configure: vi.fn(), domains: vi.fn(async () => ({ domains: ["one.example"], defaultDomain: "one.example" })), writeText: vi.fn(), send: vi.fn() }));
-vi.mock("../src/api", () => ({ ApiError: class extends Error {}, isValidDomain: (value: unknown) => typeof value === "string" && value.includes("."), createApi: () => ({ probe: vi.fn(), domains: mocks.domains }) }));
+const mocks = vi.hoisted(() => ({ configure: vi.fn(), domains: vi.fn(async () => ({ domains: ["one.example"], defaultDomain: "one.example", customAliasDomains: ["one.example"] })), destinations: vi.fn(async () => ({ destinations: [{ id: "7", email: "real@me.example", isDefault: true }], defaultDestinationId: "7" as string | null })), writeText: vi.fn(), send: vi.fn() }));
+vi.mock("../src/api", () => ({ ApiError: class extends Error {}, isValidDomain: (value: unknown) => typeof value === "string" && value.includes("."), createApi: () => ({ probe: vi.fn(), domains: mocks.domains, destinations: mocks.destinations }) }));
 vi.mock("../src/config", () => ({ ConfigError: class extends Error {}, chromePlatform: {}, configure: mocks.configure, initializeConfig: vi.fn(async () => ({ ok: true, config: { server: "https://mail.example", key: "hme_key" } })) }));
 
 const alias = (id: string, active = true) => ({ id, email: `alias${id}@one.example`, active, description: id === "1" ? "Shopping" : null, domain: "one.example", local_part: `alias${id}` });
@@ -12,7 +12,7 @@ async function loadPopup() {
   document.body.innerHTML = `<main><span id="server-label"></span><button id="settings" hidden>Change</button>
   <section id="setup"><form id="setup-form"><input id="server"><input id="key"><button id="connect">Connect</button></form></section>
   <section id="app" hidden><div role="tablist"><button id="tab-create" role="tab" aria-controls="panel-create" aria-selected="true" tabindex="0">Create</button><button id="tab-aliases" role="tab" aria-controls="panel-aliases" aria-selected="false" tabindex="-1">Aliases</button></div>
-  <section id="panel-create" role="tabpanel"><select id="domain"></select><button id="customize" aria-expanded="false">Customize</button><div id="custom-controls" hidden><select id="format"><option value="random_characters">Random</option><option value="uuid">UUID</option><option value="custom">Custom</option></select><label id="local-label" hidden>Local part<input id="local-part"></label><input id="description"></div><button id="generate">Generate alias</button><div id="result" hidden><span id="alias"></span><button id="copy">Copy</button></div><p id="create-status"></p></section>
+  <section id="panel-create" role="tabpanel"><select id="domain"></select><select id="destination"></select><button id="customize" aria-expanded="false">Customize</button><div id="custom-controls" hidden><select id="format"><option value="random_characters">Random</option><option value="uuid">UUID</option><option value="custom">Custom</option></select><label id="local-label" hidden>Local part<input id="local-part"></label><input id="description"></div><button id="generate">Generate alias</button><div id="result" hidden><span id="alias"></span><button id="copy">Copy</button></div><p id="create-status"></p></section>
   <section id="panel-aliases" role="tabpanel" hidden><form id="search-form"><input id="search"><button>Search</button></form><div id="list-state"></div><ul id="alias-list"></ul><button id="retry" hidden>Retry</button></section></section><p id="status"></p></main>`;
   globalThis.Option = function (text = "", value = "", _d = false, selected = false) { const option = document.createElement("option"); option.text = text; option.value = value; option.selected = selected; return option; } as unknown as typeof Option;
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: mocks.writeText } });
@@ -21,7 +21,7 @@ async function loadPopup() {
   await vi.waitFor(() => expect(document.querySelector<HTMLElement>("#app")!.hidden).toBe(false));
 }
 
-beforeEach(() => { vi.clearAllMocks(); vi.resetModules(); mocks.domains.mockResolvedValue({ domains: ["one.example"], defaultDomain: "one.example" }); mocks.send.mockResolvedValue({ ok: true, aliases: [alias("1")] }); });
+beforeEach(() => { vi.clearAllMocks(); vi.resetModules(); mocks.domains.mockResolvedValue({ domains: ["one.example"], defaultDomain: "one.example", customAliasDomains: ["one.example"] }); mocks.destinations.mockResolvedValue({ destinations: [{ id: "7", email: "real@me.example", isDefault: true }], defaultDestinationId: "7" }); mocks.send.mockResolvedValue({ ok: true, aliases: [alias("1")] }); });
 
 test("tabs implement keyboard semantics and load aliases", async () => {
   await loadPopup(); const create = document.querySelector<HTMLButtonElement>("#tab-create")!; const aliases = document.querySelector<HTMLButtonElement>("#tab-aliases")!;
@@ -33,15 +33,45 @@ test("tabs implement keyboard semantics and load aliases", async () => {
 });
 
 test("custom controls submit a rich create payload and refresh inventory", async () => {
+  mocks.destinations.mockResolvedValueOnce({ destinations: [{ id: "7", email: "default@me.example", isDefault: true }, { id: "8", email: "orders@me.example", isDefault: false }], defaultDestinationId: "7" });
   mocks.send.mockResolvedValueOnce({ ok: true, alias: alias("2") }).mockResolvedValueOnce({ ok: true, aliases: [alias("2")] });
   await loadPopup(); document.querySelector<HTMLButtonElement>("#customize")!.click();
+  const destination = document.querySelector<HTMLSelectElement>("#destination")!;
+  expect(destination.value).toBe("7");
+  destination.value = "8";
   const format = document.querySelector<HTMLSelectElement>("#format")!; format.value = "custom"; format.dispatchEvent(new Event("change"));
   expect(document.querySelector<HTMLElement>("#local-label")!.hidden).toBe(false);
   document.querySelector<HTMLInputElement>("#local-part")!.value = "orders"; document.querySelector<HTMLInputElement>("#description")!.value = "Orders";
   document.querySelector<HTMLButtonElement>("#generate")!.click();
-  await vi.waitFor(() => expect(mocks.send).toHaveBeenCalledWith({ type: "hme:aliases:create", input: { domain: "one.example", format: "custom", local_part: "orders", description: "Orders" } }));
+  await vi.waitFor(() => expect(mocks.send).toHaveBeenCalledWith({ type: "hme:aliases:create", input: { domain: "one.example", destination_id: "8", format: "custom", local_part: "orders", description: "Orders" } }));
   await vi.waitFor(() => expect(document.querySelector("#alias")!.textContent).toBe("alias2@one.example"));
   expect(mocks.send).toHaveBeenCalledWith({ type: "hme:aliases:list" });
+});
+
+test("blocks creation when no verified destination is available", async () => {
+  mocks.destinations.mockResolvedValueOnce({ destinations: [], defaultDestinationId: null });
+  await loadPopup();
+
+  expect(document.querySelector<HTMLSelectElement>("#destination")!.disabled).toBe(true);
+  expect(document.querySelector<HTMLButtonElement>("#generate")!.disabled).toBe(true);
+  expect(document.querySelector("#create-status")!.textContent).toContain("Add and verify a destination");
+});
+
+test("only shows custom format for domains that permit chosen local parts", async () => {
+  mocks.domains.mockResolvedValueOnce({ domains: ["one.example", "managed.example"], defaultDomain: "one.example", customAliasDomains: ["one.example"] });
+  await loadPopup();
+  const domain = document.querySelector<HTMLSelectElement>("#domain")!;
+  const format = document.querySelector<HTMLSelectElement>("#format")!;
+  expect(format.querySelector('option[value="custom"]')).not.toBeNull();
+  format.value = "custom";
+  format.dispatchEvent(new Event("change"));
+
+  domain.value = "managed.example";
+  domain.dispatchEvent(new Event("change"));
+
+  expect(format.querySelector('option[value="custom"]')).toBeNull();
+  expect(format.value).toBe("random_characters");
+  expect(document.querySelector<HTMLElement>("#local-label")!.hidden).toBe(true);
 });
 
 test("invalid custom local part leaves no loading message and keeps controls unlocked", async () => {
