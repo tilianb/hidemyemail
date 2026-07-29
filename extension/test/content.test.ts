@@ -233,6 +233,29 @@ test("moves dynamically for late closed-shadow autofill UI with mismatched host 
   }
 });
 
+test("caches overlay scans during rapid placement and invalidates them on page mutations", async () => {
+  vi.useFakeTimers();
+  const elementsFromPoint = vi.fn<() => Element[]>(() => []);
+  Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: elementsFromPoint });
+  try {
+    await mounted();
+    const initialScans = elementsFromPoint.mock.calls.length;
+
+    window.dispatchEvent(new Event("scroll"));
+    await vi.advanceTimersByTimeAsync(20);
+    expect(elementsFromPoint).toHaveBeenCalledTimes(initialScans);
+
+    document.body.append(document.createElement("div"));
+    await Promise.resolve();
+    window.dispatchEvent(new Event("scroll"));
+    await vi.advanceTimersByTimeAsync(20);
+    expect(elementsFromPoint.mock.calls.length).toBeGreaterThan(initialScans);
+  } finally {
+    Reflect.deleteProperty(document, "elementsFromPoint");
+    vi.useRealTimers();
+  }
+});
+
 test("hides the trigger when a narrow field has no non-overlapping icon lane", async () => {
   const overlay = document.createElement("com-1password-button");
   vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue(rect(122, 106, 28, 28));

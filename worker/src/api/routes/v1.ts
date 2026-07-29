@@ -135,7 +135,7 @@ export function v1Routes() {
 
   r.get("/destination-options", async (c) => {
     const rows = await c.env.DB.prepare(
-      "SELECT id, email, is_default FROM destinations WHERE user_id = ? AND verified_at IS NOT NULL ORDER BY is_default DESC, created_at"
+      "SELECT id, email, is_default FROM destinations WHERE user_id = ? AND verified_at IS NOT NULL ORDER BY is_default DESC, created_at LIMIT 100"
     ).bind(c.get("userId")).all<{ id: number; email: string; is_default: number }>();
     const data = await Promise.all((rows.results ?? []).map(async (row) => ({
       id: String(row.id),

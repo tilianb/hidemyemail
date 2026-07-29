@@ -184,6 +184,35 @@ test("destination options expose only verified owned addresses and alias creatio
   await db().prepare("DELETE FROM users WHERE id = 2").run();
 });
 
+test("destination options cap default-first results at 100", async () => {
+  const app = createApp();
+  const defaultId = await addDefaultDestination();
+  const inserts = await Promise.all(Array.from({ length: 100 }, async (_, index) => {
+    const email = `bulk-${index}@me.com`;
+    return db().prepare(
+      "INSERT INTO destinations (user_id, email, email_hash, token, verified_at, created_at, is_default) VALUES (1, ?, ?, ?, 123, ?, 0)"
+    ).bind(
+      await encryptDestination(email, testEnv.DESTINATION_ENCRYPTION_KEY),
+      await hashDestination(email, testEnv.DESTINATION_ENCRYPTION_KEY),
+      crypto.randomUUID(),
+      1000 + index,
+    );
+  }));
+  await db().batch(inserts);
+  const token = await createKey(app);
+
+  const response = await app.request("/api/v1/destination-options", {
+    headers: { Authorization: `Bearer ${token}` },
+  }, testEnv);
+  const body = await response.json<{ data: { id: string; email: string }[]; defaultDestinationId: string }>();
+
+  expect(response.status).toBe(200);
+  expect(body.data).toHaveLength(100);
+  expect(body.data[0]).toMatchObject({ id: String(defaultId), email: "real@me.com" });
+  expect(body.defaultDestinationId).toBe(String(defaultId));
+  expect(body.data.some(({ email }) => email === "bulk-99@me.com")).toBe(false);
+});
+
 test("v1 custom alias cannot claim another user's reserved address", async () => {
   const app = createApp();
   await addDefaultDestination();

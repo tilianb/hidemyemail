@@ -9,6 +9,7 @@ const OVERLAY_GAP = 3;
 const FIELD_EDGE_PADDING = 4;
 const OVERLAY_SCAN_WIDTH = 96;
 const OVERLAY_SCAN_STEP = 4;
+const OVERLAY_CACHE_MS = 50;
 
 function aliasResponse(value: unknown, domain: string): value is { ok: true; alias: string } {
   if (typeof value !== "object" || value === null || !("ok" in value) || !("alias" in value)) return false;
@@ -82,11 +83,13 @@ function foreignOverlayRects(input: HTMLInputElement, host: HTMLDivElement, left
   return rects;
 }
 
-export function triggerLeft(input: HTMLInputElement, host: HTMLDivElement, top: number): number | null {
+type OverlayRects = (input: HTMLInputElement, host: HTMLDivElement, left: number, top: number, width: number) => DOMRect[];
+
+export function triggerLeft(input: HTMLInputElement, host: HTMLDivElement, top: number, overlayRects: OverlayRects = foreignOverlayRects): number | null {
   const field = input.getBoundingClientRect();
   const trailingEdge = field.right - FIELD_EDGE_PADDING;
   const scanLeft = Math.max(field.left, trailingEdge - OVERLAY_SCAN_WIDTH);
-  const collisions = foreignOverlayRects(input, host, scanLeft, top, trailingEdge - scanLeft);
+  const collisions = overlayRects(input, host, scanLeft, top, trailingEdge - scanLeft);
   const left = collisions.length === 0
     ? trailingEdge - TRIGGER_SIZE
     : Math.min(...collisions.map((rect) => rect.left)) - OVERLAY_GAP - TRIGGER_SIZE;
@@ -102,13 +105,25 @@ export function mountContent(send: Send, shadowMode: ShadowRootMode = "closed"):
   trigger.innerHTML = `<svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#0d0d0f"/><rect x=".5" y=".5" width="31" height="31" rx="7.5" stroke="#ffb300" stroke-opacity=".15"/><path d="M6 10a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V10Z" stroke="#e8e8ec" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="m6 10 10 6.5L26 10" stroke="#e8e8ec" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="9.5" y="14" width="13" height="4.5" rx="1" fill="#ffb300"/></svg>`;
   shadow.append(style, trigger); host.hidden = true; document.documentElement.append(host);
   let target: HTMLInputElement | null = null; let panel: HTMLDivElement | null = null; let frame = 0; let generation = 0; let placementTimers: number[] = [];
+  let overlayCache: { input: HTMLInputElement; left: number; top: number; scannedAt: number; rects: DOMRect[] } | null = null;
+  const cachedOverlayRects: OverlayRects = (input, overlayHost, left, top, width) => {
+    const now = Date.now();
+    if (overlayCache?.input === input && now - overlayCache.scannedAt < OVERLAY_CACHE_MS) {
+      const dx = left - overlayCache.left; const dy = top - overlayCache.top;
+      return overlayCache.rects.map((rect) => new DOMRect(rect.left + dx, rect.top + dy, rect.width, rect.height));
+    }
+    const rects = foreignOverlayRects(input, overlayHost, left, top, width);
+    overlayCache = { input, left, top, scannedAt: now, rects };
+    return rects;
+  };
+  const invalidateOverlayCache = () => { overlayCache = null; };
   const place = () => {
     if (!target) return;
     cancelAnimationFrame(frame); frame = requestAnimationFrame(() => {
       if (!target?.isConnected || !isEmailField(target)) return hide();
       const rect = target.getBoundingClientRect();
       const top = Math.min(Math.max(0, rect.top + (rect.height - TRIGGER_SIZE) / 2), Math.max(0, innerHeight - TRIGGER_SIZE));
-      const left = triggerLeft(target, host, top);
+      const left = triggerLeft(target, host, top, cachedOverlayRects);
       host.hidden = left === null;
       if (left === null) return;
       host.style.left = `${Math.min(Math.max(0, left), Math.max(0, innerWidth - TRIGGER_SIZE))}px`;
@@ -133,7 +148,7 @@ export function mountContent(send: Send, shadowMode: ShadowRootMode = "closed"):
     if (active) attributeObserver.observe(document.documentElement, activeObservation);
     else { attributeObserver.disconnect(); recoveryObserver.observe(document.documentElement, inactiveObservation); }
   };
-  const hide = () => { close(false); target = null; host.hidden = true; placementTimers.forEach(clearTimeout); placementTimers = []; observe(false); };
+  const hide = () => { close(false); target = null; invalidateOverlayCache(); host.hidden = true; placementTimers.forEach(clearTimeout); placementTimers = []; observe(false); };
   const open = async () => {
     if (!target || panel) return;
     panel = document.createElement("div"); panel.className = "panel"; panel.setAttribute("role", "dialog"); panel.setAttribute("aria-label", "HideMyEmail alias generator");
@@ -162,7 +177,7 @@ export function mountContent(send: Send, shadowMode: ShadowRootMode = "closed"):
   const onFocusIn = (event: FocusEvent) => {
     const input = event.composedPath().find(isEmailField);
     if (input) {
-      target = input; host.hidden = false; close(false); observe(true); place();
+      target = input; invalidateOverlayCache(); host.hidden = false; close(false); observe(true); place();
       placementTimers.forEach(clearTimeout);
       placementTimers = [100, 300, 1000].map((delay) => window.setTimeout(place, delay));
     }
@@ -175,12 +190,14 @@ export function mountContent(send: Send, shadowMode: ShadowRootMode = "closed"):
   document.addEventListener("focusin", onFocusIn, true);
   document.addEventListener("pointerdown", onPointerDown, true);
   document.addEventListener("keydown", onKeyDown, true);
-  addEventListener("resize", place, { passive: true }); addEventListener("scroll", place, { passive: true, capture: true });
+  const onResize = () => { invalidateOverlayCache(); place(); };
+  addEventListener("resize", onResize, { passive: true }); addEventListener("scroll", place, { passive: true, capture: true });
   let mutationTimer = 0;
   const onMutations: MutationCallback = (records) => {
     if (!host.isConnected) document.documentElement.append(host);
     const hasExternalMutation = records.some(({ target: mutationTarget }) => mutationTarget !== host && !host.contains(mutationTarget) && mutationTarget.getRootNode() !== shadow);
     if (!target || !hasExternalMutation) return;
+    invalidateOverlayCache();
     clearTimeout(mutationTimer); mutationTimer = window.setTimeout(place, 100);
   };
   recoveryObserver = new MutationObserver(onMutations);
@@ -193,7 +210,7 @@ export function mountContent(send: Send, shadowMode: ShadowRootMode = "closed"):
     document.removeEventListener("focusin", onFocusIn, true);
     document.removeEventListener("pointerdown", onPointerDown, true);
     document.removeEventListener("keydown", onKeyDown, true);
-    removeEventListener("resize", place); removeEventListener("scroll", place, true);
+    removeEventListener("resize", onResize); removeEventListener("scroll", place, true);
     teardowns.delete(host); host.remove();
   });
   return host;
