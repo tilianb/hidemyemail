@@ -12,12 +12,14 @@ All notable changes to this project are documented here. The format follows
   registered passkey instead of a TOTP or backup code when MFA is enabled.
 - Chromium extension v1.3.1 can search, copy, activate, deactivate, and delete
   aliases from a new manager tab. Alias creation now supports random, UUID,
-  and custom local parts plus optional descriptions.
+  and custom local parts plus optional descriptions, and the popup can select
+  which verified destination receives each new alias's mail.
 - Focused email fields on web pages now show a HideMyEmail button that can
   generate and fill an alias after an explicit click. Detection uses semantic
   field attributes and conservative email-label matching; the extension never
   submits the form automatically. Inline-created aliases use the page hostname
-  (and no other page URL or content) as their server-visible description.
+  (and no other page URL or content) as their server-visible description, and
+  users can choose which verified destination receives the alias's mail.
 
 ### Changed
 
@@ -29,14 +31,18 @@ All notable changes to this project are documented here. The format follows
   with local product fonts, the app envelope icon, and a clearer connected
   alias generator and setup flow. New connections default to
   `https://app.hidemyemail.dev` while self-hosted deployments remain supported.
+  The toolbar icon and popup surface now have rounded outer corners, and the
+  popup only shows the custom alias format for domains whose policy permits
+  chosen local parts.
 
 ### Fixed
 
 - The iOS MFA setup screen now renders its QR code correctly in dark mode
   instead of showing an oversized blank area.
-- Inline alias controls now reserve the trailing autofill lane and move farther
-  away from detectable controls, preventing overlap with isolated Bitwarden and
-  1Password UI. They stay hidden when a field is too narrow to fit separately.
+- Inline alias controls now dynamically move away from Bitwarden and 1Password,
+  including controls isolated behind closed shadow UI, while using the trailing
+  edge when no other autofill control is present. They stay hidden when a field
+  is too narrow to fit separately.
 
 ### Security
 
