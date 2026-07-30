@@ -98,12 +98,16 @@ export function triggerLeft(input: HTMLInputElement, host: HTMLDivElement, top: 
 
 export function mountContent(send: Send, shadowMode: ShadowRootMode = "closed"): HTMLDivElement {
   const host = document.createElement("div"); host.dataset.hmeExtension = "true";
+  const setHostVisible = (visible: boolean) => {
+    host.hidden = !visible;
+    host.style.setProperty("display", visible ? "block" : "none", "important");
+  };
   const shadow = host.attachShadow({ mode: shadowMode });
   const style = document.createElement("style");
   style.textContent = `:host{all:initial;position:fixed;z-index:2147483647;color-scheme:dark;font:13px system-ui,sans-serif}.trigger{display:grid;place-items:center;width:28px;height:28px;padding:0;border:1px solid #7a5700;border-radius:7px;background:#ffb300;color:#111;cursor:pointer}.trigger svg{width:22px;height:22px;border-radius:5px}.trigger:focus-visible,button:focus-visible,select:focus-visible{outline:3px solid CanvasText;outline-offset:2px}.panel{box-sizing:border-box;position:fixed;width:250px;padding:14px;border:1px solid #45454f;border-radius:12px;background:#111114;color:#eee;box-shadow:0 8px 30px #0008}.brand{margin:0 0 10px;font-weight:700}.panel label{display:grid;gap:5px;margin-top:8px;color:#bbb}.panel select,.panel button{box-sizing:border-box;width:100%;min-height:38px;margin-top:5px;border:1px solid #555;border-radius:8px;padding:0 9px;background:#202026;color:#eee;font:inherit}.panel button{margin-top:10px;border-color:#ffb300;background:#ffb300;color:#111;font-weight:700;cursor:pointer}.status{min-height:16px;margin:8px 0 0;color:#ffcf5c;font-size:12px}@media(forced-colors:active){.trigger,.panel button{forced-color-adjust:none}}@media(prefers-reduced-motion:reduce){*{transition:none!important}}`;
   const trigger = document.createElement("button"); trigger.className = "trigger"; trigger.type = "button"; trigger.setAttribute("aria-label", "Generate a HideMyEmail alias");
   trigger.innerHTML = `<svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#0d0d0f"/><rect x=".5" y=".5" width="31" height="31" rx="7.5" stroke="#ffb300" stroke-opacity=".15"/><path d="M6 10a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V10Z" stroke="#e8e8ec" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="m6 10 10 6.5L26 10" stroke="#e8e8ec" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="9.5" y="14" width="13" height="4.5" rx="1" fill="#ffb300"/></svg>`;
-  shadow.append(style, trigger); host.hidden = true; document.documentElement.append(host);
+  shadow.append(style, trigger); setHostVisible(false); document.documentElement.append(host);
   let target: HTMLInputElement | null = null; let panel: HTMLDivElement | null = null; let frame = 0; let generation = 0; let placementTimers: number[] = [];
   let overlayCache: { input: HTMLInputElement; left: number; top: number; scannedAt: number; rects: DOMRect[] } | null = null;
   const cachedOverlayRects: OverlayRects = (input, overlayHost, left, top, width) => {
@@ -124,8 +128,7 @@ export function mountContent(send: Send, shadowMode: ShadowRootMode = "closed"):
       const rect = target.getBoundingClientRect();
       const top = Math.min(Math.max(0, rect.top + (rect.height - TRIGGER_SIZE) / 2), Math.max(0, innerHeight - TRIGGER_SIZE));
       const left = triggerLeft(target, host, top, cachedOverlayRects);
-      host.hidden = left === null;
-      if (left === null) return;
+      if (left === null) { setHostVisible(false); return; }
       host.style.left = `${Math.min(Math.max(0, left), Math.max(0, innerWidth - TRIGGER_SIZE))}px`;
       host.style.top = `${top}px`;
       if (panel) {
@@ -134,6 +137,7 @@ export function mountContent(send: Send, shadowMode: ShadowRootMode = "closed"):
         panel.style.left = `${Math.min(Math.max(0, rect.right - panelWidth), Math.max(0, innerWidth - panelWidth))}px`;
         panel.style.top = `${Math.min(Math.max(0, top), Math.max(0, innerHeight - panelHeight))}px`;
       }
+      setHostVisible(true);
     });
   };
   const close = (restore = true) => {
@@ -148,7 +152,7 @@ export function mountContent(send: Send, shadowMode: ShadowRootMode = "closed"):
     if (active) attributeObserver.observe(document.documentElement, activeObservation);
     else { attributeObserver.disconnect(); recoveryObserver.observe(document.documentElement, inactiveObservation); }
   };
-  const hide = () => { close(false); target = null; invalidateOverlayCache(); host.hidden = true; placementTimers.forEach(clearTimeout); placementTimers = []; observe(false); };
+  const hide = () => { close(false); target = null; invalidateOverlayCache(); setHostVisible(false); placementTimers.forEach(clearTimeout); placementTimers = []; observe(false); };
   const open = async () => {
     if (!target || panel) return;
     panel = document.createElement("div"); panel.className = "panel"; panel.setAttribute("role", "dialog"); panel.setAttribute("aria-label", "HideMyEmail alias generator");
@@ -177,7 +181,7 @@ export function mountContent(send: Send, shadowMode: ShadowRootMode = "closed"):
   const onFocusIn = (event: FocusEvent) => {
     const input = event.composedPath().find(isEmailField);
     if (input) {
-      target = input; invalidateOverlayCache(); host.hidden = false; close(false); observe(true); place();
+      target = input; invalidateOverlayCache(); close(false); observe(true); place();
       placementTimers.forEach(clearTimeout);
       placementTimers = [100, 300, 1000].map((delay) => window.setTimeout(place, delay));
     }
