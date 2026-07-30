@@ -36,6 +36,29 @@ async function mounted(send: (message: unknown) => Promise<unknown> = vi.fn(asyn
   return { input, host, shadow: host.shadowRoot!, send };
 }
 
+test("stays hidden until an autofocused field has been positioned", () => {
+  const input = document.createElement("input"); input.type = "email";
+  vi.spyOn(input, "getBoundingClientRect").mockReturnValue(rect(100, 100, 250, 40));
+  document.body.append(input);
+  let placement: FrameRequestCallback | undefined;
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => { placement = callback; return 1; });
+  const host = mountContent(vi.fn(), "open");
+
+  input.focus();
+
+  expect(host.hidden).toBe(true);
+  expect(host.style.getPropertyValue("display")).toBe("none");
+  expect(host.style.getPropertyPriority("display")).toBe("important");
+  expect(host.style.left).toBe("");
+
+  placement?.(0);
+  expect(host.style.left).toBe("318px");
+  expect(host.style.top).toBe("106px");
+  expect(host.hidden).toBe(false);
+  expect(host.style.getPropertyValue("display")).toBe("block");
+  expect(host.style.getPropertyPriority("display")).toBe("important");
+});
+
 test("generation and filling occur only after an explicit click", async () => {
   const input = document.createElement("input"); input.type = "email"; vi.spyOn(input, "getBoundingClientRect").mockReturnValue(rect(10, 10, 200, 30)); document.body.append(input);
   const send = vi.fn(async () => ({ ok: true as const, alias: "new@one.example" }));
@@ -167,8 +190,7 @@ test("clamps the trigger and 250px chooser to the viewport and chooses the side 
   const { input, host, shadow } = await mounted();
   vi.mocked(input.getBoundingClientRect).mockReturnValue(rect(290, 210, 80, 30));
   window.dispatchEvent(new Event("resize"));
-  await vi.waitFor(() => expect(host.style.left).toBe("292px"));
-  expect(host.style.top).toBe("211px");
+  await vi.waitFor(() => expect({ left: host.style.left, top: host.style.top }).toEqual({ left: "292px", top: "211px" }));
   shadow.querySelector<HTMLButtonElement>(".trigger")!.click();
   await vi.waitFor(() => expect(shadow.querySelector<HTMLElement>(".panel")?.style.top).toBe("0px"));
   const panel = shadow.querySelector<HTMLElement>(".panel")!;
@@ -365,8 +387,10 @@ test("reattaches a removed host without scheduling work until a target is focuse
 
   const input = visibleEmailInput();
   input.focus();
-  expect(host.hidden).toBe(false);
+  expect(host.hidden).toBe(true);
   expect(frame).toHaveBeenCalledOnce();
+  await vi.runAllTimersAsync();
+  expect(host.hidden).toBe(false);
   vi.useRealTimers();
 });
 
