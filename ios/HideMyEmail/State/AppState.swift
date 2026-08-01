@@ -176,19 +176,14 @@ final class AppState {
         )
         try requireCurrent(snapshot)
 
-        var response: [String: Any] = [
-            "id": assertion.credentialID.base64urlEncodedString(),
-            "rawId": assertion.credentialID.base64urlEncodedString(),
-            "type": "public-key",
-            "clientExtensionResults": [String: Any](),
-            "response": [
-                "clientDataJSON": assertion.rawClientDataJSON.base64urlEncodedString(),
-                "authenticatorData": assertion.rawAuthenticatorData.base64urlEncodedString(),
-                "signature": assertion.signature.base64urlEncodedString(),
-                "userHandle": assertion.userID.base64urlEncodedString(),
-            ],
-            "passkey_token": passkeyToken,
-        ]
+        let response = PasskeyAssertionResponse.make(
+            credentialID: assertion.credentialID,
+            clientDataJSON: assertion.rawClientDataJSON,
+            authenticatorData: assertion.rawAuthenticatorData,
+            signature: assertion.signature,
+            userID: assertion.userID,
+            passkeyToken: passkeyToken
+        )
 
         let res = try await client.passkeyVerify(assertion: response)
         try await finishLogin(token: res.token, freshAuth: res.freshAuth, snapshot: snapshot, client: client)
