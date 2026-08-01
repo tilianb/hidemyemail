@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { createPassphraseVerifier, hashPassword, verifyPassphraseVerifier, verifyPassword, signFreshAuth, signSession, verifyFreshAuth, verifySession } from "../src/lib/auth";
+import { createPassphraseVerifier, hashPassword, verifyPassphraseVerifier, verifyPassword, signFreshAuth, signMfaPasskeyChallenge, signSession, verifyFreshAuth, verifyMfaPasskeyChallenge, verifySession } from "../src/lib/auth";
 
 test("password hash + verify", async () => {
   const { saltHex, hashHex } = await hashPassword("hunter2");
@@ -65,6 +65,17 @@ test("fresh auth token is user-bound and short-lived", async () => {
   expect(await verifyFreshAuth(secret, tok, 43, 3)).toBe(false);
   const expired = await signFreshAuth(secret, 42, -1, 3);
   expect(await verifyFreshAuth(secret, expired, 42, 3)).toBe(false);
+});
+
+test("MFA passkey challenge is bound to user, auth version, and action", async () => {
+  const token = await signMfaPasskeyChallenge("topsecret", 42, 3, "disable", "challenge");
+  expect(await verifyMfaPasskeyChallenge("topsecret", token)).toMatchObject({
+    userId: 42,
+    authVersion: 3,
+    action: "disable",
+    challenge: "challenge",
+  });
+  expect(await verifyMfaPasskeyChallenge("wrong", token)).toBeNull();
 });
 
 test("legacy fresh auth tokens verify only as auth version zero", async () => {

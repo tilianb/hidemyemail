@@ -1,10 +1,10 @@
 import { Hono } from "hono";
 import { setCookie, deleteCookie, getCookie } from "hono/cookie";
 import type { AppEnv } from "../app";
-import { signPasskeyRegChallenge, verifyPasskeyRegChallenge } from "../../lib/auth";
+import { signMfaPasskeyChallenge, signPasskeyRegChallenge, verifyMfaPasskeyChallenge, verifyPasskeyRegChallenge, type MfaPasskeyAction } from "../../lib/auth";
 import { hasFreshAuth, isAuthenticatedNative } from "../auth-helpers";
 import { fromBase64url, toBase64url, getAndroidAssociations, getRegistrationOrigins, getRpFromOrigin } from "../../lib/webauthn";
-import type { RegistrationResponseJSON } from "@simplewebauthn/server";
+import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/server";
 import { consumeAuthArtifact, markFailedAttempt, rateLimitFailures } from "../../lib/auth-security";
 
 export function settingsRoutes() {
@@ -12,6 +12,7 @@ export function settingsRoutes() {
 
   r.use("/mfa/disable", rateLimitFailures());
   r.use("/mfa/backup-codes", rateLimitFailures());
+  r.use("/mfa/passkey/complete", rateLimitFailures());
 
   r.get("/preferences", async (c) => {
     const userId = c.get("userId");
@@ -221,6 +222,118 @@ export function settingsRoutes() {
       "UPDATE mfa SET totp_backup_codes = ? WHERE user_id = ?"
     ).bind(JSON.stringify(hashed), userId).run();
 
+    return c.json({ ok: true, backupCodes: plain });
+  });
+
+  // Passkey confirmation for MFA mutations. The challenge is bound to the
+  // current account, auth version, and one action, then consumed exactly once.
+  r.post("/mfa/passkey/challenge", async (c) => {
+    const userId = c.get("userId");
+    const { action } = await c.req.json<{ action?: MfaPasskeyAction }>()
+      .catch(() => ({} as { action?: MfaPasskeyAction }));
+    if (action !== "disable" && action !== "backup-codes") {
+      return c.json({ error: "Invalid MFA action" }, 400);
+    }
+    const mfa = await c.env.DB.prepare(
+      "SELECT 1 FROM mfa WHERE user_id = ? AND totp_enabled = 1"
+    ).bind(userId).first();
+    if (!mfa) return c.json({ error: "MFA not enabled" }, 400);
+    const credentials = await c.env.DB.prepare(
+      "SELECT id, transports FROM passkey_credentials WHERE user_id = ?"
+    ).bind(userId).all<{ id: string; transports: string | null }>();
+    if (!credentials.results?.length) return c.json({ error: "No passkeys registered" }, 400);
+
+    const { generateAuthenticationOptions } = await import("@simplewebauthn/server");
+    let rpID: string;
+    try {
+      ({ rpID } = getRpFromOrigin(c.env.APP_ORIGIN));
+    } catch {
+      return c.json({ error: "Passkey authentication is not configured" }, 500);
+    }
+    const options = await generateAuthenticationOptions({
+      rpID,
+      userVerification: "required",
+      allowCredentials: credentials.results.map((credential) => ({
+        id: credential.id,
+        transports: credential.transports ? JSON.parse(credential.transports) : undefined,
+      })),
+    });
+    const passkeyToken = await signMfaPasskeyChallenge(
+      c.env.SESSION_SECRET, userId, c.get("authVersion"), action, options.challenge,
+    );
+    return c.json({ ...options, passkey_token: passkeyToken });
+  });
+
+  r.post("/mfa/passkey/complete", async (c) => {
+    const body = await c.req.json<{
+      action?: MfaPasskeyAction;
+      response?: AuthenticationResponseJSON;
+      passkey_token?: string;
+    }>().catch(() => null);
+    if (!body?.response?.id || !body.passkey_token) return c.json({ error: "Invalid request" }, 400);
+    const signed = await verifyMfaPasskeyChallenge(c.env.SESSION_SECRET, body.passkey_token);
+    if (!signed || signed.userId !== c.get("userId") || signed.authVersion !== c.get("authVersion") || signed.action !== body.action) {
+      return c.json({ error: "Invalid or expired passkey challenge" }, 401);
+    }
+    const credential = await c.env.DB.prepare(
+      "SELECT public_key, sign_count, transports FROM passkey_credentials WHERE id = ? AND user_id = ?"
+    ).bind(body.response.id, signed.userId).first<{ public_key: string; sign_count: number; transports: string | null }>();
+    if (!credential) {
+      markFailedAttempt(c);
+      return c.json({ error: "Unknown credential" }, 401);
+    }
+
+    const { verifyAuthenticationResponse } = await import("@simplewebauthn/server");
+    let rpID: string;
+    let expectedOrigin: string | string[];
+    try {
+      ({ rpID } = getRpFromOrigin(c.env.APP_ORIGIN));
+      expectedOrigin = getRegistrationOrigins(
+        c.env.APP_ORIGIN,
+        c.env.ANDROID_APP_ORIGINS,
+        isAuthenticatedNative(c),
+      );
+    } catch {
+      return c.json({ error: "Passkey authentication is not configured" }, 500);
+    }
+    const result = await verifyAuthenticationResponse({
+      response: body.response,
+      expectedChallenge: signed.challenge,
+      expectedOrigin,
+      expectedRPID: rpID,
+      requireUserVerification: true,
+      credential: {
+        id: body.response.id,
+        publicKey: fromBase64url(credential.public_key),
+        counter: credential.sign_count,
+        transports: credential.transports ? JSON.parse(credential.transports) : undefined,
+      },
+    }).catch(() => ({ verified: false as const, authenticationInfo: undefined }));
+    if (!result.verified || !result.authenticationInfo) {
+      markFailedAttempt(c);
+      return c.json({ error: "Verification failed" }, 401);
+    }
+    if (!(await consumeAuthArtifact(c.env.DB, body.passkey_token, Math.floor(Date.now() / 1000) + 300))) {
+      return c.json({ error: "Invalid or expired passkey challenge" }, 401);
+    }
+    const counter = await c.env.DB.prepare(
+      "UPDATE passkey_credentials SET sign_count = MAX(sign_count, ?) WHERE id = ? AND user_id = ?"
+    ).bind(result.authenticationInfo.newCounter, body.response.id, signed.userId).run();
+    if (counter.meta.changes !== 1) return c.json({ error: "Unknown credential" }, 401);
+
+    if (signed.action === "disable") {
+      const disabled = await c.env.DB.prepare(
+        "UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL WHERE user_id = ? AND totp_enabled = 1"
+      ).bind(signed.userId).run();
+      if (disabled.meta.changes !== 1) return c.json({ error: "MFA not enabled" }, 400);
+      return c.json({ ok: true });
+    }
+
+    const { plain, hashed } = await (await import("../../lib/totp")).generateBackupCodes();
+    const regenerated = await c.env.DB.prepare(
+      "UPDATE mfa SET totp_backup_codes = ? WHERE user_id = ? AND totp_enabled = 1"
+    ).bind(JSON.stringify(hashed), signed.userId).run();
+    if (regenerated.meta.changes !== 1) return c.json({ error: "MFA not enabled" }, 400);
     return c.json({ ok: true, backupCodes: plain });
   });
 

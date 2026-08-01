@@ -228,6 +228,22 @@ actor APIClient {
         try await requestVoid("/api/settings/mfa/disable", method: "POST", body: ["code": code])
     }
 
+    func mfaPasskeyChallenge(action: MFAPasskeyAction) async throws -> PasskeyChallengeOptions {
+        try await request(
+            "/api/settings/mfa/passkey/challenge", method: "POST",
+            body: ["action": action.rawValue]
+        )
+    }
+
+    func completeMFAPasskeyAction(
+        _ action: MFAPasskeyAction, response: [String: Any], passkeyToken: String
+    ) async throws -> MFAPasskeyCompleteResponse {
+        try await request(
+            "/api/settings/mfa/passkey/complete", method: "POST",
+            body: ["action": action.rawValue, "response": response, "passkey_token": passkeyToken]
+        )
+    }
+
     // MARK: - Username & self-service recovery codes
 
     /// Current user's username + recovery-code status.
@@ -489,6 +505,8 @@ actor APIClient {
             let semanticUnauthorizedEndpoints = [
                 "/api/settings/mfa/disable",
                 "/api/settings/mfa/backup-codes",
+                "/api/settings/mfa/passkey/challenge",
+                "/api/settings/mfa/passkey/complete",
                 "/api/settings/passkeys/challenge",
                 "/api/settings/passkeys/register",
             ]

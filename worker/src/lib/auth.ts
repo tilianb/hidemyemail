@@ -188,6 +188,34 @@ export async function verifyFreshAuth(secret: string, token: string, userId: num
   return Number(expStr) > Math.floor(Date.now() / 1000);
 }
 
+export type MfaPasskeyAction = "disable" | "backup-codes";
+
+export async function signMfaPasskeyChallenge(
+  secret: string,
+  userId: number,
+  authVersion: number,
+  action: MfaPasskeyAction,
+  challenge: string,
+): Promise<string> {
+  const exp = Math.floor(Date.now() / 1000) + 300;
+  const payload = `mfa-passkey1.${userId}.${authVersion}.${action}.${exp}.${challenge}`;
+  return `${payload}.${await hmac(secret, payload)}`;
+}
+
+export async function verifyMfaPasskeyChallenge(
+  secret: string,
+  token: string,
+): Promise<{ userId: number; authVersion: number; action: MfaPasskeyAction; challenge: string } | null> {
+  const parts = token.split(".");
+  if (parts.length !== 7 || parts[0] !== "mfa-passkey1") return null;
+  const [, userIdStr, authVersionStr, action, expStr, challenge, sig] = parts;
+  if (action !== "disable" && action !== "backup-codes") return null;
+  const payload = `mfa-passkey1.${userIdStr}.${authVersionStr}.${action}.${expStr}.${challenge}`;
+  if (!timingSafeEqual(sig!, await hmac(secret, payload))) return null;
+  if (Number(expStr) <= Math.floor(Date.now() / 1000)) return null;
+  return { userId: Number(userIdStr), authVersion: Number(authVersionStr), action, challenge: challenge! };
+}
+
 // App-auth handoff codes (web-session login → native bearer token).
 //
 // The native app opens the dashboard login in an ASWebAuthenticationSession

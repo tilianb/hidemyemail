@@ -283,6 +283,42 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
 
     suspend fun passkeys(): List<Passkey> = request("/api/settings/passkeys")
 
+    /** Request assertion options for an authenticated passkey MFA mutation. */
+    suspend fun passkeyMfaChallenge(action: String): PasskeyAuthenticationChallenge {
+        require(action == "disable" || action == "backup-codes") { "Invalid passkey MFA action" }
+        val raw = perform(
+            "/api/settings/mfa/passkey/challenge", "POST",
+            buildJsonObject { put("action", action) }, authMode = true, authed = true,
+        )
+        return parsePasskeyAuthenticationChallenge(raw)
+    }
+
+    /** Complete the requested MFA mutation using a CredentialManager assertion. */
+    suspend fun completePasskeyMfa(
+        action: String,
+        responseJson: String,
+        passkeyToken: String,
+    ): PasskeyMfaResult {
+        require(action == "disable" || action == "backup-codes") { "Invalid passkey MFA action" }
+        val assertion = try {
+            json.parseToJsonElement(responseJson) as? JsonObject
+                ?: throw IllegalArgumentException("Invalid credential response")
+        } catch (e: IllegalArgumentException) {
+            throw e
+        } catch (e: Exception) {
+            throw IllegalArgumentException("Invalid credential response", e)
+        }
+        return request(
+            "/api/settings/mfa/passkey/complete", "POST",
+            buildJsonObject {
+                put("action", action)
+                put("response", assertion)
+                put("passkey_token", passkeyToken)
+            },
+            authMode = true, authed = true,
+        )
+    }
+
     suspend fun renamePasskey(id: String, name: String) =
         requestVoid("/api/settings/passkeys/$id", "PATCH", buildJsonObject { put("deviceName", name) })
 
@@ -501,6 +537,24 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
 
     @kotlinx.serialization.Serializable
     private data class ErrorBody(val error: String)
+}
+
+internal fun parsePasskeyAuthenticationChallenge(raw: String): PasskeyAuthenticationChallenge {
+    try {
+        val objectValue = Json.parseToJsonElement(raw) as? JsonObject ?: throw ApiException.Decoding()
+        fun string(name: String) = (objectValue[name] as? JsonPrimitive)
+            ?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
+            ?: throw ApiException.Decoding()
+        val token = string("passkey_token")
+        val rpId = string("rpId")
+        return PasskeyAuthenticationChallenge(
+            JsonObject(objectValue - "passkey_token").toString(), token, rpId,
+        )
+    } catch (e: ApiException.Decoding) {
+        throw e
+    } catch (_: Exception) {
+        throw ApiException.Decoding()
+    }
 }
 
 /** Bridge OkHttp's callback API into a cancellable coroutine. */
