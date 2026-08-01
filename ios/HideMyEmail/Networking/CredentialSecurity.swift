@@ -71,8 +71,7 @@ struct SecurityOperationGuard {
 
 enum SecurityRequestError {
     static func shouldHandleAuthFailure(_ error: Error) -> Bool {
-        if case APIError.unauthorized = error { return true }
-        return false
+        (error as? APIError)?.isAuthFailure == true
     }
 }
 
