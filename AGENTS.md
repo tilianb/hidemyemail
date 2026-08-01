@@ -7,6 +7,29 @@ Guidance for AI coding agents (and new contributors) working in this repo.
 > invariant listed here, update this file in the same PR. Treat a stale
 > AGENTS.md as a bug.
 
+## Memory and Learning
+
+**Before starting any task:**
+Read `Learnings.md` in full. Apply all entries under "What Has Worked"
+and "Patterns and Preferences." Avoid all patterns listed under
+"What Has Failed."
+
+**After completing any task:**
+Update `Learnings.md` with new observations using this format:
+
+**[Date] — [Task type]**
+- Observation: [what you noticed]
+- Action: [what to do or avoid going forward]
+- Confidence: [high / medium / low]
+
+Be specific. "Avoid relative imports in /utils — the build step
+resolves them incorrectly" is useful. "Be careful with imports" is not.
+
+Do not add:
+- Observations already captured in the file
+- General best practices (only project-specific ones)
+- Redundant restatements of existing entries
+
 ## What this project is
 
 Self-hosted, serverless email alias service ("hide my email" style):

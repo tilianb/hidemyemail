@@ -294,7 +294,7 @@ fun UsernameSection(app: AppViewModel) {
  * is fresh-auth gated; the freshly minted codes are shown once to save.
  */
 @Composable
-fun RecoveryCodesSection(app: AppViewModel) {
+internal fun RecoveryCodesSection(app: AppViewModel, freshAuth: FreshAuthCoordinator) {
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
     var remaining by remember { mutableStateOf<Int?>(null) }
@@ -314,17 +314,19 @@ fun RecoveryCodesSection(app: AppViewModel) {
     fun regenerate() {
         generating = true
         scope.launch {
-            try {
-                val codes = app.api()?.regenerateRecoveryCodes()?.codes ?: emptyList()
+            val client = app.api()
+            suspend fun generate() {
+                val codes = client?.regenerateRecoveryCodes()?.codes ?: emptyList()
                 newCodes = codes
                 remaining = codes.size
                 error = null
+            }
+            try {
+                generate()
             } catch (e: ApiException.Server) {
-                error = if (e.status == 401 && e.message == "Fresh authentication required") {
-                    "Session is not fresh — sign out and back in, then retry."
-                } else {
-                    e.message
-                }
+                if (shouldRequestReauthentication(e, true) && client != null) {
+                    freshAuth.request(client, { generate() }) { error = it }
+                } else error = e.message
             } catch (e: Exception) {
                 error = e.message
             } finally {
@@ -415,7 +417,7 @@ fun RecoveryCodesSection(app: AppViewModel) {
  * exactly once.
  */
 @Composable
-fun ApiKeysSection(app: AppViewModel) {
+internal fun ApiKeysSection(app: AppViewModel, freshAuth: FreshAuthCoordinator) {
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
     var keys by remember { mutableStateOf<List<ApiKey>>(emptyList()) }
@@ -436,25 +438,24 @@ fun ApiKeysSection(app: AppViewModel) {
 
     LaunchedEffect(Unit) { load() }
 
-    fun freshAuthMessage(e: ApiException.Server): String? =
-        if (e.status == 401 && e.message == "Fresh authentication required") {
-            "Session is not fresh — sign out and back in, then retry."
-        } else {
-            e.message
-        }
-
     fun create() {
         val name = nameDraft.trim()
         if (name.isEmpty()) return
         creating = true
         scope.launch {
-            try {
-                val created = app.api()?.createApiKey(name)
+            val client = app.api()
+            suspend fun performCreate() {
+                val created = client?.createApiKey(name)
                 newToken = created?.token
                 error = null
                 load()
+            }
+            try {
+                performCreate()
             } catch (e: ApiException.Server) {
-                error = freshAuthMessage(e)
+                if (shouldRequestReauthentication(e, true) && client != null) {
+                    freshAuth.request(client, { performCreate() }) { error = it }
+                } else error = e.message
             } catch (e: Exception) {
                 error = e.message
             } finally {
@@ -465,12 +466,18 @@ fun ApiKeysSection(app: AppViewModel) {
 
     fun revoke(key: ApiKey) {
         scope.launch {
-            try {
-                app.api()?.deleteApiKey(key.id)
+            val client = app.api()
+            suspend fun performRevoke() {
+                client?.deleteApiKey(key.id)
                 keys = keys.filter { it.id != key.id }
                 error = null
+            }
+            try {
+                performRevoke()
             } catch (e: ApiException.Server) {
-                error = freshAuthMessage(e)
+                if (shouldRequestReauthentication(e, true) && client != null) {
+                    freshAuth.request(client, { performRevoke() }) { error = it }
+                } else error = e.message
             } catch (e: Exception) {
                 error = e.message
             }
@@ -593,7 +600,7 @@ fun ApiKeysSection(app: AppViewModel) {
 
 /** Account export (GET /api/export) → system share sheet. */
 @Composable
-fun ExportSection(app: AppViewModel) {
+internal fun ExportSection(app: AppViewModel, freshAuth: FreshAuthCoordinator) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var busy by remember { mutableStateOf(false) }
@@ -608,8 +615,9 @@ fun ExportSection(app: AppViewModel) {
                 .clickable(enabled = !busy) {
                     busy = true
                     scope.launch {
-                        try {
-                            val json = app.api()?.exportData() ?: return@launch
+                        val client = app.api()
+                        suspend fun performExport() {
+                            val json = client?.exportData() ?: return
                             val send = Intent(Intent.ACTION_SEND).apply {
                                 type = "application/json"
                                 putExtra(Intent.EXTRA_SUBJECT, "HideMyEmail export")
@@ -617,6 +625,13 @@ fun ExportSection(app: AppViewModel) {
                             }
                             context.startActivity(Intent.createChooser(send, "Export account data"))
                             error = null
+                        }
+                        try {
+                            performExport()
+                        } catch (e: ApiException.Server) {
+                            if (shouldRequestReauthentication(e, true) && client != null) {
+                                freshAuth.request(client, { performExport() }) { error = it }
+                            } else error = e.message
                         } catch (e: Exception) {
                             error = e.message
                         } finally {

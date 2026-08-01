@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { QRCode } from "react-qr-code";
-import { api } from "../api";
+import { api, isFreshAuthRequired } from "../api";
 import { useAuth } from "../auth";
 import { useToast } from "../ui";
 import { ShieldCheck, ShieldOff, KeyRound, Copy, RefreshCw, Loader2, Fingerprint, Trash2, Pencil, Mail, Download, AlertTriangle, Bell } from "lucide-react";
@@ -14,6 +14,18 @@ export function Settings() {
   const [enabled, setEnabled] = useState(false);
   const [backupCodesRemaining, setBackupCodesRemaining] = useState(0);
   const [loading, setLoading] = useState(true);
+  const profileId = useRef<number | null>(null);
+
+  // Exactly one failed operation can wait for elevation. A second failure is
+  // surfaced normally rather than opening an authentication loop.
+  const [freshPrompt, setFreshPrompt] = useState(false);
+  const pendingFresh = useRef<null | (() => Promise<void>)>(null);
+  const pendingFreshProfileId = useRef<number | null>(null);
+  const retryingFresh = useRef(false);
+  const [reauthPassphrase, setReauthPassphrase] = useState("");
+  const [reauthCode, setReauthCode] = useState("");
+  const [reauthLoading, setReauthLoading] = useState(false);
+  const [reauthError, setReauthError] = useState("");
 
   // Passkey state
   const [passkeys, setPasskeys] = useState<PasskeyRow[]>([]);
@@ -99,6 +111,7 @@ export function Settings() {
       setPasskeys(pks);
       setApiKeys(keys);
       if (profile) {
+        profileId.current = profile.id;
         setUsername(profile.username);
         setUsernameInput(profile.username ?? "");
         setRecoveryRemaining(profile.recovery_codes_remaining);
@@ -151,14 +164,99 @@ export function Settings() {
 
   useEffect(() => { loadStatus(); }, []);
 
+  async function freshGuard<T>(operation: () => Promise<T>, afterElevation: () => Promise<void>): Promise<{ ok: true; value: T } | { ok: false }> {
+    const boundProfileId = profileId.current ?? (await api.profile()).id;
+    if (profileId.current === null) profileId.current = boundProfileId;
+    try {
+      return { ok: true, value: await operation() };
+    } catch (err) {
+      if (!isFreshAuthRequired(err) || pendingFresh.current || retryingFresh.current) throw err;
+      const currentProfile = await api.profile();
+      if (currentProfile.id !== boundProfileId) {
+        throw new Error("The signed-in account changed. Please start the action again.");
+      }
+      pendingFresh.current = afterElevation;
+      pendingFreshProfileId.current = boundProfileId;
+      setReauthPassphrase("");
+      setReauthCode("");
+      setReauthError("");
+      setFreshPrompt(true);
+      return { ok: false };
+    }
+  }
+
+  function cancelReauth() {
+    pendingFresh.current = null;
+    pendingFreshProfileId.current = null;
+    setFreshPrompt(false);
+    setReauthPassphrase("");
+    setReauthCode("");
+    setReauthError("");
+  }
+
+  async function finishReauth() {
+    const operation = pendingFresh.current;
+    const boundProfileId = pendingFreshProfileId.current;
+    if (!operation || boundProfileId === null) return;
+    const profile = await api.profile();
+    if (profile.id !== boundProfileId) {
+      cancelReauth();
+      toast("The signed-in account changed. Please start the action again.", "error");
+      return;
+    }
+    pendingFresh.current = null; // retry at most once
+    pendingFreshProfileId.current = null;
+    setFreshPrompt(false);
+    setReauthPassphrase("");
+    setReauthCode("");
+    retryingFresh.current = true;
+    try { await operation(); }
+    catch (err: any) { toast(err?.message || "The action could not be completed", "error"); }
+    finally { retryingFresh.current = false; }
+  }
+
+  async function submitReauth(e: React.FormEvent) {
+    e.preventDefault();
+    setReauthLoading(true); setReauthError("");
+    try {
+      await api.reauth(reauthPassphrase, enabled ? reauthCode.trim() : undefined);
+      await finishReauth();
+    } catch (err: any) { setReauthError(err?.message || "Authentication failed"); }
+    finally { setReauthLoading(false); }
+  }
+
+  async function submitPasskeyReauth() {
+    setReauthLoading(true); setReauthError("");
+    try {
+      const options = await api.reauthPasskeyChallenge();
+      const { startAuthentication } = await import("@simplewebauthn/browser");
+      const response = await startAuthentication({ optionsJSON: options as unknown as Parameters<typeof startAuthentication>[0]["optionsJSON"] });
+      await api.reauthPasskeyComplete(response);
+      await finishReauth();
+    } catch (err: any) {
+      if (err?.name !== "NotAllowedError") setReauthError(err?.message || "Passkey verification failed");
+    } finally { setReauthLoading(false); }
+  }
+
   async function addPasskey(e: React.FormEvent) {
     e.preventDefault();
+    await performAddPasskey();
+  }
+
+  async function performAddPasskey() {
     setAddingPasskey(true);
     try {
-      const options = await api.passkeyChallenge();
+      const challenged = await freshGuard(api.passkeyChallenge, performAddPasskey);
+      if (!challenged.ok) return;
+      const options = challenged.value;
       const { startRegistration } = await import("@simplewebauthn/browser");
       const response = await startRegistration({ optionsJSON: options as unknown as Parameters<typeof startRegistration>[0]["optionsJSON"] });
-      const result = await api.passkeyRegister({ response, deviceName: newPasskeyName || undefined });
+      const registered = await freshGuard(
+        () => api.passkeyRegister({ response, deviceName: newPasskeyName || undefined }),
+        async () => { await performAddPasskey(); },
+      );
+      if (!registered.ok) return;
+      const result = registered.value;
       setPasskeys(prev => [...prev, { id: result.id, device_name: newPasskeyName || null, created_at: Date.now() }]);
       setShowAddPasskey(false);
       setNewPasskeyName("");
@@ -177,23 +275,31 @@ export function Settings() {
   async function deletePasskey(id: string) {
     if (!confirm("Remove this passkey?")) return;
     try {
-      await api.passkeyDelete(id);
-      setPasskeys(prev => prev.filter(p => p.id !== id));
-      toast("Passkey removed", "success");
+      await freshGuard(() => deletePasskeyConfirmed(id), () => deletePasskeyConfirmed(id));
     } catch (err: any) {
       toast(err?.message || "Failed to remove passkey", "error");
     }
   }
 
+  async function deletePasskeyConfirmed(id: string) {
+    await api.passkeyDelete(id);
+    setPasskeys(prev => prev.filter(p => p.id !== id));
+    toast("Passkey removed", "success");
+  }
+
   async function renamePasskey(id: string, name: string) {
     try {
-      await api.passkeyRename(id, name);
-      setPasskeys(prev => prev.map(p => p.id === id ? { ...p, device_name: name } : p));
-      setEditingPasskeyId(null);
-      toast("Passkey renamed", "success");
+      await freshGuard(() => renamePasskeyConfirmed(id, name), () => renamePasskeyConfirmed(id, name));
     } catch (err: any) {
       toast(err?.message || "Failed to rename passkey", "error");
     }
+  }
+
+  async function renamePasskeyConfirmed(id: string, name: string) {
+    await api.passkeyRename(id, name);
+    setPasskeys(prev => prev.map(p => p.id === id ? { ...p, device_name: name } : p));
+    setEditingPasskeyId(null);
+    toast("Passkey renamed", "success");
   }
 
   async function addApiKey(e: React.FormEvent) {
@@ -202,32 +308,31 @@ export function Settings() {
     if (!name) return;
     setCreatingApiKey(true);
     try {
-      const created = await api.createApiKey(name);
-      setApiKeys(prev => [{ id: created.id, name: created.name, token_prefix: created.token_prefix, created_at: created.created_at, last_used_at: null }, ...prev]);
-      setNewApiKeyToken(created.token);
-      setShowAddApiKey(false);
-      setNewApiKeyName("");
+      await freshGuard(() => createApiKeyConfirmed(name), () => createApiKeyConfirmed(name));
     } catch (err: any) {
-      // Key creation is fresh-auth gated, like passkey enrolment.
-      toast(err?.message === "Fresh authentication required" || err?.message === "unauthorized"
-        ? "Session is not fresh — log out and back in, then retry"
-        : err?.message || "Failed to create API key", "error");
+      toast(err?.message || "Failed to create API key", "error");
     } finally {
       setCreatingApiKey(false);
     }
   }
 
+  async function createApiKeyConfirmed(name: string) {
+    const created = await api.createApiKey(name);
+    setApiKeys(prev => [{ id: created.id, name: created.name, token_prefix: created.token_prefix, created_at: created.created_at, last_used_at: null }, ...prev]);
+    setNewApiKeyToken(created.token); setShowAddApiKey(false); setNewApiKeyName("");
+  }
+
   async function deleteApiKey(id: number) {
     if (!confirm("Revoke this API key? Anything using it stops working immediately.")) return;
     try {
-      await api.deleteApiKey(id);
-      setApiKeys(prev => prev.filter(k => k.id !== id));
-      toast("API key revoked", "success");
+      await freshGuard(() => deleteApiKeyConfirmed(id), () => deleteApiKeyConfirmed(id));
     } catch (err: any) {
-      toast(err?.message === "Fresh authentication required" || err?.message === "unauthorized"
-        ? "Session is not fresh — log out and back in, then retry"
-        : err?.message || "Failed to revoke API key", "error");
+      toast(err?.message || "Failed to revoke API key", "error");
     }
+  }
+
+  async function deleteApiKeyConfirmed(id: number) {
+    await api.deleteApiKey(id); setApiKeys(prev => prev.filter(k => k.id !== id)); toast("API key revoked", "success");
   }
 
   async function testPushNotification() {
@@ -251,7 +356,9 @@ export function Settings() {
   async function beginSetup() {
     setSetupLoading(true);
     try {
-      const data = await api.mfaSetup();
+      const result = await freshGuard(api.mfaSetup, beginSetup);
+      if (!result.ok) return;
+      const data = result.value;
       setSetupSecret(data.secret);
       setSetupUri(data.uri);
       setSetupStep("qr");
@@ -270,7 +377,12 @@ export function Settings() {
     }
     setSetupLoading(true);
     try {
-      const data = await api.mfaVerify(setupCode);
+      const result = await freshGuard(() => api.mfaVerify(setupCode), async () => {
+        setSetupCode("");
+        toast("Identity confirmed. Enter a new authenticator code to enable MFA.", "success");
+      });
+      if (!result.ok) { setSetupCode(""); return; }
+      const data = result.value;
       setSetupBackupCodes(data.backupCodes);
       setSetupStep("backup");
     } catch (err: any) {
@@ -304,7 +416,11 @@ export function Settings() {
     e.preventDefault();
     setDisableLoading(true);
     try {
-      await api.mfaDisable(disableCode);
+      const result = await freshGuard(() => api.mfaDisable(disableCode), async () => {
+        setDisableCode(""); setShowDisable(true);
+        toast("Identity confirmed. Enter a new authentication or backup code to disable 2FA.", "success");
+      });
+      if (!result.ok) { setDisableCode(""); return; }
       setEnabled(false);
       setBackupCodesRemaining(0);
       setShowDisable(false);
@@ -330,7 +446,8 @@ export function Settings() {
   async function disableMfaWithPasskey() {
     setDisableLoading(true);
     try {
-      await confirmMfaWithPasskey("disable");
+      const result = await freshGuard(() => confirmMfaWithPasskey("disable"), disableMfaWithPasskey);
+      if (!result.ok) return;
       setEnabled(false);
       setBackupCodesRemaining(0);
       setShowDisable(false);
@@ -347,7 +464,12 @@ export function Settings() {
     e.preventDefault();
     setRegenLoading(true);
     try {
-      const data = await api.mfaRegenerateBackupCodes(regenCode);
+      const result = await freshGuard(() => api.mfaRegenerateBackupCodes(regenCode), async () => {
+        setRegenCode(""); setShowRegen(true);
+        toast("Identity confirmed. Enter a new authentication code to regenerate backup codes.", "success");
+      });
+      if (!result.ok) { setRegenCode(""); return; }
+      const data = result.value;
       setNewBackupCodes(data.backupCodes);
       setBackupCodesRemaining(data.backupCodes.length);
       setRegenCode("");
@@ -362,7 +484,9 @@ export function Settings() {
   async function regenBackupCodesWithPasskey() {
     setRegenLoading(true);
     try {
-      const data = await confirmMfaWithPasskey("backup-codes");
+      const result = await freshGuard(() => confirmMfaWithPasskey("backup-codes"), regenBackupCodesWithPasskey);
+      if (!result.ok) return;
+      const data = result.value;
       const codes = data.backupCodes ?? [];
       setNewBackupCodes(codes);
       setBackupCodesRemaining(codes.length);
@@ -404,16 +528,15 @@ export function Settings() {
   async function regenerateRecovery() {
     setRegeneratingRecovery(true);
     try {
-      const res = await api.regenerateRecoveryCodes();
+      const result = await freshGuard(api.regenerateRecoveryCodes, regenerateRecovery);
+      if (!result.ok) return;
+      const res = result.value;
       setNewRecoveryCodes(res.codes);
       setRecoveryRemaining(res.codes.length);
       setShowRecoveryRegen(false);
       toast("New recovery codes generated", "success");
     } catch (err: any) {
-      // Regeneration is fresh-auth gated, same as export/delete.
-      toast(err?.message === "Fresh authentication required" || err?.message === "unauthorized"
-        ? "Session is not fresh — log out and back in, then retry"
-        : err?.message || "Failed to generate recovery codes", "error");
+      toast(err?.message || "Failed to generate recovery codes", "error");
     } finally {
       setRegeneratingRecovery(false);
     }
@@ -422,13 +545,11 @@ export function Settings() {
   async function handleExport() {
     setExportLoading(true);
     try {
-      await api.exportAccount();
+      const result = await freshGuard(api.exportAccount, handleExport);
+      if (!result.ok) return;
       toast("Export downloaded", "success");
     } catch (err: any) {
-      // Export is fresh-auth gated: a long-lived session alone can't reach it
-      toast(err?.message === "Fresh authentication required" || err?.message === "unauthorized"
-        ? "Session is not fresh — log out and back in, then retry"
-        : err?.message || "Failed to export data", "error");
+      toast(err?.message || "Failed to export data", "error");
     } finally {
       setExportLoading(false);
     }
@@ -442,13 +563,16 @@ export function Settings() {
     }
     setDeleteLoading(true);
     try {
-      await api.deleteAccount(deletePassword, deleteConfirmText);
+      const result = await freshGuard(() => api.deleteAccount(deletePassword, deleteConfirmText), async () => {
+        setDeletePassword(""); setDeleteConfirmText(""); setShowDeleteZone(true);
+        toast("Identity confirmed. Review the deletion warning and submit again.", "success");
+      });
+      // Never retain or replay destructive form values across elevation.
+      if (!result.ok) { setDeletePassword(""); setDeleteConfirmText(""); return; }
       toast("Account scheduled for deletion", "success");
       setAuthed(false);
     } catch (err: any) {
-      toast(err?.message === "Fresh authentication required" || err?.message === "unauthorized"
-        ? "Session is not fresh — log out and back in, then retry"
-        : err?.message || "Failed to delete account", "error");
+      toast(err?.message || "Failed to delete account", "error");
       setDeletePassword("");
     } finally {
       setDeleteLoading(false);
@@ -1322,6 +1446,44 @@ export function Settings() {
             <p className="muted-copy">
               The admin account cannot be self-deleted. Use the Admin panel to manage other user accounts.
             </p>
+          </div>
+        </div>
+      )}
+
+      {freshPrompt && (
+        <div className="overlay" role="presentation">
+          <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="reauth-title" aria-describedby="reauth-description">
+            <h2 className="dialog-title" id="reauth-title">Confirm it’s you</h2>
+            <p className="dialog-body" id="reauth-description">
+              This security-sensitive action needs a recent identity check.
+            </p>
+            <form onSubmit={submitReauth} className="security-form-stack">
+              <div className="field field-tight">
+                <label className="field-label" htmlFor="reauth-passphrase">Passphrase</label>
+                <input id="reauth-passphrase" className="input" type="password" autoComplete="current-password"
+                  autoFocus value={reauthPassphrase} onChange={e => setReauthPassphrase(e.target.value)} disabled={reauthLoading} />
+              </div>
+              {enabled && (
+                <div className="field field-tight">
+                  <label className="field-label" htmlFor="reauth-code">Authentication or backup code</label>
+                  <input id="reauth-code" className="input" type="text" inputMode="numeric" autoComplete="one-time-code"
+                    value={reauthCode} onChange={e => setReauthCode(e.target.value.replace(/\s/g, "").slice(0, 20))}
+                    placeholder="000000 or XXXX-XXXX" disabled={reauthLoading} />
+                </div>
+              )}
+              {reauthError && <p className="form-error" role="alert">{reauthError}</p>}
+              {passkeysSupported && passkeys.length > 0 && (
+                <button type="button" className="btn btn-soft btn-center" onClick={submitPasskeyReauth} disabled={reauthLoading}>
+                  <Fingerprint size={14} /> Use Passkey
+                </button>
+              )}
+              <div className="dialog-actions">
+                <button type="button" className="btn btn-soft" onClick={cancelReauth} disabled={reauthLoading}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={reauthLoading || !reauthPassphrase || (enabled && !reauthCode.trim())}>
+                  {reauthLoading && <Loader2 size={14} className="spin" />} Confirm
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

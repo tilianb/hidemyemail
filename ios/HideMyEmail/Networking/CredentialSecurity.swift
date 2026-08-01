@@ -47,49 +47,13 @@ enum SecurityOperation: Equatable {
     case disableMFA(code: String)
     case addPasskey(deviceName: String)
     case deletePasskey(id: String)
+    case renamePasskey(id: String, name: String)
 
     var requiresNewMfaCodeAfterReauthentication: Bool {
         switch self {
         case .disableMFA, .regenerateMFA: return true
         default: return false
         }
-    }
-}
-
-struct SecurityFlowState {
-    var pendingOperation: SecurityOperation?
-    var passphrase = ""
-    var reauthenticationCode = ""
-    var showReauthentication = false
-    private var waitingForActionSheetDismissal = false
-
-    mutating func capture(_ operation: SecurityOperation, actionSheetPresented: Bool) {
-        pendingOperation = operation
-        waitingForActionSheetDismissal = actionSheetPresented
-    }
-
-    mutating func requireReauthentication() {
-        if waitingForActionSheetDismissal { return }
-        showReauthentication = true
-    }
-
-    mutating func actionSheetDidDismiss() {
-        guard waitingForActionSheetDismissal, pendingOperation != nil else { return }
-        waitingForActionSheetDismissal = false
-        showReauthentication = true
-    }
-
-    mutating func consumePendingOperation() -> SecurityOperation? {
-        defer { pendingOperation = nil }
-        return pendingOperation
-    }
-
-    mutating func cancel() {
-        pendingOperation = nil
-        passphrase = ""
-        reauthenticationCode = ""
-        showReauthentication = false
-        waitingForActionSheetDismissal = false
     }
 }
 

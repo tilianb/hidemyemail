@@ -3,6 +3,7 @@ import SwiftUI
 
 struct SecuritySection: View {
     @Environment(AppState.self) private var app
+    @Environment(FreshAuthenticationCoordinator.self) private var freshAuthentication
     @Environment(\.openURL) private var openURL
 
     @State private var mfa: MfaStatus?
@@ -16,14 +17,15 @@ struct SecuritySection: View {
     @State private var renameDraft = ""
     @State private var error: String?
     @State private var operationGuard = SecurityOperationGuard()
-    @State private var flow = SecurityFlowState()
     @State private var showMFASetup = false
     @State private var showMFAAction = false
     @State private var disabling = false
     @State private var showPasskeyName = false
     @State private var deleting: Passkey?
+    @State private var showMFASetupAfterFreshAuth = false
+    @State private var showMFAActionAfterFreshAuth = false
 
-    private var busy: Bool { operationGuard.isBusy }
+    private var busy: Bool { operationGuard.isBusy || freshAuthentication.isBusy }
     private var canUseNativePasskey: Bool {
         guard !passkeys.isEmpty, let origin = try? ServerOrigin(app.serverURLString) else { return false }
         return SecurityRegistrationMode.forServer(origin) == .native
@@ -44,11 +46,18 @@ struct SecuritySection: View {
             else { Text("Protect your account with authenticator codes and passkeys.") }
         }
         .task { await load() }
-        .sheet(isPresented: $showMFASetup, onDismiss: clearMFASecrets) { mfaSetupSheet }
+        .sheet(isPresented: $showMFASetup, onDismiss: mfaSetupDidDismiss) { mfaSetupSheet }
         .sheet(isPresented: $showMFAAction, onDismiss: mfaActionDidDismiss) { mfaActionSheet }
-        .sheet(isPresented: Binding(get: { flow.showReauthentication }, set: {
-            if !$0 { flow.cancel() }
-        })) { reauthSheet }
+        .onChange(of: freshAuthentication.isPresented) { _, presented in
+            guard !presented else { return }
+            if showMFASetupAfterFreshAuth {
+                showMFASetupAfterFreshAuth = false
+                showMFASetup = true
+            } else if showMFAActionAfterFreshAuth {
+                showMFAActionAfterFreshAuth = false
+                showMFAAction = true
+            }
+        }
         .alert("Name This Passkey", isPresented: $showPasskeyName) {
             TextField("Device name", text: $deviceName)
             Button("Cancel", role: .cancel) {}
@@ -164,10 +173,10 @@ struct SecuritySection: View {
             .navigationTitle(backupCodes.isEmpty ? "Set Up MFA" : "MFA Enabled")
             .toolbar { ToolbarItem(placement: .confirmationAction) {
                 Button(backupCodes.isEmpty ? "Cancel" : "Done") { showMFASetup = false }
-                    .disabled(!operationGuard.allowsDismissal)
+                    .disabled(busy)
             }}
         }
-        .interactiveDismissDisabled(!operationGuard.allowsDismissal)
+        .interactiveDismissDisabled(busy)
     }
 
     private var mfaActionSheet: some View {
@@ -189,30 +198,11 @@ struct SecuritySection: View {
                 } footer: { Text(disabling ? "A backup code may be used to disable MFA." : "Enter your current authenticator code.") }
             }
             .navigationTitle(disabling ? "Disable MFA" : "Backup Codes")
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showMFAAction = false } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { showMFAAction = false }.disabled(busy)
+            }}
         }
-    }
-
-    private var reauthSheet: some View {
-        NavigationStack {
-            Form {
-                SecureField("Passphrase", text: $flow.passphrase).textContentType(.password)
-                    .accessibilityLabel("Account passphrase")
-                if mfa?.enabled == true {
-                    TextField("MFA code", text: $flow.reauthenticationCode)
-                        .keyboardType(.asciiCapable)
-                        .textContentType(.oneTimeCode)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .accessibilityLabel("MFA code")
-                }
-                if let error { Text(error).foregroundStyle(Theme.red) }
-                Button("Continue") { Task { await reauthenticate() } }
-                    .disabled(flow.passphrase.isEmpty || (mfa?.enabled == true && flow.reauthenticationCode.isEmpty) || busy)
-            }
-            .navigationTitle("Confirm It’s You")
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { flow.cancel() } } }
-        }.presentationDetents([.medium])
+        .interactiveDismissDisabled(busy)
     }
 
     private func load() async {
@@ -222,66 +212,50 @@ struct SecuritySection: View {
         do {
             async let status = client.mfaStatus()
             async let credentials = client.passkeys()
-            mfa = try await status; passkeys = try await credentials; error = nil
+            mfa = try await status; passkeys = try await credentials
+            freshAuthentication.registeredPasskeysAvailable = !passkeys.isEmpty
+            error = nil
         } catch { await handleRequestError(error, client: client) }
     }
 
     private func startSensitive(_ operation: SecurityOperation, fromActionSheet: Bool = false) async {
-        guard operationGuard.begin() else { return }
-        defer { operationGuard.end() }
-        flow.capture(operation, actionSheetPresented: fromActionSheet)
-        await perform(operation)
-    }
-
-    private func handle(_ caught: Error, client: APIClient) async {
-        if case APIError.server(let status, let message) = caught,
-           status == 401, message == "Fresh authentication required", flow.pendingOperation != nil {
-            error = nil
-            if showMFAAction { showMFAAction = false }
-            flow.requireReauthentication()
-        } else {
-            flow.cancel()
-            await handleRequestError(caught, client: client)
-        }
-    }
-
-    private func reauthenticate() async {
         guard let client = app.api() else { return }
-        guard operationGuard.begin() else { return }
-        do {
-            try await client.reauthenticate(passphrase: flow.passphrase,
-                code: mfa?.enabled == true ? flow.reauthenticationCode : nil)
-            let retry = flow.consumePendingOperation()
-            let requestNewCode = retry?.requiresNewMfaCodeAfterReauthentication == true
-            flow.cancel()
-            operationGuard.end()
-            if requestNewCode {
+        var attempt = 0
+        await freshAuthentication.perform(
+            app: app, onError: { error = $0 }, deferPresentation: fromActionSheet
+        ) {
+            attempt += 1
+            guard app.api() === client else { throw APIError.unauthorized }
+            if attempt > 1 && operation.requiresNewMfaCodeAfterReauthentication {
                 actionCode = ""
-                if case .disableMFA = retry {
-                    disabling = true
-                } else if case .regenerateMFA = retry {
-                    disabling = false
-                }
-                showMFAAction = true
-            } else if let retry {
-                await execute(retry)
+                if case .disableMFA = operation { disabling = true } else { disabling = false }
+                showMFAActionAfterFreshAuth = true
+                return
             }
-        } catch {
-            operationGuard.end()
-            await handleRequestError(error, client: client)
+            try await perform(operation, client: client)
         }
+        if fromActionSheet && freshAuthentication.isPending { showMFAAction = false }
     }
 
     private func verifyMFA() async {
         guard let client = app.api() else { return }
-        guard operationGuard.begin() else { return }
-        defer { operationGuard.end() }
-        do {
+        var attempt = 0
+        await freshAuthentication.perform(
+            app: app, onError: { error = $0 }, deferPresentation: true
+        ) {
+            attempt += 1
+            if attempt > 1 {
+                verifyCode = ""
+                setup = try await client.setupMFA()
+                showMFASetupAfterFreshAuth = true
+                return
+            }
             let response = try await client.verifyMFA(code: verifyCode)
             backupCodes = response.backupCodes
             mfa = MfaStatus(enabled: true, backupCodesRemaining: backupCodes.count)
             setup = nil; verifyCode = ""; error = nil
-        } catch { await handleRequestError(error, client: client) }
+        }
+        if freshAuthentication.isPending { showMFASetup = false }
     }
 
     private func usePasskeyForMFAAction() async {
@@ -329,16 +303,9 @@ struct SecuritySection: View {
         }
     }
 
-    private func execute(_ operation: SecurityOperation) async {
-        guard operationGuard.begin() else { return }
-        defer { operationGuard.end() }
-        await perform(operation)
-    }
-
-    private func perform(_ operation: SecurityOperation) async {
-        guard let client = app.api() else { return }
-        do {
-            switch operation {
+    private func perform(_ operation: SecurityOperation, client: APIClient) async throws {
+        guard app.api() === client else { throw APIError.unauthorized }
+        switch operation {
             case .setupMFA:
                 setup = try await client.setupMFA(); showMFASetup = true
             case .disableMFA(let code):
@@ -354,9 +321,12 @@ struct SecuritySection: View {
             case .deletePasskey(let id):
                 try await client.deletePasskey(id: id)
                 passkeys.removeAll { $0.id == id }
-            }
-            actionCode = ""; error = nil; _ = flow.consumePendingOperation()
-        } catch { await handle(error, client: client) }
+            case .renamePasskey(let id, let name):
+                try await client.renamePasskey(id: id, name: name)
+                passkeys = try await client.passkeys()
+        }
+        freshAuthentication.registeredPasskeysAvailable = !passkeys.isEmpty
+        actionCode = ""; error = nil
     }
 
     private func addPasskey() async {
@@ -394,13 +364,8 @@ struct SecuritySection: View {
     }
 
     private func rename(_ passkey: Passkey) async {
-        guard let client = app.api(), !renameDraft.isEmpty else { return }
-        guard operationGuard.begin() else { return }
-        defer { operationGuard.end() }
-        do {
-            try await client.renamePasskey(id: passkey.id, name: renameDraft)
-            passkeys = try await client.passkeys()
-        } catch { await handleRequestError(error, client: client) }
+        guard !renameDraft.isEmpty else { return }
+        await startSensitive(.renamePasskey(id: passkey.id, name: renameDraft))
     }
 
     private func qrImage(_ value: String) -> UIImage? {
@@ -418,9 +383,13 @@ struct SecuritySection: View {
     }
 
     private func clearMFASecrets() { setup = nil; backupCodes = []; verifyCode = "" }
+    private func mfaSetupDidDismiss() {
+        clearMFASecrets()
+        freshAuthentication.presentPending()
+    }
     private func mfaActionDidDismiss() {
         actionCode = ""
-        flow.actionSheetDidDismiss()
+        freshAuthentication.presentPending()
     }
 
     private func handleRequestError(_ caught: Error, client: APIClient) async {
@@ -430,4 +399,5 @@ struct SecuritySection: View {
             error = caught.localizedDescription
         }
     }
+
 }
