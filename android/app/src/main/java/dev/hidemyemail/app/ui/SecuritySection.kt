@@ -40,6 +40,9 @@ import androidx.compose.ui.unit.sp
 import androidx.credentials.CreatePublicKeyCredentialRequest
 import androidx.credentials.CreatePublicKeyCredentialResponse
 import androidx.credentials.CredentialManager
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.GetPublicKeyCredentialOption
+import androidx.credentials.PublicKeyCredential
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.MultiFormatWriter
 import com.google.zxing.common.BitMatrix
@@ -67,6 +70,9 @@ internal class SecurityOperationGate {
 }
 
 internal fun isCurrentPendingRetry(current: (() -> Unit)?, captured: () -> Unit) = current === captured
+
+internal fun canUsePasskeyForMfa(passkeyCount: Int, serverUrl: String) =
+    passkeyCount > 0 && usesNativePasskeys(serverUrl)
 
 internal fun reauthenticationContinuation(
     retry: () -> Unit,
@@ -238,7 +244,28 @@ fun SecuritySection(app: AppViewModel) {
     if (codes.isNotEmpty()) BackupCodesDialog(codes, onDismiss = ::clearSecrets)
     codePurpose?.let { purpose ->
         val regenerating = !purpose.startsWith("Disable")
-        CodeDialog(purpose, code, { code = it }, regenerating, onDismiss = ::clearSecrets) {
+        CodeDialog(purpose, code, { code = it }, regenerating, onDismiss = ::clearSecrets, onUsePasskey =
+            if (canUsePasskeyForMfa(passkeys.size, app.serverUrl.value)) {{
+                clearSecrets()
+                operation { client ->
+                    val action = if (regenerating) "backup-codes" else "disable"
+                    val challenge = client.passkeyMfaChallenge(action)
+                    check(isValidNativePasskeyChallenge(app.serverUrl.value, challenge.rpId)) {
+                        "Server returned an invalid passkey RP ID"
+                    }
+                    val credential = CredentialManager.create(context).getCredential(
+                        context,
+                        GetCredentialRequest(listOf(GetPublicKeyCredentialOption(challenge.requestOptionsJson))),
+                    ).credential as? PublicKeyCredential
+                        ?: error("Credential provider returned an unexpected response")
+                    val result = client.completePasskeyMfa(
+                        action, credential.authenticationResponseJson, challenge.passkeyToken,
+                    )
+                    if (regenerating) codes = result.backupCodes
+                    reload++
+                }
+            }} else null,
+        ) {
         val entered = code
         clearSecrets()
         val afterReauthentication = if (regenerating) null else {
@@ -344,8 +371,8 @@ private fun ReauthDialog(mfa: Boolean, error: String?, onDismiss: () -> Unit, on
         dismissButton = { TextButton(onClick = { passphrase = ""; code = ""; onDismiss() }) { Text("Cancel") } })
 }
 
-@Composable private fun CodeDialog(title: String, value: String, onValue: (String) -> Unit, totpOnly: Boolean, onDismiss: () -> Unit, onSubmit: () -> Unit) =
-    AlertDialog(onDismissRequest = onDismiss, containerColor = Theme.surface2, title = { Text(title, style = Theme.displayStyle(18.sp)) }, text = { OutlinedTextField(value, { onValue(if (totpOnly) it.filter(Char::isDigit).take(6) else it.take(64)) }, label = { Text(if (totpOnly) "6-digit authenticator code" else "Authenticator or backup code") }, singleLine = true) }, confirmButton = { TextButton(enabled = if (totpOnly) value.length == 6 else value.isNotBlank(), onClick = onSubmit) { Text("Continue") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+@Composable private fun CodeDialog(title: String, value: String, onValue: (String) -> Unit, totpOnly: Boolean, onDismiss: () -> Unit, onUsePasskey: (() -> Unit)?, onSubmit: () -> Unit) =
+    AlertDialog(onDismissRequest = onDismiss, containerColor = Theme.surface2, title = { Text(title, style = Theme.displayStyle(18.sp)) }, text = { OutlinedTextField(value, { onValue(if (totpOnly) it.filter(Char::isDigit).take(6) else it.take(64)) }, label = { Text(if (totpOnly) "6-digit authenticator code" else "Authenticator or backup code") }, singleLine = true) }, confirmButton = { Column { TextButton(enabled = if (totpOnly) value.length == 6 else value.isNotBlank(), onClick = onSubmit) { Text("Continue") }; onUsePasskey?.let { TextButton(onClick = it) { Text("Use Passkey") } } } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 
 @Composable private fun NameDialog(title: String, value: String, onValue: (String) -> Unit, onDismiss: () -> Unit, onSubmit: () -> Unit) =
     AlertDialog(onDismissRequest = onDismiss, containerColor = Theme.surface2, title = { Text(title, style = Theme.displayStyle(18.sp)) }, text = { OutlinedTextField(value, onValue, label = { Text("Device name (optional)") }, singleLine = true) }, confirmButton = { TextButton(onClick = onSubmit) { Text("Continue") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })

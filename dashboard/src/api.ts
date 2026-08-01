@@ -218,6 +218,13 @@ export const api = {
   mfaVerify: (code: string) => req<{ ok: true; backupCodes: string[] }>("/api/settings/mfa/verify", { method: "POST", body: JSON.stringify({ code }) }),
   mfaDisable: (code: string) => req<{ ok: true }>("/api/settings/mfa/disable", { method: "POST", body: JSON.stringify({ code }) }),
   mfaRegenerateBackupCodes: (code: string) => req<{ ok: true; backupCodes: string[] }>("/api/settings/mfa/backup-codes", { method: "POST", body: JSON.stringify({ code }) }),
+  mfaPasskeyChallenge: (action: "disable" | "backup-codes") => req<Record<string, unknown> & { passkey_token: string }>(
+    "/api/settings/mfa/passkey/challenge", { method: "POST", body: JSON.stringify({ action }) },
+  ),
+  mfaPasskeyComplete: (action: "disable" | "backup-codes", response: unknown, passkeyToken: string) => req<{ ok: true; backupCodes?: string[] }>(
+    "/api/settings/mfa/passkey/complete",
+    { method: "POST", body: JSON.stringify({ action, response, passkey_token: passkeyToken }) },
+  ),
 
   // Account data export — returns a JSON Blob for download
   exportAccount: async (): Promise<void> => {

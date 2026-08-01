@@ -318,6 +318,31 @@ export function Settings() {
     }
   }
 
+  async function confirmMfaWithPasskey(action: "disable" | "backup-codes") {
+    const { passkey_token, ...options } = await api.mfaPasskeyChallenge(action);
+    const { startAuthentication } = await import("@simplewebauthn/browser");
+    const response = await startAuthentication({
+      optionsJSON: options as unknown as Parameters<typeof startAuthentication>[0]["optionsJSON"],
+    });
+    return api.mfaPasskeyComplete(action, response, passkey_token);
+  }
+
+  async function disableMfaWithPasskey() {
+    setDisableLoading(true);
+    try {
+      await confirmMfaWithPasskey("disable");
+      setEnabled(false);
+      setBackupCodesRemaining(0);
+      setShowDisable(false);
+      setDisableCode("");
+      toast("Two-factor authentication disabled", "success");
+    } catch (err: any) {
+      if (err?.name !== "NotAllowedError") toast(err?.message || "Passkey verification failed", "error");
+    } finally {
+      setDisableLoading(false);
+    }
+  }
+
   async function regenBackupCodes(e: React.FormEvent) {
     e.preventDefault();
     setRegenLoading(true);
@@ -329,6 +354,22 @@ export function Settings() {
     } catch (err: any) {
       toast(err.message || "Failed to regenerate codes", "error");
       setRegenCode("");
+    } finally {
+      setRegenLoading(false);
+    }
+  }
+
+  async function regenBackupCodesWithPasskey() {
+    setRegenLoading(true);
+    try {
+      const data = await confirmMfaWithPasskey("backup-codes");
+      const codes = data.backupCodes ?? [];
+      setNewBackupCodes(codes);
+      setBackupCodesRemaining(codes.length);
+      setShowRegen(false);
+      setRegenCode("");
+    } catch (err: any) {
+      if (err?.name !== "NotAllowedError") toast(err?.message || "Passkey verification failed", "error");
     } finally {
       setRegenLoading(false);
     }
@@ -747,6 +788,11 @@ export function Settings() {
                 <button type="button" className="btn btn-soft" onClick={() => setShowDisable(false)} disabled={disableLoading}>
                   Cancel
                 </button>
+                {passkeysSupported && passkeys.length > 0 && (
+                  <button type="button" className="btn btn-soft" onClick={disableMfaWithPasskey} disabled={disableLoading}>
+                    <Fingerprint size={14} /> Use Passkey
+                  </button>
+                )}
                 <button type="submit" className="btn btn-danger-soft" disabled={disableLoading || !disableCode}>
                   {disableLoading ? <Loader2 size={14} className="spin" /> : "Confirm Disable"}
                 </button>
@@ -818,6 +864,11 @@ export function Settings() {
                     {regenLoading ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
                     Regenerate
                   </button>
+                  {passkeysSupported && passkeys.length > 0 && (
+                    <button type="button" className="btn btn-soft" onClick={regenBackupCodesWithPasskey} disabled={regenLoading}>
+                      <Fingerprint size={14} /> Use Passkey
+                    </button>
+                  )}
                   <button type="button" className="btn btn-soft" onClick={() => { setShowRegen(false); setRegenCode(""); }} disabled={regenLoading}>
                     Cancel
                   </button>

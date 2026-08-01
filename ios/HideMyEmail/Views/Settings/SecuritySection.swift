@@ -24,6 +24,10 @@ struct SecuritySection: View {
     @State private var deleting: Passkey?
 
     private var busy: Bool { operationGuard.isBusy }
+    private var canUseNativePasskey: Bool {
+        guard !passkeys.isEmpty, let origin = try? ServerOrigin(app.serverURLString) else { return false }
+        return SecurityRegistrationMode.forServer(origin) == .native
+    }
 
     var body: some View {
         Section {
@@ -178,6 +182,10 @@ struct SecuritySection: View {
                             ? .disableMFA(code: actionCode) : .regenerateMFA(code: actionCode)
                         Task { await startSensitive(operation, fromActionSheet: true) }
                     }.disabled(actionCode.isEmpty || busy)
+                    if canUseNativePasskey {
+                        Button("Use Passkey") { Task { await usePasskeyForMFAAction() } }
+                            .disabled(busy)
+                    }
                 } footer: { Text(disabling ? "A backup code may be used to disable MFA." : "Enter your current authenticator code.") }
             }
             .navigationTitle(disabling ? "Disable MFA" : "Backup Codes")
@@ -274,6 +282,51 @@ struct SecuritySection: View {
             mfa = MfaStatus(enabled: true, backupCodesRemaining: backupCodes.count)
             setup = nil; verifyCode = ""; error = nil
         } catch { await handleRequestError(error, client: client) }
+    }
+
+    private func usePasskeyForMFAAction() async {
+        guard canUseNativePasskey, let client = app.api() else { return }
+        guard operationGuard.begin() else { return }
+        defer { operationGuard.end() }
+        do {
+            let action: MFAPasskeyAction = disabling ? .disable : .backupCodes
+            let options = try await client.mfaPasskeyChallenge(action: action)
+            guard let challenge = Data(base64urlEncoded: options.challenge),
+                  let passkeyToken = options.passkeyToken,
+                  let origin = try? ServerOrigin(app.serverURLString),
+                  let host = origin.url.host else {
+                throw APIError.server(status: -1, message: "Malformed passkey challenge")
+            }
+            let rpID = options.rpId ?? host
+            try NativePasskeyRegistration.validate(origin: origin, rpID: rpID)
+            let assertion = try await PasskeyAuthenticator().assert(relyingParty: rpID, challenge: challenge)
+            let response = PasskeyAssertionResponse.make(
+                credentialID: assertion.credentialID,
+                clientDataJSON: assertion.rawClientDataJSON,
+                authenticatorData: assertion.rawAuthenticatorData,
+                signature: assertion.signature,
+                userID: assertion.userID,
+                passkeyToken: nil
+            )
+            let result = try await client.completeMFAPasskeyAction(
+                action, response: response, passkeyToken: passkeyToken
+            )
+            if disabling {
+                mfa = MfaStatus(enabled: false, backupCodesRemaining: 0)
+                showMFAAction = false
+            } else {
+                guard let codes = result.backupCodes else {
+                    throw APIError.server(status: -1, message: "Backup codes were not returned")
+                }
+                backupCodes = codes
+                mfa = MfaStatus(enabled: true, backupCodesRemaining: backupCodes.count)
+                showMFAAction = false
+                showMFASetup = true
+            }
+            actionCode = ""; error = nil
+        } catch {
+            await handleRequestError(error, client: client)
+        }
     }
 
     private func execute(_ operation: SecurityOperation) async {
