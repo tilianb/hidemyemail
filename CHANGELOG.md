@@ -24,6 +24,11 @@ All notable changes to this project are documented here. The format follows
   a passkey in the dashboard and the official iOS and Android apps. Passkey
   confirmation is bound to the current account and selected action, and can be
   used only once; authenticator and backup-code confirmation remain available.
+- The dashboard and official iOS and Android apps now confirm sensitive
+  Settings actions in place when the 10-minute authorization window expires.
+  Users can use their passphrase plus enabled MFA or an account-bound passkey;
+  the interrupted operation is retried once without signing out or replacing
+  the seven-day session.
 
 ### Changed
 
@@ -50,6 +55,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Security
 
+- General passkey reauthentication challenges are bound to the current account,
+  authentication version, and web/native channel, restricted to that account's
+  registered credentials, and consumed once. Web completion refreshes only the
+  HttpOnly fresh-auth cookie, while native completion refreshes only its
+  memory-held fresh-auth token.
+- Passkey assertion counters now use compare-and-swap finalization across login,
+  MFA confirmation, and fresh authentication so concurrent assertions cannot
+  both advance the same positive authenticator counter.
+- Completing MFA enrollment now rechecks fresh authentication before enabling
+  the factor; clients discard the submitted setup code and ask for a new one if
+  the authorization window expires during enrollment.
 - Browser field integration requires install-time access to HTTP and HTTPS
   pages. Page code receives no API key or alias inventory: a trusted extension
   service worker owns authenticated API calls, while the content script reads

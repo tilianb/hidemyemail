@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { deleteCookie } from "hono/cookie";
 import type { AppEnv } from "../app";
 import { derivePassphraseHash, timingSafeEqual } from "../../lib/auth";
-import { hasFreshAuth } from "../auth-helpers";
+import { freshAuthRequired, hasFreshAuth } from "../auth-helpers";
 import { decryptDestination } from "../../lib/crypto";
 import { validateUsername } from "../../lib/username";
 import { generateRecoveryCodes } from "../../lib/recovery";
@@ -22,7 +22,7 @@ export function accountRoutes() {
    * plaintext, so a stolen long-lived session cookie alone must not reach it.
    */
   r.get("/export", async (c) => {
-    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
+    if (!(await hasFreshAuth(c))) return freshAuthRequired(c);
     const userId = c.get("userId");
     const db = c.env.DB;
     const key = c.env.DESTINATION_ENCRYPTION_KEY;
@@ -152,7 +152,7 @@ export function accountRoutes() {
   r.post("/delete", async (c) => {
     // Fresh-auth gated on top of the password check: with MFA enabled, a
     // stolen session + password alone must not be able to destroy the account.
-    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
+    if (!(await hasFreshAuth(c))) return freshAuthRequired(c);
     const userId = c.get("userId");
     if (userId === 1) {
       return c.json({ error: "The admin account cannot be self-deleted" }, 403);
@@ -270,7 +270,7 @@ export function accountRoutes() {
    * the kind of operation a stolen long-lived cookie must not be able to do.
    */
   r.post("/recovery-codes", async (c) => {
-    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
+    if (!(await hasFreshAuth(c))) return freshAuthRequired(c);
     const userId = c.get("userId");
     const { plain, hashed } = await generateRecoveryCodes();
     await c.env.DB.prepare("UPDATE users SET recovery_codes = ? WHERE id = ?")

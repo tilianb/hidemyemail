@@ -42,10 +42,19 @@ export async function verifyPassphraseVerifier(passphrase: string, verifier: str
   return version === "v1" && !!saltHex && !!hashHex && await verifyPassword(passphrase, saltHex, hashHex);
 }
 
-export async function updatePasskeySignCount(db: D1Database, credentialId: string, newCounter: number): Promise<void> {
-  await db.prepare(
-    "UPDATE passkey_credentials SET sign_count = MAX(sign_count, ?) WHERE id = ?"
-  ).bind(newCounter, credentialId).run();
+export async function updatePasskeySignCount(db: D1Database, credentialId: string, oldCounter: number, newCounter: number): Promise<boolean> {
+  const result = await db.prepare(
+    "UPDATE passkey_credentials SET sign_count = ? WHERE id = ? AND sign_count = ?"
+  ).bind(newCounter, credentialId, oldCounter).run();
+  return result.meta.changes === 1;
+}
+
+export function passkeyArtifactExpiresAt(token: string): number | null {
+  const parts = token.split(".");
+  const index = parts[0] === "pauth" ? 1 : parts[0] === "pauthmfa" ? 3 : parts[0] === "mfa-passkey1" ? 4 : null;
+  if (index === null) return null;
+  const value = Number(parts[index]);
+  return Number.isSafeInteger(value) ? value : null;
 }
 
 export async function verifyPassword(password: string, saltHex: string, hashHex: string): Promise<boolean> {
@@ -120,6 +129,25 @@ export async function verifyPasskeyMfaChallenge(secret: string, token: string): 
   if (!Number.isSafeInteger(userId) || userId < 1 || !Number.isSafeInteger(authVersion) || authVersion < 0 ||
       !Number.isSafeInteger(exp) || exp <= Math.floor(Date.now() / 1000) || !challenge) return null;
   return { userId, authVersion, challenge };
+}
+
+export type ReauthChannel = "web" | "native";
+export async function signReauthPasskeyChallenge(secret: string, userId: number, authVersion: number, channel: ReauthChannel, challenge: string): Promise<string> {
+  const exp = Math.floor(Date.now() / 1000) + 300;
+  const payload = `reauthpk1.${userId}.${authVersion}.${channel}.${exp}.${challenge}`;
+  return `${payload}.${await hmac(secret, payload)}`;
+}
+
+export async function verifyReauthPasskeyChallenge(secret: string, token: string): Promise<{ userId: number; authVersion: number; channel: ReauthChannel; challenge: string; expiresAt: number } | null> {
+  const parts = token.split(".");
+  if (parts.length !== 7 || parts[0] !== "reauthpk1") return null;
+  const [, userId, version, channel, expiration, challenge, signature] = parts;
+  if (channel !== "web" && channel !== "native") return null;
+  const payload = `reauthpk1.${userId}.${version}.${channel}.${expiration}.${challenge}`;
+  if (!timingSafeEqual(signature!, await hmac(secret, payload))) return null;
+  const expiresAt = Number(expiration);
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= Math.floor(Date.now() / 1000)) return null;
+  return { userId: Number(userId), authVersion: Number(version), channel, challenge: challenge!, expiresAt };
 }
 
 // Passkey registration challenge (userId included, user already authenticated)
