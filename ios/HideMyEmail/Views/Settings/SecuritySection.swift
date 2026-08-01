@@ -337,30 +337,31 @@ struct SecuritySection: View {
         guard let origin = try? ServerOrigin(app.serverURLString) else { return }
         if SecurityRegistrationMode.forServer(origin) == .handoff {
             openURL(try await client.securityHandoffURL())
-        } else {
-                    let options = try await client.passkeyRegistrationChallenge()
-                    try NativePasskeyRegistration.validate(origin: origin, rpID: options.rp.id)
-                    guard let challenge = Data(base64urlEncoded: options.challenge),
-                          let userID = Data(base64urlEncoded: options.user.id) else {
-                        throw APIError.server(status: -1, message: "Malformed passkey challenge")
-                    }
-                    let credential = try await PasskeyAuthenticator().register(
-                        relyingParty: options.rp.id, challenge: challenge,
-                        userID: userID, userName: options.user.name
-                    )
-                    guard let attestation = credential.rawAttestationObject else {
-                        throw APIError.server(status: -1, message: "Missing passkey attestation")
-                    }
-                    let response = PasskeyRegistrationResponse.make(
-                        credentialID: credential.credentialID,
-                        clientDataJSON: credential.rawClientDataJSON,
-                        attestationObject: attestation, attachment: "platform"
-                    )
-                    try await client.registerPasskey(response: response,
-                        deviceName: name,
-                        challengeToken: options.challengeToken)
-            passkeys = try await client.passkeys()
+            return
         }
+
+        let options = try await client.passkeyRegistrationChallenge()
+        try NativePasskeyRegistration.validate(origin: origin, rpID: options.rp.id)
+        guard let challenge = Data(base64urlEncoded: options.challenge),
+              let userID = Data(base64urlEncoded: options.user.id) else {
+            throw APIError.server(status: -1, message: "Malformed passkey challenge")
+        }
+        let credential = try await PasskeyAuthenticator().register(
+            relyingParty: options.rp.id, challenge: challenge,
+            userID: userID, userName: options.user.name
+        )
+        guard let attestation = credential.rawAttestationObject else {
+            throw APIError.server(status: -1, message: "Missing passkey attestation")
+        }
+        let response = PasskeyRegistrationResponse.make(
+            credentialID: credential.credentialID,
+            clientDataJSON: credential.rawClientDataJSON,
+            attestationObject: attestation, attachment: "platform"
+        )
+        try await client.registerPasskey(response: response,
+            deviceName: name,
+            challengeToken: options.challengeToken)
+        passkeys = try await client.passkeys()
     }
 
     private func rename(_ passkey: Passkey) async {
