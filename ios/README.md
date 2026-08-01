@@ -31,6 +31,32 @@ open HideMyEmail.xcodeproj  # then ⌘R in Xcode
 In Xcode, select the **HideMyEmail** target → Signing & Capabilities and set
 your development team (or edit `DEVELOPMENT_TEAM` in `project.yml`).
 
+## TestFlight from `dev`
+
+To ship the current development build, open **Actions → TestFlight → Run
+workflow**, select the `dev` branch, and run it. Manual uploads are restricted to
+`dev`; selecting another branch skips the job. Pull requests continue to run the
+simulator build and tests independently. Pushes to `main` that change the iOS
+app or this workflow upload automatically. Branch builds use `MARKETING_VERSION`
+from `project.yml`, while release-tag builds use the tag version. All uploads
+use the globally unique GitHub Actions run ID as the App Store build number, so
+their uploads cannot collide.
+
+Configure these GitHub Actions secrets before the first upload:
+
+- `BUILD_CERTIFICATE_BASE64` — Base64-encoded Apple Distribution `.p12`
+- `P12_PASSWORD` — password for that `.p12`
+- `BUILD_PROVISION_PROFILE_BASE64` — Base64-encoded App Store provisioning
+  profile named `Github`, with Associated Domains and Push Notifications
+- `APP_STORE_CONNECT_API_PRIVATE_KEY` — App Store Connect `.p8` contents
+- `APP_STORE_CONNECT_API_KEY_ID` and `APP_STORE_CONNECT_API_ISSUER_ID`
+
+The upload job uses the GitHub `production` environment as its deployment
+boundary. Add required reviewers or deployment-branch restrictions there if a
+manual gate is desired. The App Store Connect API key needs permission to upload
+builds, and the profile, certificate, team ID, and `dev.hidemyemail.app` bundle
+ID must belong to the same Apple team.
+
 ### Pointing at a server
 
 The app defaults to `https://app.hidemyemail.dev`. Self-hosters can change the
