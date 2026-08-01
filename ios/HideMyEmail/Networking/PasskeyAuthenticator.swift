@@ -135,6 +135,28 @@ enum PasskeyRegistrationResponse {
     }
 }
 
+enum PasskeyAssertionResponse {
+    static func make(
+        credentialID: Data, clientDataJSON: Data, authenticatorData: Data,
+        signature: Data, userID: Data, passkeyToken: String?
+    ) -> [String: Any] {
+        var result: [String: Any] = [
+            "id": credentialID.base64urlEncodedString(),
+            "rawId": credentialID.base64urlEncodedString(),
+            "type": "public-key",
+            "clientExtensionResults": [String: Any](),
+            "response": [
+                "clientDataJSON": clientDataJSON.base64urlEncodedString(),
+                "authenticatorData": authenticatorData.base64urlEncodedString(),
+                "signature": signature.base64urlEncodedString(),
+                "userHandle": userID.base64urlEncodedString(),
+            ],
+        ]
+        if let passkeyToken { result["passkey_token"] = passkeyToken }
+        return result
+    }
+}
+
 extension PasskeyAuthenticator: ASAuthorizationControllerPresentationContextProviding {
     func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
         let scene = UIApplication.shared.connectedScenes

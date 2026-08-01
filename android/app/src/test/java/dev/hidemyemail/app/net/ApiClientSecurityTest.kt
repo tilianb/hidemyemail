@@ -120,6 +120,33 @@ class ApiClientSecurityTest {
         }
     }
 
+    @Test fun passkeyMfaRoundTripUsesCurrentAuthAndPreservesCredentials() = runTest {
+        client.freshAuth = "current-fresh"
+        server.enqueue(json("""{"challenge":"abc","rpId":"app.hidemyemail.dev","userVerification":"required","passkey_token":"signed"}"""))
+        server.enqueue(json("""{"ok":true,"backupCodes":["NEW-CODE"]}"""))
+
+        val challenge = client.passkeyMfaChallenge("backup-codes")
+        assertFalse(json.parseToJsonElement(challenge.requestOptionsJson).jsonObject.containsKey("passkey_token"))
+        val result = client.completePasskeyMfa("backup-codes", """{"id":"credential","type":"public-key","response":{"clientDataJSON":"x"}}""", challenge.passkeyToken)
+
+        val requests = List(2) { server.takeRequest() }
+        assertEquals(listOf("/api/settings/mfa/passkey/challenge", "/api/settings/mfa/passkey/complete"), requests.map { it.path })
+        requests.forEach {
+            assertEquals("token", it.getHeader("X-Auth-Mode"))
+            assertEquals("Bearer bearer", it.getHeader("Authorization"))
+            assertEquals("current-fresh", it.getHeader("X-Fresh-Auth"))
+        }
+        val challengeBody = json.parseToJsonElement(requests[0].body.readUtf8()).jsonObject
+        assertEquals("backup-codes", challengeBody["action"]?.jsonPrimitive?.content)
+        val completeBody = json.parseToJsonElement(requests[1].body.readUtf8()).jsonObject
+        assertEquals("backup-codes", completeBody["action"]?.jsonPrimitive?.content)
+        assertEquals("signed", completeBody["passkey_token"]?.jsonPrimitive?.content)
+        assertEquals("credential", completeBody["response"]?.jsonObject?.get("id")?.jsonPrimitive?.content)
+        assertEquals(listOf("NEW-CODE"), result.backupCodes)
+        assertEquals("bearer", client.token)
+        assertEquals("current-fresh", client.freshAuth)
+    }
+
     @Test fun malformedPasskeyChallengeJsonBecomesDecodingError() = runTest {
         server.enqueue(json("not json"))
 

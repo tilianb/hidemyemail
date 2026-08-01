@@ -151,6 +151,16 @@ struct MFABackupCodesResponse: Decodable {
     let backupCodes: [String]
 }
 
+enum MFAPasskeyAction: String {
+    case disable
+    case backupCodes = "backup-codes"
+}
+
+struct MFAPasskeyCompleteResponse: Decodable {
+    let ok: Bool
+    let backupCodes: [String]?
+}
+
 struct FreshAuthResponse: Decodable {
     let freshAuth: String
     enum CodingKeys: String, CodingKey { case freshAuth = "fresh_auth" }

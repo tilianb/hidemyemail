@@ -372,6 +372,56 @@ test("P4: MFA setup requires fresh auth", async () => {
   expect(res.status).toBe(401);
 });
 
+test("MFA passkey challenge is restricted to the current account and requested action", async () => {
+  const app = createApp();
+  const passkeyEnv = { ...testEnv, APP_ORIGIN: "https://app.example.com" };
+  const userId = await makeUser(1);
+  const otherUserId = await makeUser(1);
+  const session = await signSession("sek", userId, 3600);
+  const secret = await encryptDestination("JBSWY3DPEHPK3PXP", testEnv.DESTINATION_ENCRYPTION_KEY);
+  await (env.DB as D1Database).prepare(
+    "INSERT INTO mfa (user_id, totp_secret, totp_enabled, totp_backup_codes) VALUES (?, ?, 1, '[]')"
+  ).bind(userId, secret).run();
+  await (env.DB as D1Database).prepare(
+    "INSERT INTO passkey_credentials (id, user_id, public_key, sign_count, created_at) VALUES ('current-passkey', ?, 'key', 0, ?)"
+  ).bind(userId, Date.now()).run();
+
+  const challenge = await app.request("/api/settings/mfa/passkey/challenge", {
+    method: "POST",
+    headers: {
+      cookie: `__Host-session=${session}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ action: "disable" }),
+  }, passkeyEnv);
+  expect(challenge.status).toBe(200);
+  const options = await challenge.json() as { allowCredentials: { id: string }[]; passkey_token: string };
+  expect(options.allowCredentials.map((credential) => credential.id)).toEqual(["current-passkey"]);
+
+  const wrongAction = await app.request("/api/settings/mfa/passkey/complete", {
+    method: "POST",
+    headers: { cookie: `__Host-session=${session}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "backup-codes",
+      passkey_token: options.passkey_token,
+      response: { id: "current-passkey" },
+    }),
+  }, passkeyEnv);
+  expect(wrongAction.status).toBe(401);
+
+  const otherSession = await signSession("sek", otherUserId, 3600);
+  const wrongAccount = await app.request("/api/settings/mfa/passkey/complete", {
+    method: "POST",
+    headers: { cookie: `__Host-session=${otherSession}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "disable",
+      passkey_token: options.passkey_token,
+      response: { id: "current-passkey" },
+    }),
+  }, passkeyEnv);
+  expect(wrongAccount.status).toBe(401);
+});
+
 test("P4: MFA disable failures are rate limited", async () => {
   const app = createApp();
   const userId = await makeUser(1);

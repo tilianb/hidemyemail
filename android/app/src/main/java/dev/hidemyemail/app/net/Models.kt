@@ -170,6 +170,12 @@ data class PasskeyAuthenticationChallenge(
 )
 
 @Serializable
+data class PasskeyMfaResult(
+    val ok: Boolean,
+    val backupCodes: List<String> = emptyList(),
+)
+
+@Serializable
 data class SecurityHandoff(val url: String)
 
 // GET /api/passkeys — registered WebAuthn credentials.

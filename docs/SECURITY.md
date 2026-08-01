@@ -108,7 +108,11 @@ Before making an instance public:
 - Use least-privilege AWS IAM credentials.
 - Verify SPF, DKIM, and DMARC for every sending domain.
 - Configure exact SNS topic ARNs.
-- Configure exact `APP_ORIGIN` before enabling passkeys.
+- Configure exact `APP_ORIGIN` before enabling passkeys. A newly verified
+  passkey can also confirm MFA disable and MFA backup-code regeneration without
+  requiring access to the current authenticator. The Worker binds each
+  passkey challenge to the current account, authentication version, and one
+  selected MFA action, then consumes it once without replacing the session.
 - Confirm SES production access if needed.
 - Run a full send-forward-reply test.
 - Monitor SES bounces, complaints, and quotas.

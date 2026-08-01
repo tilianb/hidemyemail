@@ -147,6 +147,52 @@ final class SecurityFeatureTests: XCTestCase {
         ))
     }
 
+    func testPasskeyAssertionResponseIncludesChallengeTokenAndWebAuthnPayload() throws {
+        let result = PasskeyAssertionResponse.make(
+            credentialID: Data([0xfb, 0xff]), clientDataJSON: Data([1]),
+            authenticatorData: Data([2]), signature: Data([3]), userID: Data([4]),
+            passkeyToken: "signed"
+        )
+        XCTAssertEqual(result["id"] as? String, "-_8")
+        XCTAssertEqual(result["passkey_token"] as? String, "signed")
+        let response = try XCTUnwrap(result["response"] as? [String: Any])
+        XCTAssertEqual(response["clientDataJSON"] as? String, "AQ")
+        XCTAssertEqual(response["authenticatorData"] as? String, "Ag")
+        XCTAssertEqual(response["signature"] as? String, "Aw")
+        XCTAssertEqual(response["userHandle"] as? String, "BA")
+    }
+
+    func testMFAPasskeyActionsUseBoundSettingsEndpointsWithoutReplacingCredentials() async throws {
+        var requests: [URLRequest] = []
+        URLStub.handler = { request in
+            requests.append(request)
+            let response = request.url!.path.hasSuffix("challenge")
+                ? #"{"challenge":"AQI","rpId":"app.hidemyemail.dev","passkey_token":"signed"}"#
+                : #"{"ok":true,"backupCodes":["new-code"]}"#
+            return Self.response(request, response)
+        }
+        let api = client()
+        await api.setFreshAuth("existing-fresh")
+        _ = try await api.mfaPasskeyChallenge(action: .backupCodes)
+        let result = try await api.completeMFAPasskeyAction(
+            .backupCodes, response: ["id": "credential"], passkeyToken: "signed"
+        )
+        _ = try await api.mfaStatus()
+
+        XCTAssertEqual(requests[0].url?.path, "/api/settings/mfa/passkey/challenge")
+        XCTAssertEqual(requests[1].url?.path, "/api/settings/mfa/passkey/complete")
+        XCTAssertEqual(try body(requests[0])["action"] as? String, "backup-codes")
+        let complete = try body(requests[1])
+        XCTAssertEqual(complete["action"] as? String, "backup-codes")
+        XCTAssertEqual(complete["passkey_token"] as? String, "signed")
+        XCTAssertEqual((complete["response"] as? [String: String])?["id"], "credential")
+        XCTAssertEqual(result.backupCodes, ["new-code"])
+        XCTAssertTrue(requests.allSatisfy {
+            $0.value(forHTTPHeaderField: "Authorization") == "Bearer bearer" &&
+            $0.value(forHTTPHeaderField: "X-Fresh-Auth") == "existing-fresh"
+        })
+    }
+
     func testInvalidMFACodePreservesWorkerErrorAndBearer() async throws {
         for endpoint in ["/api/settings/mfa/disable", "/api/settings/mfa/backup-codes"] {
             var requests: [URLRequest] = []
