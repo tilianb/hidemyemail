@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- iOS builds from `dev` can now be uploaded to TestFlight on demand through
+  GitHub Actions, while iOS changes on `main` continue to upload automatically.
+  Branch builds use the project marketing version and a globally unique CI
+  build number; tagged releases continue to derive their version from the tag.
+
 ## [1.3.0] — 2026-07-27
 
 HideMyEmail 1.3.0 brings secure MFA and passkey setup to both mobile apps,
