@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
-import { hasFreshAuth } from "../auth-helpers";
+import { freshAuthRequired, hasFreshAuth } from "../auth-helpers";
 import { generateApiToken, tokenPrefix, sha256Hex } from "../../lib/api-keys";
 
 const MAX_KEYS_PER_USER = 20;
@@ -27,7 +27,7 @@ export function apiKeyRoutes() {
   // session must not be able to mint a durable credential.
   r.post("/api-keys", async (c) => {
     const userId = c.get("userId");
-    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
+    if (!(await hasFreshAuth(c))) return freshAuthRequired(c);
     const { name } = await c.req.json<{ name?: string }>().catch(() => ({ name: undefined }));
     const trimmed = (name ?? "").trim();
     if (!trimmed || trimmed.length > 64) return c.json({ error: "Name required (max 64 chars)" }, 400);
@@ -49,7 +49,7 @@ export function apiKeyRoutes() {
 
   r.delete("/api-keys/:id", async (c) => {
     const userId = c.get("userId");
-    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
+    if (!(await hasFreshAuth(c))) return freshAuthRequired(c);
     const id = Number(c.req.param("id"));
     if (!Number.isInteger(id)) return c.json({ error: "Invalid id" }, 400);
     const res = await c.env.DB.prepare("DELETE FROM api_keys WHERE id = ? AND user_id = ?")

@@ -42,7 +42,16 @@ the AWS signature and certificate before checking the exact `TopicArn`.
 - Authentication rate-limit admission and MFA backup-code consumption use
   conditional D1 writes so concurrent requests cannot share the final slot or
   code.
-- Passkey challenges and native app-auth codes are one-time artifacts.
+- Passkey challenges and native app-auth codes are one-time artifacts. Passkey
+  assertion counters use compare-and-swap updates, so concurrent assertions
+  verified against the same positive counter cannot both succeed.
+- Sensitive account operations require a 10-minute fresh-auth credential in
+  addition to the seven-day session. When it expires, the dashboard and native
+  apps confirm the current account in place with its passphrase and enabled MFA
+  or with one of that account's passkeys, then retry only the interrupted
+  operation once. Web elevation replaces only the HttpOnly fresh-auth cookie;
+  native elevation replaces only the memory-held fresh-auth token. Neither path
+  changes the session principal or returns a bearer credential to browser code.
 - Account recovery revokes sessions, fresh-auth credentials, MFA, passkeys,
   and API keys by advancing `auth_version` in the winning transaction.
 - Native credentials are bound to canonical HTTPS origins. Origin changes,
@@ -113,6 +122,8 @@ Before making an instance public:
   requiring access to the current authenticator. The Worker binds each
   passkey challenge to the current account, authentication version, and one
   selected MFA action, then consumes it once without replacing the session.
+  The same account-bound passkey can refresh the 10-minute authorization window
+  for exports, recovery-code changes, API-key management, and passkey changes.
 - Confirm SES production access if needed.
 - Run a full send-forward-reply test.
 - Monitor SES bounces, complaints, and quotas.

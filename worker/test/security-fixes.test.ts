@@ -372,6 +372,28 @@ test("P4: MFA setup requires fresh auth", async () => {
   expect(res.status).toBe(401);
 });
 
+test("MFA activation still requires fresh auth after setup has started", async () => {
+  const app = createApp();
+  const userId = await makeUser(1);
+  await (env.DB as D1Database).prepare(
+    "INSERT INTO mfa (user_id, totp_secret, totp_enabled) VALUES (?, ?, 0)"
+  ).bind(userId, "pending-secret").run();
+  const cookie = "__Host-session=" + (await signSession("sek", userId, 3600));
+
+  const res = await app.request("/api/settings/mfa/verify", {
+    method: "POST",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ code: "000000" }),
+  }, testEnv);
+
+  expect(res.status).toBe(401);
+  expect(await res.json()).toEqual({ error: "Fresh authentication required", code: "fresh_auth_required" });
+  const pending = await (env.DB as D1Database).prepare(
+    "SELECT totp_enabled FROM mfa WHERE user_id = ?"
+  ).bind(userId).first<{ totp_enabled: number }>();
+  expect(pending?.totp_enabled).toBe(0);
+});
+
 test("MFA passkey challenge is restricted to the current account and requested action", async () => {
   const app = createApp();
   const passkeyEnv = { ...testEnv, APP_ORIGIN: "https://app.example.com" };

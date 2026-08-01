@@ -8,6 +8,7 @@ import dev.hidemyemail.app.auth.WebSessionAuth
 import dev.hidemyemail.app.net.ApiClient
 import dev.hidemyemail.app.net.ApiException
 import dev.hidemyemail.app.ui.shouldRequestReauthentication
+import dev.hidemyemail.app.ui.FreshAuthCoordinator
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -51,6 +52,34 @@ class AppViewModelSecurityTest {
 
         assertEquals(true, shouldRequestReauthentication(error, retryAvailable = true))
         assertEquals(false, shouldRequestReauthentication(error, retryAvailable = false))
+    }
+
+    @Test fun clientGenerationChangesOnlyWhenCachedClientIsReplaced() {
+        val application = RuntimeEnvironment.getApplication() as Application
+        val app = AppViewModel(application, Store()) { _, _, _ -> error("unused") }
+        val initial = app.clientGeneration.value
+
+        app.bootstrap()
+        val replaced = app.clientGeneration.value
+        assertEquals(initial + 1, replaced)
+        app.api()
+        assertEquals(replaced, app.clientGeneration.value)
+        app.bootstrap()
+        assertEquals(replaced + 1, app.clientGeneration.value)
+    }
+
+    @Test fun settingsFreshAuthCoordinatorAllowsOnlyOnePendingOperationAndClearsIt() {
+        val coordinator = FreshAuthCoordinator()
+        val client = ApiClient("https://app.hidemyemail.dev", "token")
+        var error: String? = null
+
+        assertEquals(true, coordinator.request(client, {}, { error = it }))
+        assertEquals(true, coordinator.isPending)
+        assertEquals(false, coordinator.request(client, {}, { error = it }))
+        assertEquals("Another security action is awaiting confirmation.", error)
+        coordinator.clear()
+        assertEquals(false, coordinator.isPending)
+        assertEquals(true, coordinator.request(client, {}, {}))
     }
 
     @Test fun staleBootstrapFailureDoesNotDeleteNewOriginCredentials() = runTest {

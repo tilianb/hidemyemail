@@ -62,6 +62,14 @@ class AppViewModel(
 
     private var client: ApiClient? = null
     private var generation = 0L
+    private val _clientGeneration = MutableStateFlow(0L)
+    val clientGeneration: StateFlow<Long> = _clientGeneration
+
+    private fun replaceClient(replacement: ApiClient?) {
+        if (client === replacement) return
+        client = replacement
+        _clientGeneration.value++
+    }
 
     // Held between launching the web sign-in Custom Tab and the deep-link
     // callback delivering the handoff code.
@@ -85,7 +93,7 @@ class AppViewModel(
             pendingRecovery = null
             tokenStore.delete()
             client?.invalidate()
-            client = null
+            replaceClient(null)
             _phase.value = AuthPhase.LoggedOut
             _userName.value = ""
             _isAdmin.value = false
@@ -108,7 +116,7 @@ class AppViewModel(
         val operationGeneration = generation
         val token = tokenStore.load(origin)
         val operationClient = ApiClient(origin, token)
-        client = operationClient
+        replaceClient(operationClient)
         if (token == null) {
             _phase.value = AuthPhase.LoggedOut
             return
@@ -204,7 +212,7 @@ class AppViewModel(
         if (!hasServer) throw ApiException.NotConfigured()
         val existing = client
         if (existing != null) return existing
-        return ApiClient(serverUrl.value, null).also { client = it }
+        return ApiClient(serverUrl.value, null).also(::replaceClient)
     }
 
     private suspend fun finishLogin(
@@ -294,7 +302,7 @@ class AppViewModel(
         generation++
         pendingWebAuth = null
         pendingRecovery = null
-        if (client === boundClient) client = null
+        if (client === boundClient) replaceClient(null)
         boundClient?.invalidate()
         tokenStore.delete()
         _userName.value = ""

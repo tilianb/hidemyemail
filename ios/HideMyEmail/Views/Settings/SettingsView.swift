@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppState.self) private var app
     @State private var showSignOut = false
+    @State private var freshAuthentication = FreshAuthenticationCoordinator()
 
     var body: some View {
         NavigationStack {
@@ -46,6 +47,16 @@ struct SettingsView: View {
             } message: {
                 Text("You'll need to sign in again to manage your aliases.")
             }
+        }
+        .environment(freshAuthentication)
+        .sheet(isPresented: Binding(
+            get: { freshAuthentication.isPresented },
+            set: { if !$0 { freshAuthentication.cancel() } }
+        )) { FreshAuthenticationSheet(coordinator: freshAuthentication) }
+        .onChange(of: app.serverURLString) { _, _ in freshAuthentication.cancel() }
+        .onChange(of: app.sessionGeneration) { _, _ in freshAuthentication.cancel() }
+        .onChange(of: app.phase) { _, phase in
+            if phase != .loggedIn { freshAuthentication.cancel() }
         }
     }
 

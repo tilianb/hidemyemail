@@ -227,6 +227,35 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
                 if (!code.isNullOrBlank()) put("code", code)
             },
             authMode = true,
+            includeFreshAuth = false,
+        )
+        freshAuth = result.freshAuth
+    }
+
+    /** Request an account-bound assertion for general fresh-auth elevation. */
+    suspend fun freshAuthPasskeyChallenge(): PasskeyAuthenticationChallenge {
+        val raw = perform(
+            "/api/settings/reauth/passkey/challenge", "POST", null,
+            authMode = true, authed = true, includeFreshAuth = false,
+        )
+        return parsePasskeyAuthenticationChallenge(raw)
+    }
+
+    /** Complete general passkey elevation without changing the bearer session. */
+    suspend fun reauthenticateWithPasskey(responseJson: String, passkeyToken: String) {
+        val response = try {
+            json.parseToJsonElement(responseJson) as? JsonObject
+                ?: throw IllegalArgumentException("Invalid credential response")
+        } catch (e: IllegalArgumentException) { throw e }
+        catch (e: Exception) { throw IllegalArgumentException("Invalid credential response", e) }
+        val result: FreshAuthResponse = request(
+            "/api/settings/reauth/passkey/complete", "POST",
+            buildJsonObject {
+                put("response", response)
+                put("passkey_token", passkeyToken)
+            },
+            authMode = true,
+            includeFreshAuth = false,
         )
         freshAuth = result.freshAuth
     }
@@ -454,8 +483,9 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
         body: JsonObject? = null,
         authMode: Boolean = false,
         authed: Boolean = true,
+        includeFreshAuth: Boolean = true,
     ): T {
-        val data = perform(path, method, body, authMode, authed)
+        val data = perform(path, method, body, authMode, authed, includeFreshAuth)
         return try {
             json.decodeFromString(data)
         } catch (e: Exception) {
@@ -478,6 +508,7 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
         body: JsonObject?,
         authMode: Boolean,
         authed: Boolean,
+        includeFreshAuth: Boolean = true,
     ): String = withContext(Dispatchers.IO) {
         val base = baseUrl.trimEnd('/')
         val builder = Request.Builder().url(base + path)
@@ -486,7 +517,7 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
         if (authed) {
             val t = token ?: throw ApiException.Unauthorized()
             builder.header("Authorization", "Bearer $t")
-            freshAuth?.let { builder.header("X-Fresh-Auth", it) }
+            if (includeFreshAuth) freshAuth?.let { builder.header("X-Fresh-Auth", it) }
         }
         // OkHttp requires a body for POST/PATCH/PUT — send `{}` when empty
         // (e.g. PATCH /destinations/:id/default), matching what the Worker expects.

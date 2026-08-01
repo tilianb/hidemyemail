@@ -1,11 +1,11 @@
 import { Hono } from "hono";
 import { setCookie, deleteCookie, getCookie } from "hono/cookie";
 import type { AppEnv } from "../app";
-import { signMfaPasskeyChallenge, signPasskeyRegChallenge, verifyMfaPasskeyChallenge, verifyPasskeyRegChallenge, type MfaPasskeyAction } from "../../lib/auth";
-import { hasFreshAuth, isAuthenticatedNative } from "../auth-helpers";
+import { signMfaPasskeyChallenge, signPasskeyRegChallenge, verifyMfaPasskeyChallenge, verifyPasskeyRegChallenge, passkeyArtifactExpiresAt, type MfaPasskeyAction } from "../../lib/auth";
+import { freshAuthRequired, hasFreshAuth, isAuthenticatedNative } from "../auth-helpers";
 import { fromBase64url, toBase64url, getAndroidAssociations, getRegistrationOrigins, getRpFromOrigin } from "../../lib/webauthn";
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/server";
-import { consumeAuthArtifact, markFailedAttempt, rateLimitFailures } from "../../lib/auth-security";
+import { consumeAuthArtifact, finalizePasskeyAssertion, markFailedAttempt, rateLimitFailures } from "../../lib/auth-security";
 
 export function settingsRoutes() {
   const r = new Hono<AppEnv>();
@@ -80,7 +80,7 @@ export function settingsRoutes() {
   // Begin TOTP setup: generate secret and return URI for QR code
   r.post("/mfa/setup", async (c) => {
     const userId = c.get("userId");
-    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
+    if (!(await hasFreshAuth(c))) return freshAuthRequired(c);
     const { generateTOTPSecret, makeTOTPUri } = await import("../../lib/totp");
     const { encryptDestination } = await import("../../lib/crypto");
 
@@ -115,6 +115,7 @@ export function settingsRoutes() {
   // Verify code from authenticator app and activate MFA
   r.post("/mfa/verify", async (c) => {
     const userId = c.get("userId");
+    if (!(await hasFreshAuth(c))) return freshAuthRequired(c);
     const { code } = await c.req.json<{ code: string }>().catch(() => ({ code: "" }));
 
     if (!code || !/^\d{6}$/.test(code)) {
@@ -148,7 +149,7 @@ export function settingsRoutes() {
   // Disable TOTP — requires a valid TOTP code or backup code for confirmation
   r.post("/mfa/disable", async (c) => {
     const userId = c.get("userId");
-    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
+    if (!(await hasFreshAuth(c))) return freshAuthRequired(c);
     const { code } = await c.req.json<{ code: string }>().catch(() => ({ code: "" }));
 
     if (!code) return c.json({ error: "Code required" }, 400);
@@ -193,7 +194,7 @@ export function settingsRoutes() {
   // Regenerate backup codes — requires current TOTP code
   r.post("/mfa/backup-codes", async (c) => {
     const userId = c.get("userId");
-    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
+    if (!(await hasFreshAuth(c))) return freshAuthRequired(c);
     const { code } = await c.req.json<{ code: string }>().catch(() => ({ code: "" }));
 
     if (!code || !/^\d{6}$/.test(code)) {
@@ -313,13 +314,11 @@ export function settingsRoutes() {
       markFailedAttempt(c);
       return c.json({ error: "Verification failed" }, 401);
     }
-    if (!(await consumeAuthArtifact(c.env.DB, body.passkey_token, Math.floor(Date.now() / 1000) + 300))) {
+    const expiresAt = passkeyArtifactExpiresAt(body.passkey_token);
+    if (!expiresAt || !(await finalizePasskeyAssertion(c.env.DB, body.passkey_token, expiresAt, body.response.id, credential.sign_count, result.authenticationInfo.newCounter))) {
+      markFailedAttempt(c);
       return c.json({ error: "Invalid or expired passkey challenge" }, 401);
     }
-    const counter = await c.env.DB.prepare(
-      "UPDATE passkey_credentials SET sign_count = MAX(sign_count, ?) WHERE id = ? AND user_id = ?"
-    ).bind(result.authenticationInfo.newCounter, body.response.id, signed.userId).run();
-    if (counter.meta.changes !== 1) return c.json({ error: "Unknown credential" }, 401);
 
     if (signed.action === "disable") {
       const disabled = await c.env.DB.prepare(
@@ -352,7 +351,7 @@ export function settingsRoutes() {
     const userId = c.get("userId");
     const tokenMode = c.req.header("X-Auth-Mode") === "token" && !c.req.header("Origin");
     if (tokenMode && !isAuthenticatedNative(c)) return c.json({ error: "Native token mode required" }, 400);
-    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
+    if (!(await hasFreshAuth(c))) return freshAuthRequired(c);
     const { generateRegistrationOptions } = await import("@simplewebauthn/server");
     let rpID: string;
     try {
@@ -400,7 +399,7 @@ export function settingsRoutes() {
     const sessionUserId = c.get("userId");
     const tokenMode = c.req.header("X-Auth-Mode") === "token" && !c.req.header("Origin");
     if (tokenMode && !isAuthenticatedNative(c)) return c.json({ error: "Native token mode required" }, 400);
-    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
+    if (!(await hasFreshAuth(c))) return freshAuthRequired(c);
 
     const body = await c.req.json<{ response: RegistrationResponseJSON; deviceName?: string; challengeToken?: unknown }>()
       .catch(() => ({ response: null as unknown as RegistrationResponseJSON, deviceName: undefined, challengeToken: undefined }));
@@ -474,7 +473,7 @@ export function settingsRoutes() {
 
   r.delete("/passkeys/:id", async (c) => {
     const userId = c.get("userId");
-    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
+    if (!(await hasFreshAuth(c))) return freshAuthRequired(c);
     const id = c.req.param("id");
 
     await c.env.DB.prepare(

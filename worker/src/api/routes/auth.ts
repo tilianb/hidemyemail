@@ -1,10 +1,10 @@
 import { Hono } from "hono";
 import { setCookie, deleteCookie, getCookie } from "hono/cookie";
 import type { AppEnv } from "../app";
-import { verifyPassword, signFreshAuth, verifyFreshAuth, signSession, verifySession, derivePassphraseHash, createPassphraseVerifier, verifyPassphraseVerifier, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge, signPasskeyMfaChallenge, verifyPasskeyMfaChallenge, updatePasskeySignCount } from "../../lib/auth";
+import { verifyPassword, signFreshAuth, verifyFreshAuth, signSession, verifySession, derivePassphraseHash, createPassphraseVerifier, verifyPassphraseVerifier, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge, signPasskeyMfaChallenge, verifyPasskeyMfaChallenge, passkeyArtifactExpiresAt } from "../../lib/auth";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { getEnvWithOverride, getMainGlobalDomain } from "../../lib/settings";
-import { consumeAuthArtifact, markFailedAttempt, rateLimitFailures } from "../../lib/auth-security";
+import { consumeAuthArtifact, finalizePasskeyAssertion, markFailedAttempt, rateLimitFailures } from "../../lib/auth-security";
 import { randomSixDigitCode, setAuthenticatedCookies, wantsToken } from "../auth-route-helpers";
 
 const SESSION_TTL = 60 * 60 * 24 * 7; // 7 days
@@ -361,7 +361,9 @@ export function authRoutes() {
       markFailedAttempt(c);
       return c.json({ error: "Verification failed" }, 401);
     }
-    if (!(await consumeAuthArtifact(c.env.DB, cookie, Math.floor(Date.now() / 1000) + 300))) {
+    const expiresAt = passkeyArtifactExpiresAt(cookie);
+    if (!expiresAt || !(await finalizePasskeyAssertion(c.env.DB, cookie, expiresAt, response.id, cred.sign_count, result.authenticationInfo.newCounter))) {
+      markFailedAttempt(c);
       return c.json({ error: "Challenge expired" }, 401);
     }
 
@@ -370,8 +372,6 @@ export function authRoutes() {
         .bind(cred.user_id).first<{ active: number }>();
       if (!user || user.active === 0) return c.json({ error: "Account is disabled" }, 403);
     }
-
-    await updatePasskeySignCount(c.env.DB, response.id, result.authenticationInfo.newCounter);
 
     deleteCookie(c, "__Host-passkey-challenge", { path: "/", secure: true });
     if (boundPrincipal) deleteCookie(c, "__Host-mfa-challenge", { path: "/", secure: true });

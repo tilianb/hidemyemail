@@ -3,6 +3,7 @@ import Foundation
 enum APIError: LocalizedError {
     case notConfigured
     case unauthorized
+    case freshAuthRequired(message: String)
     case server(status: Int, message: String)
     case decoding(Error)
     case transport(Error)
@@ -13,6 +14,8 @@ enum APIError: LocalizedError {
             return "No server is configured. Set your HideMyEmail server URL first."
         case .unauthorized:
             return "Your session has expired. Please sign in again."
+        case .freshAuthRequired(let message):
+            return message
         case .server(_, let message):
             return message
         case .decoding:
@@ -29,5 +32,8 @@ enum APIError: LocalizedError {
     }
 }
 
-// The Worker returns `{ "error": "..." }` on failures.
-struct APIErrorBody: Decodable { let error: String }
+// The Worker returns `{ "error": "...", "code": "..." }` on failures.
+struct APIErrorBody: Decodable {
+    let error: String
+    let code: String?
+}
