@@ -335,6 +335,7 @@ internal fun RecoveryCodesSection(app: AppViewModel, freshAuth: FreshAuthCoordin
         }
     }
 
+    val hasExistingCodes = (remaining ?: 0) > 0
     SectionHeader("Recovery")
     SectionCard {
         Row(
@@ -367,7 +368,7 @@ internal fun RecoveryCodesSection(app: AppViewModel, freshAuth: FreshAuthCoordin
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
             Text(
-                if ((remaining ?: 0) > 0) "Regenerate Codes" else "Generate Codes",
+                if (hasExistingCodes) "Regenerate Codes" else "Generate Codes",
                 style = Theme.bodyStyle(15.sp).copy(color = Theme.accent),
                 modifier = Modifier.weight(1f),
             )
@@ -388,7 +389,7 @@ internal fun RecoveryCodesSection(app: AppViewModel, freshAuth: FreshAuthCoordin
             title = { Text("Recovery codes", style = Theme.displayStyle(18.sp)) },
             text = {
                 Text(
-                    if ((remaining ?: 0) > 0) {
+                    if (hasExistingCodes) {
                         "Regenerating invalidates your existing recovery codes. Continue?"
                     } else {
                         "Generate a fresh set of recovery codes?"
@@ -398,7 +399,7 @@ internal fun RecoveryCodesSection(app: AppViewModel, freshAuth: FreshAuthCoordin
             },
             confirmButton = {
                 TextButton(onClick = { confirming = false; regenerate() }) {
-                    Text(if ((remaining ?: 0) > 0) "Regenerate" else "Generate", color = Theme.red)
+                    Text(if (hasExistingCodes) "Regenerate" else "Generate", color = Theme.red)
                 }
             },
             dismissButton = {
