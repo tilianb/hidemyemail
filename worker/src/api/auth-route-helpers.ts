@@ -22,6 +22,14 @@ export async function setAuthenticatedCookies(
   return { token: sessionToken, freshAuth: freshAuthToken };
 }
 
+export async function issueFreshAuth(c: Context<AppEnv>, channel: "web" | "native"): Promise<Response> {
+  const token = await signFreshAuth(c.env.SESSION_SECRET, c.get("userId"), FRESH_AUTH_TTL, c.get("authVersion"));
+  c.header("Cache-Control", "no-store");
+  if (channel === "native") return c.json({ fresh_auth: token });
+  setCookie(c, "__Host-fresh-auth", token, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: FRESH_AUTH_TTL });
+  return c.json({ ok: true });
+}
+
 export function clearAuthenticatedCookies(c: Context<AppEnv>): void {
   deleteCookie(c, "__Host-session", { path: "/", secure: true });
   deleteCookie(c, "__Host-fresh-auth", { path: "/", secure: true });

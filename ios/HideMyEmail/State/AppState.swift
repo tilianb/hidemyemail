@@ -17,6 +17,9 @@ final class AppState {
     }
 
     private(set) var phase: AuthPhase = .loggedOut
+    /// Changes whenever the in-memory API credential/client generation changes.
+    /// Settings uses this to discard pending sensitive-operation replays.
+    private(set) var sessionGeneration: UInt = 0
     var userName: String = ""
     var isAdmin: Bool = false
 
@@ -66,6 +69,7 @@ final class AppState {
             deleteToken()
             await client?.invalidate()
             client = nil
+            sessionGeneration &+= 1
             userName = ""
             isAdmin = false
             phase = .loggedOut
@@ -82,6 +86,7 @@ final class AppState {
         let token = loadToken(snapshot.origin)
         let operationClient = makeClient(baseURL, token)
         client = operationClient
+        sessionGeneration &+= 1
         guard token != nil else { phase = .loggedOut; return }
         // Validate the restored token by fetching stats.
         do {
@@ -205,6 +210,7 @@ final class AppState {
         await client.setToken(token)
         await client.setFreshAuth(freshAuth)
         saveToken(token, snapshot.origin)
+        sessionGeneration &+= 1
         try await refreshIdentity(client: client, snapshot: snapshot)
         try requireCurrent(snapshot, client: client)
         phase = .loggedIn
@@ -264,6 +270,7 @@ final class AppState {
         // Clear local auth before any suspension. Push cleanup uses the captured
         // old client and cannot later erase a replacement session.
         binding.invalidate()
+        sessionGeneration &+= 1
         deleteToken()
         client = nil
         pendingRecovery = nil
@@ -279,6 +286,7 @@ final class AppState {
 
     private func signOut(snapshot: CredentialBinding.Snapshot, client operationClient: APIClient) async {
         guard isCurrent(snapshot, client: operationClient) else { return }
+        sessionGeneration &+= 1
         deleteToken()
         client = nil
         userName = ""

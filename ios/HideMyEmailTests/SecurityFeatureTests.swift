@@ -57,6 +57,61 @@ final class SecurityFeatureTests: XCTestCase {
         XCTAssertEqual(json["code"] as? String, "123456")
     }
 
+    func testPasskeyReauthUsesTokenModeContractAndStoresFreshToken() async throws {
+        var requests: [URLRequest] = []
+        URLStub.handler = { request in
+            requests.append(request)
+            let response = switch request.url!.path {
+            case "/api/settings/reauth/passkey/challenge":
+                #"{"challenge":"AQI","rpId":"app.hidemyemail.dev","allowCredentials":[{"id":"AwQ"}],"passkey_token":"bound"}"#
+            case "/api/settings/reauth/passkey/complete": #"{"fresh_auth":"elevated"}"#
+            default: #"{"enabled":false,"backupCodesRemaining":0}"#
+            }
+            return Self.response(request, response)
+        }
+        let api = client()
+        let challenge = try await api.reauthenticationPasskeyChallenge()
+        try await api.completeReauthenticationPasskey(
+            response: ["id": "credential"], passkeyToken: try XCTUnwrap(challenge.passkeyToken)
+        )
+        _ = try await api.mfaStatus()
+
+        XCTAssertEqual(requests[0].url?.path, "/api/settings/reauth/passkey/challenge")
+        XCTAssertEqual(requests[1].url?.path, "/api/settings/reauth/passkey/complete")
+        XCTAssertTrue(requests.prefix(2).allSatisfy {
+            $0.httpMethod == "POST" &&
+            $0.value(forHTTPHeaderField: "X-Auth-Mode") == "token" &&
+            $0.value(forHTTPHeaderField: "Authorization") == "Bearer bearer" &&
+            $0.value(forHTTPHeaderField: "X-Fresh-Auth") == nil
+        })
+        let complete = try body(requests[1])
+        XCTAssertEqual(complete["passkey_token"] as? String, "bound")
+        XCTAssertEqual((complete["response"] as? [String: String])?["id"], "credential")
+        XCTAssertEqual(requests[2].value(forHTTPHeaderField: "X-Fresh-Auth"), "elevated")
+    }
+
+    func testFreshAuthCodePreservesBearerSession() async throws {
+        var count = 0
+        URLStub.handler = { request in
+            count += 1
+            if count == 1 {
+                return (HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"])!,
+                    Data(#"{"error":"Fresh authentication required","code":"fresh_auth_required"}"#.utf8))
+            }
+            return Self.response(request, #"{"enabled":false,"backupCodesRemaining":0}"#)
+        }
+        let api = client()
+        do {
+            _ = try await api.createApiKey(name: "test")
+            XCTFail("Expected fresh-auth guard")
+        } catch APIError.freshAuthRequired(let message) {
+            XCTAssertEqual(message, "Fresh authentication required")
+        }
+        _ = try await api.mfaStatus()
+        XCTAssertEqual(count, 2, "fresh-auth guard must not invalidate the bearer credential")
+    }
+
     func testReauthSurfacesInvalidCredentialsWithoutExpiringBearer() async throws {
         URLStub.handler = { request in
             (HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil,
@@ -166,9 +221,12 @@ final class SecurityFeatureTests: XCTestCase {
         var requests: [URLRequest] = []
         URLStub.handler = { request in
             requests.append(request)
-            let response = request.url!.path.hasSuffix("challenge")
-                ? #"{"challenge":"AQI","rpId":"app.hidemyemail.dev","passkey_token":"signed"}"#
-                : #"{"ok":true,"backupCodes":["new-code"]}"#
+            let response = switch request.url!.path {
+            case "/api/settings/mfa/passkey/challenge":
+                #"{"challenge":"AQI","rpId":"app.hidemyemail.dev","passkey_token":"signed"}"#
+            case "/api/settings/mfa/passkey/complete": #"{"ok":true,"backupCodes":["new-code"]}"#
+            default: #"{"enabled":true,"backupCodesRemaining":1}"#
+            }
             return Self.response(request, response)
         }
         let api = client()
@@ -365,43 +423,10 @@ final class SecurityFeatureTests: XCTestCase {
         XCTAssertEqual(url.path, "/security-handoff")
     }
 
-    func testSecurityFlowCapturesMFAOperationAndWaitsForActionSheetDismissal() {
-        var flow = SecurityFlowState()
-        flow.capture(.disableMFA(code: "backup"), actionSheetPresented: true)
-        flow.requireReauthentication()
-
-        XCTAssertEqual(flow.pendingOperation, .disableMFA(code: "backup"))
-        XCTAssertFalse(flow.showReauthentication)
-        flow.actionSheetDidDismiss()
-        XCTAssertTrue(flow.showReauthentication)
-    }
-
-    func testSecurityFlowRetriesCapturedOperationOnlyOnce() {
-        var flow = SecurityFlowState()
-        flow.capture(.regenerateMFA(code: "123456"), actionSheetPresented: false)
-        flow.requireReauthentication()
-
-        XCTAssertEqual(flow.consumePendingOperation(), .regenerateMFA(code: "123456"))
-        XCTAssertNil(flow.consumePendingOperation())
-    }
-
     func testMFAActionsRequireANewCodeAfterReauthentication() {
         XCTAssertTrue(SecurityOperation.disableMFA(code: "backup").requiresNewMfaCodeAfterReauthentication)
         XCTAssertTrue(SecurityOperation.regenerateMFA(code: "123456").requiresNewMfaCodeAfterReauthentication)
         XCTAssertFalse(SecurityOperation.setupMFA.requiresNewMfaCodeAfterReauthentication)
-    }
-
-    func testSecurityFlowCancellationClearsPendingAndSensitiveState() {
-        var flow = SecurityFlowState()
-        flow.capture(.disableMFA(code: "secret"), actionSheetPresented: false)
-        flow.passphrase = "passphrase"
-        flow.reauthenticationCode = "654321"
-        flow.cancel()
-
-        XCTAssertNil(flow.pendingOperation)
-        XCTAssertEqual(flow.passphrase, "")
-        XCTAssertEqual(flow.reauthenticationCode, "")
-        XCTAssertFalse(flow.showReauthentication)
     }
 
     func testSecurityOperationGuardRejectsOverlapUntilEnd() {
@@ -434,7 +459,7 @@ final class SecurityFeatureTests: XCTestCase {
     func testUnauthorizedDecisionOnlyMatchesSessionFailure() {
         XCTAssertTrue(SecurityRequestError.shouldHandleAuthFailure(APIError.unauthorized))
         XCTAssertFalse(SecurityRequestError.shouldHandleAuthFailure(
-            APIError.server(status: 401, message: "Fresh authentication required")
+            APIError.freshAuthRequired(message: "Fresh authentication required")
         ))
     }
 

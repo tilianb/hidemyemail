@@ -1,6 +1,6 @@
 import type { Context, MiddlewareHandler } from "hono";
 import type { AppEnv } from "../api/app";
-import { sha256Base64url } from "./auth";
+import { sha256Base64url, updatePasskeySignCount } from "./auth";
 
 const MAX_ATTEMPTS = 10;
 const WINDOW_SECONDS = 3600;
@@ -74,4 +74,14 @@ export async function consumeAuthArtifact(db: D1Database, token: string, expires
     db.prepare("INSERT OR IGNORE INTO consumed_auth_artifacts (artifact_hash, expires_at) VALUES (?, ?)").bind(hash, expiresAt),
   ]);
   return results[1]?.meta.changes === 1;
+}
+
+export async function finalizePasskeyAssertion(
+  db: D1Database, token: string, expiresAt: number, credentialId: string, oldCounter: number, newCounter: number,
+): Promise<boolean> {
+  // CAS first makes concurrent assertions from the same observed counter one-winner.
+  // SQLite reports a matched 0 -> 0 update as one change, after which artifact
+  // consumption still supplies the one-winner property for zero-counter devices.
+  if (!(await updatePasskeySignCount(db, credentialId, oldCounter, newCounter))) return false;
+  return consumeAuthArtifact(db, token, expiresAt);
 }
