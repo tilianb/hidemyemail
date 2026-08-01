@@ -22,6 +22,10 @@ const TEST_EMAIL_TYPES = [
   { value: "demo_oq", label: "Demo forward (over-quota)" },
 ];
 
+function sanitizeSignedInteger(value: string) {
+  return value.replace(/[^0-9-]/g, "").replace(/(?!^)-/g, "");
+}
+
 function verificationRecords(domain: Domain, sesRegion: string) {
   return {
     txtHost: `_hidemyemail.${domain.domain}`,
@@ -813,7 +817,7 @@ export function Admin() {
                     type="text"
                     inputMode="numeric"
                     value={editedSettings.rate_limit_global ?? ""}
-                    onChange={e => setEditedSettings({...editedSettings, rate_limit_global: e.target.value.replace(/[^0-9-]/g, "").replace(/(?!^)-/g, "")})}
+                    onChange={e => setEditedSettings({...editedSettings, rate_limit_global: sanitizeSignedInteger(e.target.value)})}
                   />
                 </div>
               </div>
@@ -830,7 +834,7 @@ export function Admin() {
                     type="text"
                     inputMode="numeric"
                     value={editedSettings.rate_limit_per_alias ?? ""}
-                    onChange={e => setEditedSettings({...editedSettings, rate_limit_per_alias: e.target.value.replace(/[^0-9-]/g, "").replace(/(?!^)-/g, "")})}
+                    onChange={e => setEditedSettings({...editedSettings, rate_limit_per_alias: sanitizeSignedInteger(e.target.value)})}
                   />
                 </div>
               </div>
@@ -847,7 +851,7 @@ export function Admin() {
                     type="text"
                     inputMode="numeric"
                     value={editedSettings.rate_limit_reply_per_alias ?? ""}
-                    onChange={e => setEditedSettings({...editedSettings, rate_limit_reply_per_alias: e.target.value.replace(/[^0-9-]/g, "").replace(/(?!^)-/g, "")})}
+                    onChange={e => setEditedSettings({...editedSettings, rate_limit_reply_per_alias: sanitizeSignedInteger(e.target.value)})}
                   />
                 </div>
               </div>
@@ -864,7 +868,7 @@ export function Admin() {
                     type="text"
                     inputMode="numeric"
                     value={editedSettings.reply_distinct_recipient_cap ?? ""}
-                    onChange={e => setEditedSettings({...editedSettings, reply_distinct_recipient_cap: e.target.value.replace(/[^0-9-]/g, "").replace(/(?!^)-/g, "")})}
+                    onChange={e => setEditedSettings({...editedSettings, reply_distinct_recipient_cap: sanitizeSignedInteger(e.target.value)})}
                   />
                 </div>
               </div>
@@ -881,7 +885,7 @@ export function Admin() {
                     type="text"
                     inputMode="numeric"
                     value={editedSettings.max_total_aliases ?? "-1"}
-                    onChange={e => setEditedSettings({...editedSettings, max_total_aliases: e.target.value.replace(/[^0-9-]/g, "").replace(/(?!^)-/g, "")})}
+                    onChange={e => setEditedSettings({...editedSettings, max_total_aliases: sanitizeSignedInteger(e.target.value)})}
                   />
                 </div>
               </div>
@@ -915,7 +919,7 @@ export function Admin() {
                     type="text"
                     inputMode="numeric"
                     value={editedSettings.max_subdomains ?? "-1"}
-                    onChange={e => setEditedSettings({...editedSettings, max_subdomains: e.target.value.replace(/[^0-9-]/g, "").replace(/(?!^)-/g, "")})}
+                    onChange={e => setEditedSettings({...editedSettings, max_subdomains: sanitizeSignedInteger(e.target.value)})}
                   />
                 </div>
               </div>

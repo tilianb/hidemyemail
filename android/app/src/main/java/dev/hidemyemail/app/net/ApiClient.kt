@@ -54,6 +54,15 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
     private val json = Json { ignoreUnknownKeys = true }
     private val jsonMedia = "application/json".toMediaType()
 
+    private fun parseCredentialResponse(responseJson: String): JsonObject = try {
+        json.parseToJsonElement(responseJson) as? JsonObject
+            ?: throw IllegalArgumentException("Invalid credential response")
+    } catch (e: IllegalArgumentException) {
+        throw e
+    } catch (e: Exception) {
+        throw IllegalArgumentException("Invalid credential response", e)
+    }
+
     fun invalidate() {
         token = null
         freshAuth = null
@@ -243,11 +252,7 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
 
     /** Complete general passkey elevation without changing the bearer session. */
     suspend fun reauthenticateWithPasskey(responseJson: String, passkeyToken: String) {
-        val response = try {
-            json.parseToJsonElement(responseJson) as? JsonObject
-                ?: throw IllegalArgumentException("Invalid credential response")
-        } catch (e: IllegalArgumentException) { throw e }
-        catch (e: Exception) { throw IllegalArgumentException("Invalid credential response", e) }
+        val response = parseCredentialResponse(responseJson)
         val result: FreshAuthResponse = request(
             "/api/settings/reauth/passkey/complete", "POST",
             buildJsonObject {
@@ -329,14 +334,7 @@ class ApiClient(private val baseUrl: String, @Volatile var token: String? = null
         passkeyToken: String,
     ): PasskeyMfaResult {
         require(action == "disable" || action == "backup-codes") { "Invalid passkey MFA action" }
-        val assertion = try {
-            json.parseToJsonElement(responseJson) as? JsonObject
-                ?: throw IllegalArgumentException("Invalid credential response")
-        } catch (e: IllegalArgumentException) {
-            throw e
-        } catch (e: Exception) {
-            throw IllegalArgumentException("Invalid credential response", e)
-        }
+        val assertion = parseCredentialResponse(responseJson)
         return request(
             "/api/settings/mfa/passkey/complete", "POST",
             buildJsonObject {

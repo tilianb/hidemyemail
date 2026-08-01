@@ -79,12 +79,13 @@ export function createApi(config: ExtensionConfig, fetcher: Fetcher = fetch) {
     if (!aliasId(id)) throw new ApiError("validation", "The alias ID is invalid.");
   }
   async function createRichAlias(input: CreateAliasInput): Promise<Alias> {
-    const keys = record(input) ? Object.keys(input) : [];
-    const validFormat = record(input) && (input.format === "random_characters" || input.format === "uuid" || input.format === "custom");
-    const validDescription = record(input) && (input.description === undefined || inputDescription(input.description));
-    const validLocal = record(input) && (input.format === "custom" ? creatableLocalPart(input.local_part) : input.local_part === undefined);
-    const validDestination = record(input) && (input.destination_id === undefined || aliasId(input.destination_id));
-    if (!record(input) || !isValidDomain(input.domain) || !validFormat || !validDescription || !validLocal || !validDestination || keys.some((key) => !["domain", "description", "format", "local_part", "destination_id"].includes(key))) {
+    if (!record(input)) throw new ApiError("validation", "The alias request is invalid.");
+    const keys = Object.keys(input);
+    const validFormat = input.format === "random_characters" || input.format === "uuid" || input.format === "custom";
+    const validDescription = input.description === undefined || inputDescription(input.description);
+    const validLocal = input.format === "custom" ? creatableLocalPart(input.local_part) : input.local_part === undefined;
+    const validDestination = input.destination_id === undefined || aliasId(input.destination_id);
+    if (!isValidDomain(input.domain) || !validFormat || !validDescription || !validLocal || !validDestination || keys.some((key) => !["domain", "description", "format", "local_part", "destination_id"].includes(key))) {
       throw new ApiError("validation", "The alias request is invalid.");
     }
     const normalizedInput = { ...input, domain: input.domain.toLowerCase() };

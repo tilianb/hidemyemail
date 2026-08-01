@@ -51,8 +51,20 @@ export async function updatePasskeySignCount(db: D1Database, credentialId: strin
 
 export function passkeyArtifactExpiresAt(token: string): number | null {
   const parts = token.split(".");
-  const index = parts[0] === "pauth" ? 1 : parts[0] === "pauthmfa" ? 3 : parts[0] === "mfa-passkey1" ? 4 : null;
-  if (index === null) return null;
+  let index: number;
+  switch (parts[0]) {
+    case "pauth":
+      index = 1;
+      break;
+    case "pauthmfa":
+      index = 3;
+      break;
+    case "mfa-passkey1":
+      index = 4;
+      break;
+    default:
+      return null;
+  }
   const value = Number(parts[index]);
   return Number.isSafeInteger(value) ? value : null;
 }
