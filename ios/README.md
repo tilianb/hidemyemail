@@ -39,8 +39,8 @@ workflow**, select the `dev` branch, and run it. Manual uploads are restricted t
 simulator build and tests independently. Pushes to `main` that change the iOS
 app or this workflow upload automatically. Branch builds use `MARKETING_VERSION`
 from `project.yml`, while release-tag builds use the tag version. All uploads
-use the globally unique GitHub Actions run ID as the App Store build number, so
-their uploads cannot collide.
+use `${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}` as the App Store build number, so
+their uploads and reruns cannot collide.
 
 Configure these GitHub Actions secrets before the first upload:
 
