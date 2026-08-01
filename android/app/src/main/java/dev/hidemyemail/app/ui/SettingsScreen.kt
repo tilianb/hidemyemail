@@ -19,9 +19,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -37,8 +39,15 @@ fun SettingsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
     val userName by app.userName.collectAsState()
     val isAdmin by app.isAdmin.collectAsState()
     val serverUrl by app.serverUrl.collectAsState()
+    val clientGeneration by app.clientGeneration.collectAsState()
+    val screenScope = rememberCoroutineScope()
     var showSignOut by remember { mutableStateOf(false) }
     var showDestinations by remember { mutableStateOf(false) }
+    val freshAuth = remember { FreshAuthCoordinator() }
+
+    // A continuation is account-bound; never carry it across an origin,
+    // identity, or ApiClient replacement.
+    LaunchedEffect(serverUrl, userName, clientGeneration) { freshAuth.clear() }
 
     if (showDestinations) {
         DestinationsScreen(app, onBack = { showDestinations = false }, modifier = modifier)
@@ -109,10 +118,10 @@ fun SettingsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
             UsernameSection(app)
             NotificationsSection(app)
             InlineActionsSection(app)
-            SecuritySection(app)
-            ApiKeysSection(app)
-            RecoveryCodesSection(app)
-            ExportSection(app)
+            SecuritySection(app, freshAuth)
+            ApiKeysSection(app, freshAuth)
+            RecoveryCodesSection(app, freshAuth)
+            ExportSection(app, freshAuth)
 
             SectionCard(Modifier.padding(top = 20.dp)) {
                 TextButton(onClick = { showSignOut = true }, modifier = Modifier.fillMaxWidth()) {
@@ -136,6 +145,8 @@ fun SettingsScreen(app: AppViewModel, modifier: Modifier = Modifier) {
             Spacer(Modifier.size(32.dp))
         }
     }
+
+    freshAuth.Host(app, screenScope)
 
     if (showSignOut) {
         AlertDialog(

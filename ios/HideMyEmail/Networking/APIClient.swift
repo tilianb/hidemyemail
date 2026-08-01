@@ -209,6 +209,22 @@ actor APIClient {
         freshAuth = response.freshAuth
     }
 
+    func reauthenticationPasskeyChallenge() async throws -> PasskeyChallengeOptions {
+        try await request(
+            "/api/settings/reauth/passkey/challenge", method: "POST", body: [:],
+            authMode: true, includeFreshAuth: false
+        )
+    }
+
+    func completeReauthenticationPasskey(response: [String: Any], passkeyToken: String) async throws {
+        let result: FreshAuthResponse = try await request(
+            "/api/settings/reauth/passkey/complete", method: "POST",
+            body: ["response": response, "passkey_token": passkeyToken],
+            authMode: true, includeFreshAuth: false
+        )
+        freshAuth = result.freshAuth
+    }
+
     func setupMFA() async throws -> MFASetupResponse {
         try await request("/api/settings/mfa/setup", method: "POST", body: [:])
     }
@@ -495,11 +511,12 @@ actor APIClient {
             // still valid, only the 10-minute freshness window lapsed. Surface
             // the message so the UI can ask for a re-login on that action
             // instead of signing the whole app out.
-            let message = (try? Self.decoder.decode(APIErrorBody.self, from: data))?.error
-            if message == "Fresh authentication required" {
-                throw APIError.server(status: 401, message: message!)
+            let errorBody = try? Self.decoder.decode(APIErrorBody.self, from: data)
+            let message = errorBody?.error
+            if errorBody?.code == "fresh_auth_required" {
+                throw APIError.freshAuthRequired(message: message ?? "Fresh authentication required")
             }
-            if path == "/api/settings/reauth", let message, message != "Unauthorized" {
+            if path.hasPrefix("/api/settings/reauth"), let message, message != "Unauthorized" {
                 throw APIError.server(status: 401, message: message)
             }
             let semanticUnauthorizedEndpoints = [

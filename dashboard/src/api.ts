@@ -70,11 +70,32 @@ export interface StatsData {
 // instead of treating the whole session as gone.
 const FRESH_AUTH_REQUIRED = "Fresh authentication required";
 
-async function error401(res: Response): Promise<Error> {
+/** Stable discriminator for callers that need to offer inline elevation. */
+export class FreshAuthRequiredError extends Error {
+  readonly code = "fresh_auth_required";
+
+  constructor() {
+    super(FRESH_AUTH_REQUIRED);
+    this.name = "FreshAuthRequiredError";
+  }
+}
+
+export function isFreshAuthRequired(error: unknown): error is FreshAuthRequiredError {
+  return error instanceof FreshAuthRequiredError
+    || (typeof error === "object" && error !== null && "code" in error
+      && (error as { code?: unknown }).code === "fresh_auth_required");
+}
+
+async function error401(res: Response, path = ""): Promise<Error> {
   try {
     const b = await res.json();
-    if (b && typeof b === "object" && "error" in b && b.error === FRESH_AUTH_REQUIRED) {
-      return new Error(FRESH_AUTH_REQUIRED);
+    if (b && typeof b === "object" && (("code" in b && b.code === "fresh_auth_required")
+      || ("error" in b && b.error === FRESH_AUTH_REQUIRED))) {
+      return new FreshAuthRequiredError();
+    }
+    if (path.startsWith("/api/settings/reauth") && b && typeof b === "object"
+      && "error" in b && typeof b.error === "string") {
+      return new Error(b.error);
     }
   } catch {
     // Ignore JSON parse errors for non-JSON error responses
@@ -84,7 +105,7 @@ async function error401(res: Response): Promise<Error> {
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { ...init, credentials: "include", headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } });
-  if (res.status === 401) throw await error401(res);
+  if (res.status === 401) throw await error401(res, path);
   if (!res.ok) {
     let msg = `${res.status}`;
     try {
@@ -225,6 +246,15 @@ export const api = {
     "/api/settings/mfa/passkey/complete",
     { method: "POST", body: JSON.stringify({ action, response, passkey_token: passkeyToken }) },
   ),
+
+  // Inline fresh authentication (refreshes the HttpOnly web cookie only).
+  reauth: (passphrase: string, code?: string) => req<{ ok: true }>("/api/settings/reauth", {
+    method: "POST", body: JSON.stringify({ passphrase, ...(code ? { code } : {}) }),
+  }),
+  reauthPasskeyChallenge: () => req<Record<string, unknown>>("/api/settings/reauth/passkey/challenge", { method: "POST" }),
+  reauthPasskeyComplete: (response: unknown) => req<{ ok: true }>("/api/settings/reauth/passkey/complete", {
+    method: "POST", body: JSON.stringify({ response }),
+  }),
 
   // Account data export — returns a JSON Blob for download
   exportAccount: async (): Promise<void> => {

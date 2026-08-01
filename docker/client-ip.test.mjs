@@ -140,7 +140,10 @@ test("release is the only direct tag publisher", async () => {
   );
   assert.match(release, /push:\n\s+tags:\n\s+- "v\*\.\*\.\*"/);
   assert.doesNotMatch(docker, /tags:\s*\[?"v\*\.\*\.\*"/);
-  assert.doesNotMatch(testflight, /push:/);
+  const versionTagTrigger = /tags:\s*(?:\[\s*)?(?:-\s*)?(["'])v\*\.\*\.\*\1/;
+  assert.match('tags: ["v*.*.*"]', versionTagTrigger);
+  assert.match('tags:\n      - "v*.*.*"', versionTagTrigger);
+  assert.doesNotMatch(testflight, versionTagTrigger);
   assert.match(docker, /workflow_call:/);
   assert.match(testflight, /workflow_call:/);
 });
@@ -172,7 +175,7 @@ test("release publications depend on the validated tag and required artifacts", 
   assert.match(docker, /name: digests-\$\{\{ github\.run_id \}\}-\$\{\{ strategy\.job-index \}\}/);
   assert.match(docker, /pattern: digests-\$\{\{ github\.run_id \}\}-\*/);
   assert.match(docker, /overwrite: true/);
-  assert.match(testflight, /BUILD_NUMBER="\$\{GITHUB_RUN_NUMBER\}\.\$\{GITHUB_RUN_ATTEMPT\}"/);
+  assert.match(testflight, /BUILD_NUMBER="\$\{GITHUB_RUN_ID\}\.\$\{GITHUB_RUN_ATTEMPT\}"/);
   assert.match(testflight, /\^\[1-9\]\[0-9\]\*\\\.\[1-9\]\[0-9\]\*\$/);
 });
 

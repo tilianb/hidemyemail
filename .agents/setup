@@ -39,7 +39,7 @@ validate_personal_skills_checkout
 "$personal_skills_repo/scripts/install.sh"
 
 echo "==> Installing required system packages"
-packages=(ca-certificates curl unzip openjdk-17-jdk-headless)
+packages=(ca-certificates curl unzip zip openjdk-17-jdk-headless)
 missing_packages=()
 for package in "${packages[@]}"; do
   if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -q 'install ok installed'; then
@@ -119,7 +119,7 @@ EOF
 fi
 
 echo "==> Installing locked JavaScript dependencies"
-for project in dashboard worker docker website; do
+for project in dashboard worker docker website extension; do
   echo "  -> $project"
   (cd "$repo_root/$project" && npm ci --no-audit --no-fund)
 done
