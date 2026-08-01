@@ -7,6 +7,16 @@
 - Action: For authentication changes, test the Worker contract, dashboard, Android, and iOS, then rely on the iOS simulator CI for Swift validation when working from Linux.
 - Confidence: high
 
+**2026-08-01 — Extension autofill-overlay coexistence**
+- Observation: The content script recognizes 1Password's `com-1password-button` directly, while Bitwarden-style closed-shadow controls require guarded `[popover='manual']` and geometry/hit-testing; tests require foreign controls to remain untouched.
+- Action: Resolve inline-control collisions by moving or hiding HideMyEmail's host only, and keep the fixed-position host hidden until its first valid coordinates are calculated.
+- Confidence: high
+
+**2026-08-01 — Recovery-code entropy upgrade**
+- Observation: Self-service recovery codes are 160-bit values, and migration `0029_recovery_auth_version.sql` clears pre-existing 40-bit code sets rather than preserving weak credentials.
+- Action: Preserve 160-bit generation and invalidate stored credential sets when strengthening their entropy; do not silently grandfather weaker recovery codes.
+- Confidence: high
+
 ## Patterns and Preferences
 
 **2026-08-01 — Web fresh-auth continuations**
@@ -19,9 +29,29 @@
 - Action: Keep passkey sign-count compare-and-swap SQL in `updatePasskeySignCount`; compose artifact consumption around that helper rather than duplicating the statement.
 - Confidence: high
 
+**2026-08-01 — Passkeys for authenticated security actions**
+- Observation: Discoverable passkey login can select a different principal, whereas MFA and fresh-auth challenges are dedicated artifacts bound to the current user, auth version, action or client channel.
+- Action: Never reuse the standalone passwordless-login ceremony for an in-session security action; use the authenticated account-bound ceremony and preserve its anti-transfer and stale-auth-version tests.
+- Confidence: high
+
+**2026-08-01 — Native 401 semantics**
+- Observation: Native clients send bearer and fresh-auth headers without relying on cookies, but not every authenticated `401` means the bearer token expired: fresh-auth and credential-validation endpoints return semantic `401` responses that must preserve credentials.
+- Action: Sign out only for an actual unauthorized authenticated request; surface login, MFA, reauthentication, and fresh-auth failures without clearing bearer or fresh-auth state.
+- Confidence: high
+
+**2026-08-01 — Shared passphrase salt**
+- Observation: `AUTH_PASSWORD_SALT` derives both the configured admin hash and every stored non-admin `passphrase_hash`.
+- Action: Treat salt rotation as a full credential migration that rehashes every account and the admin credential; changing only the configured admin hash would strand users.
+- Confidence: high
+
 **2026-08-01 — Release workflow validation**
 - Observation: `docker/client-ip.test.mjs` also enforces release-workflow invariants, including TestFlight triggers and build-number inputs.
 - Action: When changing `.github/workflows/testflight.yml`, update and run the Docker test suite in the same change.
+- Confidence: high
+
+**2026-08-01 — Advisory-only automated review**
+- Observation: `.coderabbit.yaml` deliberately disables docstrings, autofixes, generated tests, simplification, CI fixes, and merge-conflict resolution after generated finishing touches damaged native indentation and displaced useful security comments.
+- Action: Keep automated review advisory-only, especially for Kotlin and Swift; do not enable CodeRabbit finishing touches that rewrite source.
 - Confidence: high
 
 ## What Has Failed
