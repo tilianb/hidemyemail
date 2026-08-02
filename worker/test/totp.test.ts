@@ -103,9 +103,15 @@ test("verifyBackupCode finds and returns index", async () => {
 test("MFA challenge sign and verify", async () => {
   const secret = "test-secret";
   const token = await signMfaChallenge(secret, 42, 7);
-  expect(token).toMatch(/^mfa2\.42\.7\.\d+\.[a-f0-9]+$/);
-  expect(await verifyMfaChallenge(secret, token)).toEqual({ userId: 42, authVersion: 7 });
+  expect(token).toMatch(/^mfa3\.42\.7\.\d+\.[a-f0-9]{32}\.[a-f0-9]+$/);
+  expect(await verifyMfaChallenge(secret, token)).toMatchObject({ userId: 42, authVersion: 7 });
   expect(await verifyMfaChallenge("wrong-secret", token)).toBeNull();
+});
+
+test("independent MFA challenges do not collide", async () => {
+  const first = await signMfaChallenge("secret", 1, 0);
+  const second = await signMfaChallenge("secret", 1, 0);
+  expect(second).not.toBe(first);
 });
 
 test("MFA challenge with wrong secret returns null", async () => {

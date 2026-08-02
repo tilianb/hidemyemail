@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { env } from "cloudflare:test";
-import { signPasskeyAuthChallenge, updatePasskeySignCount, verifyPasskeyAuthChallenge, signPasskeyMfaChallenge, verifyPasskeyMfaChallenge, signPasskeyRegChallenge, verifyPasskeyRegChallenge, signReauthPasskeyChallenge, verifyReauthPasskeyChallenge } from "../src/lib/auth";
-import { finalizePasskeyAssertion } from "../src/lib/auth-security";
+import { sha256Base64url, signPasskeyAuthChallenge, updatePasskeySignCount, verifyPasskeyAuthChallenge, signPasskeyMfaChallenge, verifyPasskeyMfaChallenge, signPasskeyRegChallenge, verifyPasskeyRegChallenge, signReauthPasskeyChallenge, verifyReauthPasskeyChallenge } from "../src/lib/auth";
+import { consumeAuthArtifactHash, finalizePasskeyAssertion } from "../src/lib/auth-security";
 import { toBase64url, fromBase64url, getRegistrationOrigins, getRpFromOrigin } from "../src/lib/webauthn";
 
 // ── base64url helpers ──────────────────────────────────────────────────────
@@ -90,6 +90,14 @@ test("zero-counter passkey finalization succeeds once in D1", async () => {
   expect(await finalizePasskeyAssertion(db, token, expiresAt, "zero-counter-test", 0, 0)).toBe(false);
 });
 
+test("expired auth artifacts cannot be claimed", async () => {
+  const hash = await sha256Base64url(`expired-${crypto.randomUUID()}`);
+  expect(await consumeAuthArtifactHash(env.DB as D1Database, hash, Math.floor(Date.now() / 1000))).toBe(false);
+  expect(await (env.DB as D1Database).prepare(
+    "SELECT 1 FROM consumed_auth_artifacts WHERE artifact_hash = ?"
+  ).bind(hash).first()).toBeNull();
+});
+
 // ── Passkey auth challenge ─────────────────────────────────────────────────
 
 test("passkey auth challenge sign/verify round-trip", async () => {
@@ -110,11 +118,49 @@ test("passkey auth challenge rejects bad prefix", async () => {
 });
 
 test("account-bound passkey MFA challenge cannot downgrade or be tampered with", async () => {
-  const token = await signPasskeyMfaChallenge("secret", 42, 7, "abc123");
-  expect(token).toMatch(/^pauthmfa\.42\.7\.\d+\.abc123\.[a-f0-9]+$/);
-  expect(await verifyPasskeyMfaChallenge("secret", token)).toMatchObject({ userId: 42, authVersion: 7, challenge: "abc123" });
+  const parentArtifactHash = await sha256Base64url(`parent-${crypto.randomUUID()}`);
+  const expiresAt = Math.floor(Date.now() / 1000) + 300;
+  const token = await signPasskeyMfaChallenge("secret", 42, 7, "abc123", parentArtifactHash, expiresAt);
+  expect(token).toMatch(/^pauthmfa2\.42\.7\.\d+\.abc123\.[A-Za-z0-9_-]{43}\.[a-f0-9]+$/);
+  expect(await verifyPasskeyMfaChallenge("secret", token)).toMatchObject({
+    userId: 42, authVersion: 7, challenge: "abc123", parentArtifactHash,
+  });
   expect(await verifyPasskeyAuthChallenge("secret", token)).toBeNull();
   expect(await verifyPasskeyMfaChallenge("secret", token.replace(".42.7.", ".43.7."))).toBeNull();
+  expect(await verifyPasskeyMfaChallenge("secret", token.replace(parentArtifactHash, "A".repeat(43)))).toBeNull();
+});
+
+test("passkey MFA children compete for the same parent login artifact", async () => {
+  const db = env.DB as D1Database;
+  const parentArtifactHash = await sha256Base64url(`parent-${crypto.randomUUID()}`);
+  const expiresAt = Math.floor(Date.now() / 1000) + 300;
+  const credentialId = `parent-race-${crypto.randomUUID()}`;
+  await db.prepare(
+    "INSERT INTO passkey_credentials (id, user_id, public_key, sign_count, created_at) VALUES (?, 1, 'key', 0, ?)"
+  ).bind(credentialId, Date.now()).run();
+  const children = await Promise.all([
+    signPasskeyMfaChallenge("secret", 42, 7, "first", parentArtifactHash, expiresAt),
+    signPasskeyMfaChallenge("secret", 42, 7, "second", parentArtifactHash, expiresAt),
+  ]);
+  const principals = await Promise.all(children.map((token) => verifyPasskeyMfaChallenge("secret", token)));
+  const consumed = await Promise.all(principals.map((principal, index) => finalizePasskeyAssertion(
+    db,
+    children[index]!,
+    principal!.expiresAt,
+    credentialId,
+    0,
+    1,
+    { artifactHash: principal!.parentArtifactHash, expiresAt: principal!.expiresAt },
+  )));
+  expect(consumed.sort()).toEqual([false, true]);
+
+  const third = await signPasskeyMfaChallenge("secret", 42, 7, "third", parentArtifactHash, expiresAt);
+  expect(await finalizePasskeyAssertion(
+    db, third, expiresAt, credentialId, 1, 2, { artifactHash: parentArtifactHash, expiresAt },
+  )).toBe(false);
+  const credential = await db.prepare("SELECT sign_count FROM passkey_credentials WHERE id = ?")
+    .bind(credentialId).first<{ sign_count: number }>();
+  expect(credential?.sign_count).toBe(1);
 });
 
 test("fresh-auth passkey challenge binds account, auth version, and channel", async () => {

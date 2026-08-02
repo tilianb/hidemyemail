@@ -42,6 +42,10 @@ the AWS signature and certificate before checking the exact `TopicArn`.
 - Authentication rate-limit admission and MFA backup-code consumption use
   conditional D1 writes so concurrent requests cannot share the final slot or
   code.
+- Password-authenticated MFA login challenges contain a random nonce and are
+  claimed once in D1. TOTP, backup-code, and passkey completion share that
+  parent claim, and backup-code or passkey state changes commit atomically with
+  it so a replay cannot mint another session or partially advance state.
 - Passkey challenges and native app-auth codes are one-time artifacts. Passkey
   assertion counters use compare-and-swap updates, so concurrent assertions
   verified against the same positive counter cannot both succeed.

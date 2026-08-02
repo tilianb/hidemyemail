@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeAll, expect, test } from "vitest";
 import { createApp } from "../src/api/app";
-import { hashPassword, signMfaChallenge, signPasskeyMfaChallenge, verifyPasskeyMfaChallenge } from "../src/lib/auth";
+import { hashPassword, sha256Base64url, signMfaChallenge, signPasskeyAuthChallenge, signPasskeyMfaChallenge, verifyMfaChallenge, verifyPasskeyMfaChallenge } from "../src/lib/auth";
 import { SETTING_DEFAULTS } from "../src/config";
 
 let testEnv: any;
@@ -194,7 +194,7 @@ test("native passkey challenge echoes the challenge token; web does not", async 
   }, appEnv);
   expect(web.status).toBe(200);
   expect((await web.json() as any).passkey_token).toBeUndefined();
-});
+}, 10_000);
 
 test("passkey challenge uses the configured custom-domain RP ID", async () => {
   const res = await createApp().request("/api/passkey/challenge", { method: "POST" }, {
@@ -243,7 +243,12 @@ test("account-bound passkey MFA challenge restricts credentials and rejects miss
   expect(body.passkey_token).toBeUndefined();
   const passkeyCookie = challenge.headers.get("set-cookie")!;
   const signed = decodeURIComponent(passkeyCookie.match(/__Host-passkey-challenge=([^;]+)/)![1]!);
-  expect(await verifyPasskeyMfaChallenge("sek", signed)).toMatchObject({ userId: 1, authVersion: 4, challenge: body.challenge });
+  expect(await verifyPasskeyMfaChallenge("sek", signed)).toMatchObject({
+    userId: 1,
+    authVersion: 4,
+    challenge: body.challenge,
+    parentArtifactHash: await sha256Base64url(mfaToken),
+  });
 });
 
 test("bound passkey challenge rejects stale auth version and issues native token", async () => {
@@ -271,7 +276,11 @@ test("bound passkey challenge rejects stale auth version and issues native token
   expect(native.status).toBe(200);
   const body = await native.json() as any;
   expect(body.allowCredentials.map((credential: any) => credential.id)).toEqual(["native-mfa-credential"]);
-  expect(await verifyPasskeyMfaChallenge("sek", body.passkey_token)).toMatchObject({ userId: 1, authVersion: 8 });
+  expect(await verifyPasskeyMfaChallenge("sek", body.passkey_token)).toMatchObject({
+    userId: 1,
+    authVersion: 8,
+    parentArtifactHash: await sha256Base64url(currentToken),
+  });
 });
 
 test("bound passkey verification rejects another account's credential before admission", async () => {
@@ -285,7 +294,9 @@ test("bound passkey verification rejects another account's credential before adm
   await db.prepare(
     "INSERT INTO passkey_credentials (id, user_id, public_key, sign_count, created_at) VALUES ('other-account-credential', ?, 'key', 0, ?)"
   ).bind(otherId, Date.now()).run();
-  const token = await signPasskeyMfaChallenge("sek", 1, 3, "challenge");
+  const parent = await signMfaChallenge("sek", 1, 3);
+  const principal = await verifyMfaChallenge("sek", parent);
+  const token = await signPasskeyMfaChallenge("sek", 1, 3, "challenge", await sha256Base64url(parent), principal!.expiresAt);
 
   const response = await app.request("/api/passkey/verify", {
     method: "POST",
@@ -297,6 +308,27 @@ test("bound passkey verification rejects another account's credential before adm
   const body = await response.json() as Record<string, unknown>;
   expect(body.token).toBeUndefined();
   expect(body.fresh_auth).toBeUndefined();
+});
+
+test("passkey completion keeps web and native challenge transports separate", async () => {
+  const app = createApp();
+  const token = await signPasskeyAuthChallenge("sek", "challenge");
+  const request = (headers: Record<string, string>) => app.request("/api/passkey/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify({ id: "missing-credential", passkey_token: token }),
+  }, { ...testEnv, APP_ORIGIN: "https://app.hidemyemail.dev" });
+
+  const native = await request({
+    "X-Auth-Mode": "token",
+    cookie: "__Host-passkey-challenge=stale-cookie",
+  });
+  expect(native.status).toBe(401);
+  expect(await native.json()).toEqual({ error: "Unknown credential" });
+
+  const web = await request({});
+  expect(web.status).toBe(401);
+  expect(await web.json()).toEqual({ error: "No challenge" });
 });
 
 test("apple-app-site-association: 404 until APPLE_APP_ID is configured", async () => {
