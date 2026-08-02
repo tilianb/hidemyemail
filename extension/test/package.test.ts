@@ -20,10 +20,13 @@ test("source manifest requires Chrome 102 for trusted-context storage", () => {
 
 test("manifest installs all-sites page integration with a module service worker", () => {
   const manifest = JSON.parse(readFileSync(resolve(root, "manifest.json"), "utf8"));
+  expect(manifest.manifest_version).toBe(3);
+  expect(manifest.permissions).toEqual(["storage", "clipboardWrite"]);
   expect(manifest.host_permissions).toEqual(["http://*/*", "https://*/*"]);
   expect(manifest.optional_host_permissions).toBeUndefined();
   expect(manifest.background).toEqual({ service_worker: "background.js", type: "module" });
   expect(manifest.content_scripts).toEqual([{ matches: ["http://*/*", "https://*/*"], js: ["content.js"], all_frames: true, run_at: "document_idle" }]);
+  expect(manifest.web_accessible_resources).toBeUndefined();
 });
 
 test("v1.3.1 popup uses local app branding assets and product copy", () => {
@@ -59,6 +62,7 @@ test("ZIP is deterministic and contains only built extension files", () => {
   expect(entries).toEqual(["manifest.json", "popup.html", "background.js", "content.js", ...assets, "icons/icon-16.png", "icons/icon-32.png", "icons/icon-48.png", "icons/icon-128.png"].sort());
   expect(entries.join("\n")).not.toMatch(/(?:src|test|node_modules|\.map)/);
   const packagedManifest = JSON.parse(execFileSync("unzip", ["-p", archive, "manifest.json"], { encoding: "utf8" }));
+  expect(packagedManifest).toEqual(JSON.parse(readFileSync(resolve(root, "manifest.json"), "utf8")));
   expect(packagedManifest.minimum_chrome_version).toBe("102");
   const packagedPopup = execFileSync("unzip", ["-p", archive, "popup.html"], { encoding: "utf8" });
   const executableURLs = [...packagedPopup.matchAll(/<(?:script|link)\b[^>]*\b(?:src|href)=["']([^"']+)["']/gi)].map((match) => match[1]);
