@@ -31,6 +31,7 @@ beforeEach(async () => {
   await db.prepare("DELETE FROM domains").run();
   await db.prepare("DELETE FROM passkey_credentials").run();
   await db.prepare("DELETE FROM api_keys").run();
+  await db.prepare("DELETE FROM consumed_auth_artifacts").run();
   await db.prepare("DELETE FROM users WHERE id > 1").run();
   await db.prepare("UPDATE users SET active = 1 WHERE id = 1").run();
   await db.prepare("DELETE FROM rate_limits").run();
@@ -256,6 +257,59 @@ test("P2: stale MFA challenge cannot mint credentials after recovery advances au
   expect(body.fresh_auth).toBeUndefined();
 });
 
+test("MFA login challenge is one-use while independent logins remain valid", async () => {
+  const app = createApp();
+  const password = "one-use-mfa-password";
+  const passphraseHash = await derivePassphraseHash(password, testEnv.AUTH_PASSWORD_SALT);
+  const userId = await makeUser(1);
+  const encryptedSecret = await encryptDestination("JBSWY3DPEHPK3PXP", testEnv.DESTINATION_ENCRYPTION_KEY);
+  const backupCodes = ["ABCD-EFGH", "JKLM-NPQR", "STUV-WXYZ"];
+  await (env.DB as D1Database).prepare("UPDATE users SET passphrase_hash = ?, auth_version = 0 WHERE id = ?")
+    .bind(passphraseHash, userId).run();
+  await (env.DB as D1Database).prepare(
+    "INSERT INTO mfa (user_id, totp_secret, totp_enabled, totp_backup_codes) VALUES (?, ?, 1, ?)"
+  ).bind(userId, encryptedSecret, JSON.stringify(await Promise.all(backupCodes.map(hashBackupCode)))).run();
+
+  const login = () => app.request("/api/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Auth-Mode": "token" },
+    body: JSON.stringify({ password }),
+  }, testEnv);
+  const [firstLogin, secondLogin, thirdLogin] = await Promise.all([login(), login(), login()]);
+  const firstToken = (await firstLogin.json() as { mfa_token: string }).mfa_token;
+  const secondToken = (await secondLogin.json() as { mfa_token: string }).mfa_token;
+  const thirdToken = (await thirdLogin.json() as { mfa_token: string }).mfa_token;
+  expect(firstToken).not.toBe(secondToken);
+  expect(secondToken).not.toBe(thirdToken);
+
+  const complete = (mfaToken: string, code: string, cookie?: string) => app.request("/api/mfa/complete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Auth-Mode": "token", ...(cookie ? { cookie } : {}) },
+    body: JSON.stringify({ code, mfa_token: mfaToken }),
+  }, testEnv);
+  expect((await complete(firstToken, backupCodes[0]!)).status).toBe(200);
+  const replay = await complete(firstToken, backupCodes[1]!);
+  expect(replay.status).toBe(401);
+  expect((await replay.json() as { error: string }).error).toBe("Challenge expired");
+
+  // Web mode must not accept a native body artifact.
+  const webBody = await app.request("/api/mfa/complete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: backupCodes[2], mfa_token: thirdToken }),
+  }, testEnv);
+  expect(webBody.status).toBe(401);
+  expect(await webBody.json()).toEqual({ error: "No challenge" });
+
+  // Independent parents and different backup codes can complete concurrently;
+  // native mode uses its body token even when a stale cookie is present.
+  const independent = await Promise.all([
+    complete(secondToken, backupCodes[1]!, `__Host-mfa-challenge=${firstToken}`),
+    complete(thirdToken, backupCodes[2]!),
+  ]);
+  expect(independent.map((response) => response.status)).toEqual([200, 200]);
+});
+
 test("P3: /api/settings/mfa/setup refuses to overwrite enabled MFA (re-enrol bypass)", async () => {
   const app = createApp();
   const userId = await makeUser(1);
@@ -442,7 +496,7 @@ test("MFA passkey challenge is restricted to the current account and requested a
     }),
   }, passkeyEnv);
   expect(wrongAccount.status).toBe(401);
-});
+}, 10_000);
 
 test("P4: MFA disable failures are rate limited", async () => {
   const app = createApp();

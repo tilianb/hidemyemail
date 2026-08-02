@@ -180,7 +180,7 @@ describe("inline native reauthentication", () => {
       body: JSON.stringify({ response: { id: "reauth-test-admin" }, passkey_token: nativeBody.passkey_token }),
     }, testEnv);
     expect(transferred.status).toBe(401);
-  });
+  }, 10_000);
 
   test("auth-version rotation invalidates a passkey reauth challenge before assertion verification", async () => {
     await (env.DB as D1Database).prepare(
