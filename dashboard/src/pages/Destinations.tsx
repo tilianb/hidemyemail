@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type Destination } from "../api";
-import { useToast, TableSkeleton, EmptyState } from "../ui";
+import { useToast, ConfirmDialog, TableSkeleton, EmptyState } from "../ui";
 import { Send, CheckCircle2, Clock, Trash2, AlertTriangle, PlayCircle } from "lucide-react";
 
 export function Destinations() {
@@ -10,6 +10,7 @@ export function Destinations() {
   const [form, setForm] = useState({ email: "" });
   const [submitting, setSubmitting] = useState(false);
   const [resending, setResending] = useState<Set<number>>(new Set());
+  const [pendingRemoval, setPendingRemoval] = useState<Destination | null>(null);
 
   async function load() {
     setLoading(true);
@@ -40,7 +41,7 @@ export function Destinations() {
   }
 
   async function remove(id: number) {
-    if (!confirm("Remove this destination?")) return;
+    setPendingRemoval(null);
     try {
       await api.deleteDestination(id);
       setRows(rs => rs.filter(r => r.id !== id));
@@ -198,7 +199,7 @@ export function Destinations() {
                             </button>
                           )
                         )}
-                        <button className="btn-icon danger" onClick={() => remove(d.id)} title="Remove destination">
+                        <button className="btn-icon danger" onClick={() => setPendingRemoval(d)} title="Remove destination">
                           <Trash2 size={16} />
                         </button>
                       </div>
@@ -217,6 +218,16 @@ export function Destinations() {
           )}
         </div>
       </div>
+
+      {pendingRemoval && (
+        <ConfirmDialog
+          title="Remove destination?"
+          body={`${pendingRemoval.email} will no longer receive forwarded email.`}
+          confirmLabel="Remove"
+          onConfirm={() => remove(pendingRemoval.id)}
+          onCancel={() => setPendingRemoval(null)}
+        />
+      )}
     </div>
   );
 }
