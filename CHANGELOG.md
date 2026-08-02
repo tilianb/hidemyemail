@@ -55,6 +55,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Security
 
+- Password-authenticated MFA login challenges are now random, one-use
+  artifacts. TOTP, backup-code, and passkey completion compete for the same
+  durable claim, preventing a captured challenge from minting multiple sessions
+  while keeping independent simultaneous login attempts separate.
 - General passkey reauthentication challenges are bound to the current account,
   authentication version, and web/native channel, restricted to that account's
   registered credentials, and consumed once. Web completion refreshes only the
