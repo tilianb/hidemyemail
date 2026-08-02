@@ -1,10 +1,10 @@
 import { Hono } from "hono";
 import { setCookie, deleteCookie, getCookie } from "hono/cookie";
 import type { AppEnv } from "../app";
-import { verifyPassword, signFreshAuth, verifyFreshAuth, signSession, verifySession, derivePassphraseHash, createPassphraseVerifier, verifyPassphraseVerifier, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge, signPasskeyMfaChallenge, verifyPasskeyMfaChallenge, passkeyArtifactExpiresAt } from "../../lib/auth";
+import { verifyPassword, signFreshAuth, verifyFreshAuth, signSession, verifySession, derivePassphraseHash, createPassphraseVerifier, verifyPassphraseVerifier, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge, signPasskeyMfaChallenge, verifyPasskeyMfaChallenge, passkeyArtifactExpiresAt, sha256Base64url } from "../../lib/auth";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { getEnvWithOverride, getMainGlobalDomain } from "../../lib/settings";
-import { consumeAuthArtifact, finalizePasskeyAssertion, markFailedAttempt, rateLimitFailures } from "../../lib/auth-security";
+import { consumeAuthArtifact, finalizeMfaBackupCode, finalizePasskeyAssertion, markFailedAttempt, rateLimitFailures } from "../../lib/auth-security";
 import { randomSixDigitCode, setAuthenticatedCookies, wantsToken } from "../auth-route-helpers";
 
 const SESSION_TTL = 60 * 60 * 24 * 7; // 7 days
@@ -193,8 +193,8 @@ export function authRoutes() {
   r.post("/mfa/complete", async (c) => {
     const { code, mfa_token } = await c.req.json<{ code: string; mfa_token?: string }>().catch(() => ({ code: "", mfa_token: undefined }));
 
-    // Cookie for the web app; body fallback (mfa_token) for native bearer clients.
-    const challenge = getCookie(c, "__Host-mfa-challenge") || mfa_token;
+    // Keep web artifacts HttpOnly and native artifacts explicitly body-carried.
+    const challenge = wantsToken(c) ? mfa_token ?? null : getCookie(c, "__Host-mfa-challenge") ?? null;
     if (!challenge) return c.json({ error: "No challenge" }, 401);
 
     const principal = await verifyMfaChallenge(c.env.SESSION_SECRET, challenge);
@@ -216,6 +216,7 @@ export function authRoutes() {
     const secret = await decryptDestination(mfa.totp_secret, c.env.DESTINATION_ENCRYPTION_KEY);
 
     let verified = false;
+    let backupCode = false;
 
     if (/^\d{6}$/.test(code)) {
       verified = await verifyTOTP(secret, code);
@@ -227,11 +228,8 @@ export function authRoutes() {
         const hashedCodes: string[] = mfa.totp_backup_codes ? JSON.parse(mfa.totp_backup_codes) : [];
         const idx = await verifyBackupCode(normalized, hashedCodes);
         if (idx !== -1) {
-          hashedCodes.splice(idx, 1);
-          const consumed = await c.env.DB.prepare(
-            "UPDATE mfa SET totp_backup_codes = ? WHERE user_id = ? AND totp_backup_codes = ?"
-          ).bind(JSON.stringify(hashedCodes), userId, mfa.totp_backup_codes).run();
-          verified = consumed.meta.changes === 1;
+          backupCode = true;
+          verified = true;
         }
       }
     }
@@ -239,6 +237,33 @@ export function authRoutes() {
     if (!verified) {
       markFailedAttempt(c);
       return c.json({ error: "Invalid code" }, 401);
+    }
+
+    if (backupCode) {
+      let committed = false;
+      // A different challenge may consume a different code after our initial
+      // read. Retry once against that new list so independent logins do not
+      // invalidate each other; replayed parents still lose the artifact insert.
+      for (let attempt = 0; attempt < 2 && !committed; attempt++) {
+        const codesJson = attempt === 0
+          ? mfa.totp_backup_codes
+          : (await c.env.DB.prepare("SELECT totp_backup_codes FROM mfa WHERE user_id = ?")
+              .bind(userId).first<{ totp_backup_codes: string | null }>())?.totp_backup_codes ?? null;
+        const hashedCodes: string[] = codesJson ? JSON.parse(codesJson) : [];
+        const idx = await verifyBackupCode(code, hashedCodes);
+        if (idx === -1) break;
+        hashedCodes.splice(idx, 1);
+        committed = await finalizeMfaBackupCode(
+          c.env.DB, challenge, principal.expiresAt, userId, codesJson!, JSON.stringify(hashedCodes),
+        );
+      }
+      if (!committed) {
+        markFailedAttempt(c);
+        return c.json({ error: "Challenge expired" }, 401);
+      }
+    } else if (!(await consumeAuthArtifact(c.env.DB, challenge, principal.expiresAt))) {
+      markFailedAttempt(c);
+      return c.json({ error: "Challenge expired" }, 401);
     }
 
     deleteCookie(c, "__Host-mfa-challenge", { path: "/", secure: true });
@@ -261,13 +286,14 @@ export function authRoutes() {
       return c.json({ error: "Passkey authentication is not configured" }, 500);
     }
 
-    let mfaPrincipal: { userId: number; authVersion: number } | null = null;
+    let mfaPrincipal: { userId: number; authVersion: number; expiresAt: number } | null = null;
+    let mfaChallenge: string | null = null;
     let allowCredentials: { id: string; transports?: any[] }[] | undefined;
     if (mfaMode) {
       // Web requests use only the HttpOnly cookie; native token mode uses only
       // the explicit body token. Never let either transport silently fall back
       // to a standalone ceremony.
-      const mfaChallenge = wantsToken(c) ? body.mfa_token : getCookie(c, "__Host-mfa-challenge");
+      mfaChallenge = wantsToken(c) ? body.mfa_token ?? null : getCookie(c, "__Host-mfa-challenge") ?? null;
       if (!mfaChallenge) return c.json({ error: "No MFA challenge" }, 401);
       mfaPrincipal = await verifyMfaChallenge(c.env.SESSION_SECRET, mfaChallenge);
       if (!mfaPrincipal) return c.json({ error: "MFA challenge expired" }, 401);
@@ -296,7 +322,14 @@ export function authRoutes() {
     });
 
     const cookie = mfaPrincipal
-      ? await signPasskeyMfaChallenge(c.env.SESSION_SECRET, mfaPrincipal.userId, mfaPrincipal.authVersion, options.challenge)
+      ? await signPasskeyMfaChallenge(
+          c.env.SESSION_SECRET,
+          mfaPrincipal.userId,
+          mfaPrincipal.authVersion,
+          options.challenge,
+          await sha256Base64url(mfaChallenge!),
+          mfaPrincipal.expiresAt,
+        )
       : await signPasskeyAuthChallenge(c.env.SESSION_SECRET, options.challenge);
     setCookie(c, "__Host-passkey-challenge", cookie, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: 300 });
 
@@ -311,7 +344,9 @@ export function authRoutes() {
     const response = await c.req.json<AuthenticationResponseJSON & { passkey_token?: string }>().catch(() => null);
     if (!response?.id) return c.json({ error: "Invalid request" }, 400);
 
-    const cookie = getCookie(c, "__Host-passkey-challenge") || response.passkey_token || null;
+    const cookie = wantsToken(c)
+      ? response.passkey_token ?? null
+      : getCookie(c, "__Host-passkey-challenge") ?? null;
     if (!cookie) return c.json({ error: "No challenge" }, 401);
 
     const boundPrincipal = await verifyPasskeyMfaChallenge(c.env.SESSION_SECRET, cookie);
@@ -362,7 +397,15 @@ export function authRoutes() {
       return c.json({ error: "Verification failed" }, 401);
     }
     const expiresAt = passkeyArtifactExpiresAt(cookie);
-    if (!expiresAt || !(await finalizePasskeyAssertion(c.env.DB, cookie, expiresAt, response.id, cred.sign_count, result.authenticationInfo.newCounter))) {
+    if (!expiresAt || !(await finalizePasskeyAssertion(
+      c.env.DB,
+      cookie,
+      expiresAt,
+      response.id,
+      cred.sign_count,
+      result.authenticationInfo.newCounter,
+      boundPrincipal ? { artifactHash: boundPrincipal.parentArtifactHash, expiresAt: boundPrincipal.expiresAt } : undefined,
+    ))) {
       markFailedAttempt(c);
       return c.json({ error: "Challenge expired" }, 401);
     }
