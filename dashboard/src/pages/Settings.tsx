@@ -2,11 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { QRCode } from "react-qr-code";
 import { api, isFreshAuthRequired } from "../api";
 import { useAuth } from "../auth";
-import { useToast } from "../ui";
+import { useToast, ConfirmDialog } from "../ui";
 import { ShieldCheck, ShieldOff, KeyRound, Copy, RefreshCw, Loader2, Fingerprint, Trash2, Pencil, Mail, Download, AlertTriangle, Bell } from "lucide-react";
 
 type SetupStep = "idle" | "qr" | "verify" | "backup";
 type PasskeyRow = { id: string; device_name: string | null; created_at: number };
+type ApiKeyRow = { id: number; name: string; token_prefix: string; created_at: number; last_used_at: number | null };
+type PendingRemoval =
+  | { kind: "passkey"; item: PasskeyRow }
+  | { kind: "apiKey"; item: ApiKeyRow };
 
 export function Settings() {
   const { toast } = useToast();
@@ -37,12 +41,12 @@ export function Settings() {
   const [editingPasskeyName, setEditingPasskeyName] = useState("");
 
   // API keys (addy.io-compatible /api/v1 — Bitwarden etc.)
-  type ApiKeyRow = { id: number; name: string; token_prefix: string; created_at: number; last_used_at: number | null };
   const [apiKeys, setApiKeys] = useState<ApiKeyRow[]>([]);
   const [showAddApiKey, setShowAddApiKey] = useState(false);
   const [newApiKeyName, setNewApiKeyName] = useState("");
   const [creatingApiKey, setCreatingApiKey] = useState(false);
   const [newApiKeyToken, setNewApiKeyToken] = useState("");
+  const [pendingRemoval, setPendingRemoval] = useState<PendingRemoval | null>(null);
 
   // Push notifications
   const [pushTesting, setPushTesting] = useState(false);
@@ -273,7 +277,7 @@ export function Settings() {
   }
 
   async function deletePasskey(id: string) {
-    if (!confirm("Remove this passkey?")) return;
+    setPendingRemoval(null);
     try {
       await freshGuard(() => deletePasskeyConfirmed(id), () => deletePasskeyConfirmed(id));
     } catch (err: any) {
@@ -323,7 +327,7 @@ export function Settings() {
   }
 
   async function deleteApiKey(id: number) {
-    if (!confirm("Revoke this API key? Anything using it stops working immediately.")) return;
+    setPendingRemoval(null);
     try {
       await freshGuard(() => deleteApiKeyConfirmed(id), () => deleteApiKeyConfirmed(id));
     } catch (err: any) {
@@ -1063,7 +1067,7 @@ export function Settings() {
                       <button
                         type="button"
                         className="btn btn-ghost icon-red"
-                        onClick={() => deletePasskey(pk.id)}
+                        onClick={() => setPendingRemoval({ kind: "passkey", item: pk })}
                         title="Remove"
                       >
                         <Trash2 size={13} />
@@ -1200,7 +1204,7 @@ export function Settings() {
                   <button
                     type="button"
                     className="btn btn-ghost icon-red"
-                    onClick={() => deleteApiKey(k.id)}
+                    onClick={() => setPendingRemoval({ kind: "apiKey", item: k })}
                     title="Revoke"
                   >
                     <Trash2 size={13} />
@@ -1432,6 +1436,20 @@ export function Settings() {
             )}
           </div>
         </div>
+      )}
+
+      {pendingRemoval && (
+        <ConfirmDialog
+          title={pendingRemoval.kind === "passkey" ? "Remove passkey?" : "Revoke API key?"}
+          body={pendingRemoval.kind === "passkey"
+            ? `${pendingRemoval.item.device_name || "This passkey"} will no longer be able to sign in to your account.`
+            : `${pendingRemoval.item.name} will stop working immediately.`}
+          confirmLabel={pendingRemoval.kind === "passkey" ? "Remove" : "Revoke"}
+          onConfirm={() => pendingRemoval.kind === "passkey"
+            ? deletePasskey(pendingRemoval.item.id)
+            : deleteApiKey(pendingRemoval.item.id)}
+          onCancel={() => setPendingRemoval(null)}
+        />
       )}
 
       {isAdmin && (
