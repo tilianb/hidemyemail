@@ -131,10 +131,19 @@ jobs:
           fi
           unzip -p "$archive" manifest.json > packaged-manifest.json
           node - <<'NODE'
+          const assert = require('node:assert/strict')
           const manifest = require('./packaged-manifest.json')
-          const allowed = ['https://*/*', 'http://localhost/*', 'http://127.0.0.1/*', 'http://[::1]/*']
-          if (manifest.manifest_version !== 3 || JSON.stringify(manifest.optional_host_permissions) !== JSON.stringify(allowed)) process.exit(1)
-          if (manifest.content_scripts || manifest.web_accessible_resources || manifest.host_permissions) process.exit(1)
+          const sourceManifest = require('./extension/manifest.json')
+          assert.deepStrictEqual(manifest, sourceManifest)
+          assert.equal(manifest.manifest_version, 3)
+          assert.deepStrictEqual(manifest.permissions, ['storage', 'clipboardWrite'])
+          assert.deepStrictEqual(manifest.host_permissions, ['http://*/*', 'https://*/*'])
+          assert.equal(manifest.optional_host_permissions, undefined)
+          assert.deepStrictEqual(manifest.background, { service_worker: 'background.js', type: 'module' })
+          assert.deepStrictEqual(manifest.content_scripts, [
+            { matches: ['http://*/*', 'https://*/*'], js: ['content.js'], all_frames: true, run_at: 'document_idle' },
+          ])
+          assert.equal(manifest.web_accessible_resources, undefined)
           NODE
           unzip -p "$archive" popup.html > packaged-popup.html
           node - <<'NODE'
