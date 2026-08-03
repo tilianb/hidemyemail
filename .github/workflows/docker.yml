@@ -3,8 +3,8 @@ name: Docker
 # Builds the self-host container.
 # - PRs: validate linux/amd64 only (no push) on the Namespace remote builder.
 # - Push to dev: build + push multi-arch :dev and :sha-<short> to GHCR (never :latest).
-# - Push to main: build + push multi-arch :latest, :main, :sha-<short> to GHCR.
-# - Stable SemVer release calls this workflow after release validation; pushes release tags to both registries.
+# - Push to main: build + push multi-arch :main and :sha-<short> to GHCR.
+# - Stable SemVer release calls this workflow after release validation; pushes release tags and :latest to both registries.
 
 on:
   workflow_call:
@@ -140,7 +140,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=sha,format=short,prefix=sha-
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+            type=raw,value=latest,enable=${{ needs.publish-gate.outputs.stable-release == 'true' }}
           labels: |
             org.opencontainers.image.title=hidemyemail
             org.opencontainers.image.description=Self-host container for hidemyemail.dev (Worker via Miniflare)
@@ -227,7 +227,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # GHCR: branch (dev/main), sha, semver, and latest on main only.
+      # GHCR: branch (dev/main), sha, semver, and latest on stable releases only.
       - name: Extract GHCR metadata
         id: meta-ghcr
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
@@ -241,7 +241,7 @@ jobs:
             type=semver,pattern=v{{major}}.{{minor}}
             type=semver,pattern=v{{major}}
             type=sha,format=short,prefix=sha-
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+            type=raw,value=latest,enable=${{ needs.publish-gate.outputs.stable-release == 'true' }}
 
       # Docker Hub: releases only — semver tags + latest on newest release. No main/branch/sha.
       - name: Extract Docker Hub metadata
