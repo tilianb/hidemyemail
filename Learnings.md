@@ -2,6 +2,11 @@
 
 ## What Has Worked
 
+**2026-08-03 — Release image tag consistency**
+- Observation: Applying `latest` during branch publication lets it diverge from the stable SemVer image published later by the reusable release workflow.
+- Action: Apply mutable stable aliases such as `latest` in the same manifest operation as validated release tags, and keep branch aliases separate.
+- Confidence: high
+
 **2026-08-03 — Release-validator test performance**
 - Observation: Release-validator cases that pass `--previous-tag=` never execute Git history lookups, so initializing and committing a fixture repository only adds subprocess overhead.
 - Action: Create Git history only for release-validator cases that exercise automatic previous-tag discovery.

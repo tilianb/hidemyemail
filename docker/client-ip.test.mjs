@@ -148,7 +148,7 @@ test("release is the only direct tag publisher", async () => {
   assert.match(testflight, /workflow_call:/);
 });
 
-test("dev publishes multi-arch GHCR dev and SHA tags without latest or Docker Hub", async () => {
+test("dev publishes multi-arch GHCR dev and SHA tags while latest tracks stable releases", async () => {
   const workflow = await readFile(
     new URL("../.github/workflows/docker.yml", import.meta.url),
     "utf8",
@@ -177,7 +177,8 @@ test("dev publishes multi-arch GHCR dev and SHA tags without latest or Docker Hu
   assert.match(merge, /environment:.*refs\/heads\/main.*stable-release == 'true'.*production/);
   assert.match(merge, /type=ref,event=branch/);
   assert.match(merge, /type=sha,format=short,prefix=sha-/);
-  assert.match(merge, /type=raw,value=latest,enable=\$\{\{ github\.ref == format\('refs\/heads\/\{0\}', 'main'\) \}\}/);
+  assert.match(merge, /type=raw,value=latest,enable=\$\{\{ needs\.publish-gate\.outputs\.stable-release == 'true' \}\}/);
+  assert.doesNotMatch(merge, /type=raw,value=latest,enable=.*refs\/heads\/main/);
   assert.doesNotMatch(merge, /type=raw,value=latest,enable=.*dev/);
   for (const name of [
     "Log in to Docker Hub",
