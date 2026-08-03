@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
-import { api, type Domain, type SuppressionEntry, type SuppressionSummary } from "../api";
+import { useEffect, useRef, useState } from "react";
+import { api, isFreshAuthRequired, type Domain, type SuppressionEntry, type SuppressionSummary } from "../api";
 import { useToast, TableSkeleton, EmptyState, ConfirmDialog, PromptDialog, ChoiceDialog, CopyButton } from "../ui";
-import { Users, Trash2, Globe, Cloud, Edit3, Key, Server, Settings, Send, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
+import { Users, Trash2, Globe, Cloud, Edit3, Key, Server, Settings, Send, CheckCircle, XCircle, AlertTriangle, Fingerprint, Loader2 } from "lucide-react";
 
 const FORWARDED_FROM_FORMATS = [
   { value: "name_address_parens", label: "Name (email at domain)", example: '"Alice (alice at store.com)" <alias@domain>' },
@@ -111,6 +111,16 @@ export function Admin() {
   const [inboundBytesInput, setInboundBytesInput] = useState<string>("");
   const [testEmailForm, setTestEmailForm] = useState({ type: "notification", to: "" });
   const [sendingTestEmail, setSendingTestEmail] = useState(false);
+  const [freshPrompt, setFreshPrompt] = useState(false);
+  const [reauthPassphrase, setReauthPassphrase] = useState("");
+  const [reauthCode, setReauthCode] = useState("");
+  const [reauthLoading, setReauthLoading] = useState(false);
+  const [reauthError, setReauthError] = useState("");
+  const [reauthMfa, setReauthMfa] = useState(false);
+  const [reauthHasPasskey, setReauthHasPasskey] = useState(false);
+  const pendingFresh = useRef<(() => Promise<void>) | null>(null);
+  const pendingFreshProfileId = useRef<number | null>(null);
+  const retryingFresh = useRef(false);
   const workerOrigin = window.location.origin;
   const currentMainGlobalDomain = editedSettings.main_global_domain || "";
   const selectableMainGlobalDomains = globalDomains.filter(d => d.active === 1 && d.verified_at !== null);
@@ -160,6 +170,123 @@ export function Admin() {
 
   useEffect(() => { load(); }, []);
 
+  async function freshGuard<T>(operation: () => Promise<T>, retry: () => Promise<void>): Promise<{ ok: true; value: T } | { ok: false }> {
+    const profile = await api.profile();
+    try {
+      return { ok: true, value: await operation() };
+    } catch (err) {
+      if (!isFreshAuthRequired(err) || pendingFresh.current || retryingFresh.current) throw err;
+      pendingFresh.current = retry;
+      pendingFreshProfileId.current = profile.id;
+      try {
+        const [currentProfile, mfa, passkeys] = await Promise.all([api.profile(), api.mfaStatus(), api.passkeyList()]);
+        if (currentProfile.id !== profile.id) {
+          throw new Error("The signed-in account changed. Please start the action again.");
+        }
+        setReauthMfa(mfa.enabled);
+        setReauthHasPasskey(passkeys.length > 0);
+        setReauthPassphrase("");
+        setReauthCode("");
+        setReauthError("");
+        setFreshPrompt(true);
+        return { ok: false };
+      } catch (promptError) {
+        pendingFresh.current = null;
+        pendingFreshProfileId.current = null;
+        throw promptError;
+      }
+    }
+  }
+
+  function cancelReauth() {
+    pendingFresh.current = null;
+    pendingFreshProfileId.current = null;
+    setFreshPrompt(false);
+    setReauthPassphrase("");
+    setReauthCode("");
+    setReauthError("");
+  }
+
+  async function finishReauth() {
+    const operation = pendingFresh.current;
+    const profileId = pendingFreshProfileId.current;
+    if (!operation || profileId === null || retryingFresh.current) return;
+    pendingFresh.current = null;
+    pendingFreshProfileId.current = null;
+    retryingFresh.current = true;
+    setFreshPrompt(false);
+    setReauthPassphrase("");
+    setReauthCode("");
+    try {
+      const profile = await api.profile();
+      if (profile.id !== profileId) {
+        toast("The signed-in account changed. Please start the action again.", "error");
+        return;
+      }
+      await operation();
+    } catch (err: any) {
+      toast(err?.message || "The action could not be completed", "error");
+    } finally {
+      retryingFresh.current = false;
+    }
+  }
+
+  async function submitReauth(e: React.FormEvent) {
+    e.preventDefault();
+    setReauthLoading(true);
+    setReauthError("");
+    try {
+      await api.reauth(reauthPassphrase, reauthMfa ? reauthCode.trim() : undefined);
+      await finishReauth();
+    } catch (err: any) {
+      setReauthError(err?.message || "Authentication failed");
+    } finally {
+      setReauthLoading(false);
+    }
+  }
+
+  async function submitPasskeyReauth() {
+    setReauthLoading(true);
+    setReauthError("");
+    try {
+      const options = await api.reauthPasskeyChallenge();
+      const { startAuthentication } = await import("@simplewebauthn/browser");
+      const response = await startAuthentication({ optionsJSON: options as unknown as Parameters<typeof startAuthentication>[0]["optionsJSON"] });
+      await api.reauthPasskeyComplete(response);
+      await finishReauth();
+    } catch (err: any) {
+      if (err?.name !== "NotAllowedError") setReauthError(err?.message || "Passkey verification failed");
+    } finally {
+      setReauthLoading(false);
+    }
+  }
+
+  async function deleteUser(id: number) {
+    const result = await freshGuard(() => api.adminDeleteUser(id), () => deleteUser(id));
+    if (!result.ok) return;
+    toast("User deleted", "success");
+    await load();
+  }
+
+  async function recoverUserByEmail(id: number) {
+    const result = await freshGuard(() => api.adminRecoverUser(id, true), () => recoverUserByEmail(id));
+    if (!result.ok) return;
+    toast("Recovery email sent to user", "success");
+  }
+
+  async function recoverUserByLink(id: number) {
+    const result = await freshGuard(() => api.adminRecoverUser(id, false), () => recoverUserByLink(id));
+    if (!result.ok) return;
+    const url = `${window.location.origin}/recover?token=${result.value.token}`;
+    setPromptState({
+      title: "Recovery Link",
+      body: "Copy this secure 24-hour recovery link and send it to the user:",
+      defaultValue: url,
+      confirmLabel: "Done",
+      onConfirm: () => {},
+    });
+  }
+
   function requestRemoveUser(id: number) {
     if (id === 1) return toast("Cannot delete admin user", "error");
     setConfirmState({
@@ -168,9 +295,7 @@ export function Admin() {
       confirmLabel: "Delete User",
       onConfirm: async () => {
         try {
-          await api.adminDeleteUser(id);
-          toast("User deleted", "success");
-          await load();
+          await deleteUser(id);
         } catch (err: any) {
           toast(err.message || "Failed to delete user", "error");
         }
@@ -638,22 +763,13 @@ export function Admin() {
                               primaryLabel: "Send via Email",
                               onPrimary: async () => {
                                 try {
-                                  await api.adminRecoverUser(u.id, true);
-                                  toast("Recovery email sent to user", "success");
+                                  await recoverUserByEmail(u.id);
                                 } catch (err: any) { toast(err.message, "error"); }
                               },
                               secondaryLabel: "Copy Link",
                               onSecondary: async () => {
                                 try {
-                                  const { token } = await api.adminRecoverUser(u.id, false);
-                                  const url = `${window.location.origin}/recover?token=${token}`;
-                                  setPromptState({
-                                    title: "Recovery Link",
-                                    body: "Copy this secure 24-hour recovery link and send it to the user:",
-                                    defaultValue: url,
-                                    confirmLabel: "Done",
-                                    onConfirm: () => {}
-                                  });
+                                  await recoverUserByLink(u.id);
                                 } catch (err: any) { toast(err.message, "error"); }
                               }
                             });
@@ -1597,6 +1713,43 @@ echo "SNS_ALLOWED_TOPIC_ARN=$OUTBOUND_TOPIC_ARN"`}
           onSecondary={() => { choiceState.onSecondary(); setChoiceState(null); }}
           onCancel={() => setChoiceState(null)}
         />
+      )}
+      {freshPrompt && (
+        <div className="overlay" role="presentation">
+          <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="admin-reauth-title" aria-describedby="admin-reauth-description">
+            <h2 className="dialog-title" id="admin-reauth-title">Confirm it’s you</h2>
+            <p className="dialog-body" id="admin-reauth-description">
+              This administrator action needs a recent identity check.
+            </p>
+            <form onSubmit={submitReauth} className="security-form-stack">
+              <div className="field field-tight">
+                <label className="field-label" htmlFor="admin-reauth-passphrase">Passphrase</label>
+                <input id="admin-reauth-passphrase" className="input" type="password" autoComplete="current-password"
+                  autoFocus value={reauthPassphrase} onChange={e => setReauthPassphrase(e.target.value)} disabled={reauthLoading} />
+              </div>
+              {reauthMfa && (
+                <div className="field field-tight">
+                  <label className="field-label" htmlFor="admin-reauth-code">Authentication or backup code</label>
+                  <input id="admin-reauth-code" className="input" type="text" autoComplete="one-time-code"
+                    value={reauthCode} onChange={e => setReauthCode(e.target.value.replace(/\s/g, "").slice(0, 32))}
+                    placeholder="000000 or XXXX-XXXX-…" disabled={reauthLoading} />
+                </div>
+              )}
+              {reauthError && <p className="form-error" role="alert">{reauthError}</p>}
+              {reauthHasPasskey && (
+                <button type="button" className="btn btn-soft btn-center" onClick={submitPasskeyReauth} disabled={reauthLoading}>
+                  <Fingerprint size={14} /> Use Passkey
+                </button>
+              )}
+              <div className="dialog-actions">
+                <button type="button" className="btn btn-soft" onClick={cancelReauth} disabled={reauthLoading}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={reauthLoading || !reauthPassphrase || (reauthMfa && !reauthCode.trim())}>
+                  {reauthLoading && <Loader2 size={14} className="spin" />} Confirm
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );
