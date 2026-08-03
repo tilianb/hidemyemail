@@ -92,8 +92,11 @@ order (the abstraction is the enabler; later items get cheaper once it lands):
   instead of requiring their passphrase for MFA/passkey changes, API keys,
   export, and account deletion. The assertion must be bound to the current
   `user_id` and `auth_version`, issue only a short-lived fresh-auth credential,
-  and never switch the active session to the passkey's owner. Support the web,
-  iOS, and Android flows in parity, including replay and cross-account tests.
+  and never switch the active session to the passkey's owner. Derive the RP ID
+  and browser expected origin only from canonical `APP_ORIGIN`, accept native
+  enrollment origins only from the existing configured allowlist, and consume
+  every challenge once. Support the web, iOS, and Android flows in parity,
+  including replay and cross-account tests.
 - [ ] **Guided passkey setup after registration** _(authentication / onboarding)_
   — after showing the one-time recovery codes, offer to create and name a
   passkey while the new session is still fresh. Recommend it prominently but
@@ -104,8 +107,9 @@ order (the abstraction is the enabler; later items get cheaper once it lands):
   admin create, revoke, and copy an expiring, one-use registration link or code
   while public registration remains disabled. Invitations create ordinary users
   only, reveal no account-existence information, and use atomic consumption so
-  concurrent requests cannot redeem one invitation twice. Add optional expiry
-  and usage count only if there is a demonstrated need beyond the one-use flow.
+  concurrent requests cannot redeem one invitation twice. Require every
+  invitation to expire; start with a fixed 24-hour lifetime and add configurable
+  expiry or multi-use invitations only if there is demonstrated demand.
 - [ ] **Account security and recovery health** _(authentication / onboarding)_
   — a Security checklist showing whether the user has a passkey (ideally more
   than one), a recovery username, remaining recovery codes, MFA status, and a
