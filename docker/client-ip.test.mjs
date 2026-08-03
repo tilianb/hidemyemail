@@ -194,9 +194,10 @@ test("dev sync only accepts the repository's own dev branch", async () => {
     new URL("../.github/workflows/sync-dev.yml", import.meta.url),
     "utf8",
   );
+  const syncJob = workflow.slice(workflow.indexOf("  sync-dev:"));
   assert.match(
-    workflow,
-    /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/,
+    syncJob,
+    /if: >-\n\s+github\.event\.pull_request\.merged == true &&\n\s+github\.event\.pull_request\.head\.ref == 'dev' &&\n\s+github\.event\.pull_request\.head\.repo\.full_name == github\.repository/,
   );
 });
 

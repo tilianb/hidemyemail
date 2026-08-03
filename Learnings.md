@@ -35,8 +35,8 @@
 - Confidence: high
 
 **2026-08-03 — CI runner evaluation**
-- Observation: This public repository's standard GitHub-hosted Linux, ARM64, and macOS jobs are free and unlimited; recent validation jobs usually complete in under five minutes, while release jobs hold signing and registry credentials.
-- Action: Keep GitHub-hosted runners as the default; require measured wall-clock gains and isolate secretless validation jobs before piloting any third-party runner provider.
+- Observation: Standard GitHub-hosted runners are free for this public repository, while selected Namespace profiles are workspace-controlled and ephemeral; signed Android and TestFlight jobs may use Namespace, but signing files and credentials must stay outside persistent cache paths.
+- Action: Keep GitHub-hosted runners as the default for lightweight jobs; use Namespace only for approved measured workloads, preserve least-privilege job permissions, and never persist signing or publication credentials in cross-invocation caches.
 - Confidence: high
 
 **2026-08-03 — Namespace Linux runner benchmark**
