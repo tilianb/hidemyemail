@@ -1,7 +1,7 @@
 name: Docker
 
 # Builds the self-host container.
-# - PRs and pushes to dev: validate linux/amd64 only (no push), GHA cache keeps iteration fast.
+# - PRs and pushes to dev: validate linux/amd64 only (no push) on the Namespace remote builder.
 # - Push to main: build + push multi-arch :latest, :main, :sha-<short> to GHCR.
 # - Stable SemVer release calls this workflow after release validation; pushes release tags to both registries.
 
@@ -43,7 +43,7 @@ env:
 jobs:
   publish-gate:
     name: Verify publish ref
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-default
     outputs:
       stable-release: ${{ steps.ref.outputs.stable-release }}
     permissions:
@@ -68,7 +68,7 @@ jobs:
 
   tests:
     name: Test Docker host
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-github-light
     permissions:
       contents: read
     defaults:
@@ -76,15 +76,18 @@ jobs:
         working-directory: docker
     steps:
       - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: namespacelabs/nscloud-checkout-action@445c25d7009680597d73eb03c4e1cd5be522ed73 # v9
         with:
           persist-credentials: false
       - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
+          package-manager-cache: false
+      - name: Set up Namespace npm cache
+        uses: namespacelabs/nscloud-cache-action@c5f8dab7560444c4bf8dbc64f1b203431873c547 # v1.6.1
+        with:
           cache: npm
-          cache-dependency-path: docker/package-lock.json
       - name: Install dependencies
         run: npm ci
       - name: Run tests
@@ -100,8 +103,8 @@ jobs:
     strategy:
       matrix:
         # Validation-only runs (PRs, dev pushes) build linux/amd64 only; main pushes build both.
-        include: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/dev') && fromJSON('[{"os":"ubuntu-latest","platform":"linux/amd64"}]') || fromJSON('[{"os":"ubuntu-latest","platform":"linux/amd64"},{"os":"ubuntu-24.04-arm","platform":"linux/arm64"}]') }}
-    runs-on: ${{ matrix.os }}
+        include: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/dev') && fromJSON('[{"platform":"linux/amd64"}]') || fromJSON('[{"platform":"linux/amd64"},{"platform":"linux/arm64"}]') }}
+    runs-on: namespace-profile-default
 
     steps:
       - name: Checkout
@@ -116,9 +119,6 @@ jobs:
           registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request' && github.ref != 'refs/heads/dev'
@@ -157,11 +157,7 @@ jobs:
           file: docker/Dockerfile
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          push: false
-          cache-from: type=gha,scope=build-${{ matrix.platform }}
-          cache-to: type=gha,mode=max,scope=build-${{ matrix.platform }}
-          provenance: true
-          sbom: true
+          outputs: type=cacheonly
 
       - name: Build and push by digest
         if: github.event_name != 'pull_request' && github.ref != 'refs/heads/dev'
@@ -176,8 +172,6 @@ jobs:
           outputs: |
             type=image,name=${{ env.GHCR_IMAGE }},push-by-digest=true,name-canonical=true,push=true
             ${{ needs.publish-gate.outputs.stable-release == 'true' && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.DOCKERHUB_IMAGE) || '' }}
-          cache-from: type=gha,scope=build-${{ matrix.platform }}
-          cache-to: type=gha,mode=max,scope=build-${{ matrix.platform }}
           # Disabled: attestation manifests break push-by-digest manifest merge
           # (different index digest per registry; outputs.digest reports only one).
           provenance: false
@@ -203,7 +197,7 @@ jobs:
   merge:
     name: Merge Multi-Arch Manifests
     if: github.event_name != 'pull_request' && github.ref != 'refs/heads/dev'
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-default
     needs: [publish-gate, build]
     permissions:
       contents: read
@@ -226,9 +220,6 @@ jobs:
           registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
       - name: Log in to GHCR
         uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4

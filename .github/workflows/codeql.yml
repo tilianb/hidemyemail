@@ -11,7 +11,7 @@ on:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     permissions:
       security-events: write
       packages: read
@@ -24,12 +24,14 @@ jobs:
         include:
           - language: javascript-typescript
             build-mode: none
+            runner: namespace-profile-github-light
           - language: java-kotlin
             build-mode: manual
+            runner: namespace-profile-github
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      uses: namespacelabs/nscloud-checkout-action@445c25d7009680597d73eb03c4e1cd5be522ed73 # v9
 
     - name: Set up JDK 17
       if: matrix.language == 'java-kotlin'
@@ -38,9 +40,17 @@ jobs:
         distribution: temurin
         java-version: 17
 
+    - name: Set up Namespace Gradle cache
+      if: matrix.language == 'java-kotlin'
+      uses: namespacelabs/nscloud-cache-action@c5f8dab7560444c4bf8dbc64f1b203431873c547 # v1.6.1
+      with:
+        cache: gradle
+
     - name: Set up Gradle
       if: matrix.language == 'java-kotlin'
       uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+      with:
+        cache-disabled: true
 
     - name: Initialize CodeQL
       uses: github/codeql-action/init@c54b30b7df092240050e69945842bc67aee0f0f4 # v4.37.3
