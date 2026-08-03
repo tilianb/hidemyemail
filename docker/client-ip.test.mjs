@@ -148,6 +148,17 @@ test("release is the only direct tag publisher", async () => {
   assert.match(testflight, /workflow_call:/);
 });
 
+test("dev sync only accepts the repository's own dev branch", async () => {
+  const workflow = await readFile(
+    new URL("../.github/workflows/sync-dev.yml", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    workflow,
+    /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/,
+  );
+});
+
 test("release publications depend on the validated tag and required artifacts", async () => {
   const [release, docker, testflight] = await Promise.all(
     ["release", "docker", "testflight"].map((name) =>
