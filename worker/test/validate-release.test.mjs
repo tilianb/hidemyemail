@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
@@ -9,10 +9,10 @@ const releaseWorkflow = resolve(import.meta.dirname, '../../.github/workflows/re
 const roots = []
 
 afterEach(() => {
-  for (const root of roots.splice(0)) execFileSync('rm', ['-rf', root])
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-function fixture(version = '2.0.0', changelog = `## [2.0.0] - 2026-07-26\n\nThis release improves security and reliability for every deployment.\n\n### Added\n\nCurrent notes.\n\n### Upgrade Notes\n\nNone.\n`) {
+function fixture(version = '2.0.0', changelog = `## [2.0.0] - 2026-07-26\n\nThis release improves security and reliability for every deployment.\n\n### Added\n\nCurrent notes.\n\n### Upgrade Notes\n\nNone.\n`, withGit = false) {
   const root = mkdtempSync(join(tmpdir(), 'release-validator-'))
   roots.push(root)
   for (const path of ['worker', 'dashboard', 'extension', 'android/app', 'ios']) mkdirSync(join(root, path), { recursive: true })
@@ -26,9 +26,11 @@ function fixture(version = '2.0.0', changelog = `## [2.0.0] - 2026-07-26\n\nThis
   writeFileSync(join(root, 'android/app/build.gradle.kts'), `versionCode = 20\nversionName = "${version}"\n`)
   writeFileSync(join(root, 'ios/project.yml'), `MARKETING_VERSION: "${version}"\nCURRENT_PROJECT_VERSION: "${version}"\n`)
   writeFileSync(join(root, 'CHANGELOG.md'), changelog)
-  execFileSync('git', ['init', '-q'], { cwd: root })
-  execFileSync('git', ['add', '.'], { cwd: root })
-  execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'fixture'], { cwd: root })
+  if (withGit) {
+    execFileSync('git', ['init', '-q'], { cwd: root })
+    execFileSync('git', ['add', '.'], { cwd: root })
+    execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'fixture'], { cwd: root })
+  }
   return root
 }
 
@@ -37,7 +39,7 @@ function run(root, tag = 'v2.0.0', extra = []) {
 }
 
 test('selects the highest lower stable tag and ignores RC, build, higher, and malformed tags', () => {
-  const root = fixture()
+  const root = fixture(undefined, undefined, true)
   for (const [tag, code] of [['v1.8.0', 18], ['v1.9.0', 19], ['v1.9.1-rc.1', 99], ['v1.9.2+build', 99], ['v2.1.0', 99], ['vgarbage', 99]]) {
     writeFileSync(join(root, 'android/app/build.gradle.kts'), `versionCode = ${code}\nversionName = "2.0.0"\n`)
     execFileSync('git', ['add', '.'], { cwd: root })
@@ -52,7 +54,7 @@ test('selects the highest lower stable tag and ignores RC, build, higher, and ma
 
 test('compares arbitrarily large stable SemVer identifiers without precision loss', () => {
   const version = '9007199254740993.0.0'
-  const root = fixture(version, `## [${version}]\n\nCurrent notes.\n\n### Upgrade Notes\n\nNone.\n`)
+  const root = fixture(version, `## [${version}]\n\nCurrent notes.\n\n### Upgrade Notes\n\nNone.\n`, true)
   for (const [tag, code] of [['v9007199254740992.0.0', 19], ['v9007199254740994.0.0', 99]]) {
     writeFileSync(join(root, 'android/app/build.gradle.kts'), `versionCode = ${code}\nversionName = "${version}"\n`)
     execFileSync('git', ['add', '.'], { cwd: root })

@@ -2,6 +2,11 @@
 
 ## What Has Worked
 
+**2026-08-03 — Release-validator test performance**
+- Observation: Release-validator cases that pass `--previous-tag=` never execute Git history lookups, so initializing and committing a fixture repository only adds subprocess overhead.
+- Action: Create Git history only for release-validator cases that exercise automatic previous-tag discovery.
+- Confidence: high
+
 **2026-08-01 — Cross-platform security changes**
 - Observation: Worker, dashboard, Android, and iOS fresh-auth contracts can drift unless each client is validated against the same response fields and endpoint sequence.
 - Action: For authentication changes, test the Worker contract, dashboard, Android, and iOS, then rely on the iOS simulator CI for Swift validation when working from Linux.
