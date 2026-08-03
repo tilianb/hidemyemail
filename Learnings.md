@@ -9,7 +9,7 @@
 
 **2026-08-01 — Cross-platform security changes**
 - Observation: Worker, dashboard, Android, and iOS fresh-auth contracts can drift unless each client is validated against the same response fields and endpoint sequence.
-- Action: For authentication changes, test the Worker contract, dashboard, Android, and iOS, then rely on the iOS simulator CI for Swift validation when working from Linux.
+- Action: For authentication changes, test the Worker contract, dashboard, Android, and iOS, using platform CI whenever the available environment cannot run a required native toolchain.
 - Confidence: high
 
 **2026-08-01 — Extension autofill-overlay coexistence**
@@ -23,6 +23,36 @@
 - Confidence: high
 
 ## Patterns and Preferences
+
+**2026-08-03 — Hybrid Namespace runner allocation**
+- Observation: At this repository's run volume, paid persistent cache storage costs more than the compute time it saves; two concurrent 4x8 Android/Java jobs use only 8 vCPU and 16 GB, while Docker can retain the cacheless default profile's remote builder independently of lightweight workflow jobs.
+- Action: Reserve Namespace 4x8 runners for Android and Java/Kotlin CodeQL, Namespace macOS for iOS and TestFlight, and the Namespace default profile for Docker image builds; run lightweight orchestration on GitHub-hosted runners and use GitHub-backed dependency caches.
+- Confidence: high
+
+**2026-08-03 — Local PR-check parity**
+- Observation: Local PR-check reproduction requires JDK 21, Android SDK 35, a compatible Xcode selected through `DEVELOPER_DIR`, and a Docker-compatible engine; Java/Kotlin CodeQL extraction requires Gradle `--no-daemon` so compilation runs under the tracer.
+- Action: Discover the available toolchain locations, export the standard environment variables, ensure the container engine is running, and disable the Gradle daemon when reproducing Java/Kotlin CodeQL.
+- Confidence: high
+
+**2026-08-03 — CI runner evaluation**
+- Observation: Standard GitHub-hosted runners are free for this public repository, while selected Namespace profiles are workspace-controlled and ephemeral; signed Android and TestFlight jobs may use Namespace, but signing files and credentials must stay outside persistent cache paths.
+- Action: Keep GitHub-hosted runners as the default for lightweight jobs; use Namespace only for approved measured workloads, preserve least-privilege job permissions, and never persist signing or publication credentials in cross-invocation caches.
+- Confidence: high
+
+**2026-08-03 — Namespace Linux runner benchmark**
+- Observation: The Namespace Linux profile cut Android and Java/Kotlin CodeQL execution by more than half, but burst scheduling added 73–160 seconds to later fan-out jobs and its Docker validation build took nearly three times as long as GitHub-hosted Ubuntu.
+- Action: Use Namespace selectively for Android and CodeQL compute-heavy jobs; retain GitHub-hosted Ubuntu for short fan-out and Docker validation jobs unless concurrency and Docker caching are improved.
+- Confidence: high
+
+**2026-08-03 — Namespace Docker remote builders**
+- Observation: `docker/setup-buildx-action` replaces the builder preconfigured by a Namespace runner with a local `docker-container` driver; skipping that action and using `outputs: type=cacheonly` preserves the `nsc-remote` builder and its persistent NVMe layer cache.
+- Action: On Namespace validation runners, use the profile-provided Buildx configuration directly; reserve `setup-buildx-action` for GitHub-hosted production publishing jobs.
+- Confidence: high
+
+**2026-08-03 — Namespace runner cache profiles**
+- Observation: The built-in `namespace-profile-default` provides a remote Docker builder but no runner Cache Volume; npm, Gradle, Xcode, and Git mirror acceleration require a cache-backed custom profile and `nscloud-cache-action` or `nscloud-checkout-action`.
+- Action: Use the default profile for Docker remote-builder orchestration, add persistent Namespace caches only when measured savings exceed storage cost, and avoid overlapping cache mechanisms.
+- Confidence: high
 
 **2026-08-01 — Web fresh-auth continuations**
 - Observation: Dashboard requests use ambient HttpOnly cookies, so a captured continuation is not account-bound merely because it retains the same API module reference.

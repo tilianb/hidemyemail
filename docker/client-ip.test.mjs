@@ -148,6 +148,116 @@ test("release is the only direct tag publisher", async () => {
   assert.match(testflight, /workflow_call:/);
 });
 
+test("dev publishes multi-arch GHCR dev and SHA tags without latest or Docker Hub", async () => {
+  const workflow = await readFile(
+    new URL("../.github/workflows/docker.yml", import.meta.url),
+    "utf8",
+  );
+  const build = workflow.slice(workflow.indexOf("  build:"), workflow.indexOf("  merge:"));
+  const merge = workflow.slice(workflow.indexOf("  merge:"));
+  const step = (block, name) => {
+    const start = block.indexOf(`      - name: ${name}`);
+    const next = block.indexOf("\n      - name:", start + 1);
+    return block.slice(start, next === -1 ? undefined : next);
+  };
+
+  assert.match(workflow, /branches: \['main', 'dev'\]/);
+  assert.match(workflow, /refs\/heads\/(?:main|dev)/);
+  assert.match(build, /fromJSON\('\[\{"platform":"linux\/amd64"\},\{"platform":"linux\/arm64"\}\]'\)/);
+  assert.match(build, /environment:.*refs\/heads\/main.*stable-release == 'true'.*production/);
+  assert.match(step(build, "Log in to GHCR"), /if: github\.event_name != 'pull_request'/);
+  assert.match(step(build, "Build for validation"), /if: github\.event_name == 'pull_request'/);
+  assert.match(step(build, "Build and push by digest"), /if: github\.event_name != 'pull_request'/);
+  assert.match(step(build, "Build and push by digest"), /type=image,name=\$\{\{ env\.GHCR_IMAGE \}\}/);
+  assert.match(step(build, "Build and push by digest"), /stable-release == 'true'.*env\.DOCKERHUB_IMAGE/);
+  assert.match(step(build, "Log in to Docker Hub"), /if: needs\.publish-gate\.outputs\.stable-release == 'true'/);
+  assert.match(step(build, "Export digest"), /if: github\.event_name != 'pull_request'/);
+  assert.match(step(build, "Upload digest"), /if: github\.event_name != 'pull_request'/);
+  assert.match(merge, /if: github\.event_name != 'pull_request'/);
+  assert.match(merge, /environment:.*refs\/heads\/main.*stable-release == 'true'.*production/);
+  assert.match(merge, /type=ref,event=branch/);
+  assert.match(merge, /type=sha,format=short,prefix=sha-/);
+  assert.match(merge, /type=raw,value=latest,enable=\$\{\{ github\.ref == format\('refs\/heads\/\{0\}', 'main'\) \}\}/);
+  assert.doesNotMatch(merge, /type=raw,value=latest,enable=.*dev/);
+  for (const name of [
+    "Log in to Docker Hub",
+    "Extract Docker Hub metadata",
+    "Create Docker Hub manifest list and push",
+    "Inspect Docker Hub image",
+  ]) {
+    assert.match(step(merge, name), /if: needs\.publish-gate\.outputs\.stable-release == 'true'/);
+  }
+});
+
+test("dev sync only accepts the repository's own dev branch", async () => {
+  const workflow = await readFile(
+    new URL("../.github/workflows/sync-dev.yml", import.meta.url),
+    "utf8",
+  );
+  const syncJob = workflow.slice(workflow.indexOf("  sync-dev:"));
+  assert.match(
+    syncJob,
+    /if: >-\n\s+github\.event\.pull_request\.merged == true &&\n\s+github\.event\.pull_request\.head\.ref == 'dev' &&\n\s+github\.event\.pull_request\.head\.repo\.full_name == github\.repository/,
+  );
+});
+
+test("Namespace is reserved for right-sized native, Java CodeQL, and Docker builds", async () => {
+  const workflowNames = [
+    "android",
+    "ci",
+    "codeql",
+    "docker",
+    "docs",
+    "ios",
+    "release",
+    "sync-dev",
+    "testflight",
+  ];
+  const workflows = Object.fromEntries(await Promise.all(workflowNames.map(async (name) => [
+    name,
+    await readFile(new URL(`../.github/workflows/${name}.yml`, import.meta.url), "utf8"),
+  ])));
+
+  const javaCodeql = workflows.codeql.slice(
+    workflows.codeql.indexOf("          - language: java-kotlin"),
+    workflows.codeql.indexOf("    steps:"),
+  );
+  const javascriptCodeql = workflows.codeql.slice(
+    workflows.codeql.indexOf("          - language: javascript-typescript"),
+    workflows.codeql.indexOf("          - language: java-kotlin"),
+  );
+  const dockerBuild = workflows.docker.slice(
+    workflows.docker.indexOf("  build:"),
+    workflows.docker.indexOf("  merge:"),
+  );
+  const dockerMerge = workflows.docker.slice(workflows.docker.indexOf("  merge:"));
+  const releaseAndroid = workflows.release.slice(
+    workflows.release.indexOf("  android:"),
+    workflows.release.indexOf("  extension:"),
+  );
+
+  assert.match(workflows.android, /runs-on: namespace-profile-github-4x8/);
+  assert.match(javaCodeql, /runner: namespace-profile-github-4x8/);
+  assert.match(javascriptCodeql, /runner: ubuntu-latest/);
+  assert.match(dockerBuild, /runs-on: namespace-profile-default/);
+  assert.doesNotMatch(dockerBuild, /docker\/setup-buildx-action|cache-(?:from|to): type=gha/);
+  assert.match(dockerMerge, /runs-on: ubuntu-latest/);
+  assert.match(dockerMerge, /docker\/setup-buildx-action/);
+  assert.match(workflows.ios, /runs-on: namespace-profile-github-macos/);
+  assert.match(releaseAndroid, /runs-on: namespace-profile-github-4x8/);
+  assert.match(workflows.testflight, /runs-on: namespace-profile-github-macos/);
+
+  for (const [name, workflow] of Object.entries(workflows)) {
+    assert.doesNotMatch(workflow, /namespacelabs\/nscloud-cache-action/, `${name} uses paid Namespace caching`);
+    const expectedNamespaceJobs = ["android", "codeql", "docker", "ios", "release", "testflight"].includes(name) ? 1 : 0;
+    assert.equal(
+      workflow.match(/namespace-profile-/g)?.length ?? 0,
+      expectedNamespaceJobs,
+      `${name} has an unexpected number of Namespace jobs`,
+    );
+  }
+});
+
 test("release publications depend on the validated tag and required artifacts", async () => {
   const [release, docker, testflight] = await Promise.all(
     ["release", "docker", "testflight"].map((name) =>

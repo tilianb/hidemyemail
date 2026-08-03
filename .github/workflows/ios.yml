@@ -23,7 +23,7 @@ concurrency:
 jobs:
   build-test:
     name: Build & Test (iOS Simulator)
-    runs-on: macos-15
+    runs-on: namespace-profile-github-macos
     defaults:
       run:
         working-directory: ios

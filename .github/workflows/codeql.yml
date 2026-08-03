@@ -11,7 +11,7 @@ on:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     permissions:
       security-events: write
       packages: read
@@ -24,12 +24,14 @@ jobs:
         include:
           - language: javascript-typescript
             build-mode: none
+            runner: ubuntu-latest
           - language: java-kotlin
             build-mode: manual
+            runner: namespace-profile-github-4x8
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
     - name: Set up JDK 17
       if: matrix.language == 'java-kotlin'

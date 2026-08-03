@@ -1,7 +1,8 @@
 name: Docker
 
 # Builds the self-host container.
-# - PRs and pushes to dev: validate linux/amd64 only (no push), GHA cache keeps iteration fast.
+# - PRs: validate linux/amd64 only (no push) on the Namespace remote builder.
+# - Push to dev: build + push multi-arch :dev and :sha-<short> to GHCR (never :latest).
 # - Push to main: build + push multi-arch :latest, :main, :sha-<short> to GHCR.
 # - Stable SemVer release calls this workflow after release validation; pushes release tags to both registries.
 
@@ -13,7 +14,7 @@ on:
       DOCKERHUB_TOKEN:
         required: true
   push:
-    branches: ['main']
+    branches: ['main', 'dev']
     paths:
       - "docker/**"
       - "worker/**"
@@ -54,12 +55,12 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Require main or a release tag from main
+      - name: Require dev, main, or a release tag from main
         id: ref
         run: |
           echo "stable-release=false" >> "$GITHUB_OUTPUT"
           if [[ "$GITHUB_EVENT_NAME" != "push" ]]; then exit 0; fi
-          if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then exit 0; fi
+          if [[ "$GITHUB_REF" == "refs/heads/main" || "$GITHUB_REF" == "refs/heads/dev" ]]; then exit 0; fi
           tag="${GITHUB_REF#refs/tags/}"
           [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || exit 1
           git fetch origin main
@@ -80,7 +81,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
           cache: npm
@@ -99,9 +100,9 @@ jobs:
     environment: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || needs.publish-gate.outputs.stable-release == 'true')) && 'production' || null }}
     strategy:
       matrix:
-        # Validation-only runs (PRs, dev pushes) build linux/amd64 only; main pushes build both.
-        include: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/dev') && fromJSON('[{"os":"ubuntu-latest","platform":"linux/amd64"}]') || fromJSON('[{"os":"ubuntu-latest","platform":"linux/amd64"},{"os":"ubuntu-24.04-arm","platform":"linux/arm64"}]') }}
-    runs-on: ${{ matrix.os }}
+        # PRs validate linux/amd64 only; branch and release publications build both architectures.
+        include: ${{ github.event_name == 'pull_request' && fromJSON('[{"platform":"linux/amd64"}]') || fromJSON('[{"platform":"linux/amd64"},{"platform":"linux/arm64"}]') }}
+    runs-on: namespace-profile-default
 
     steps:
       - name: Checkout
@@ -117,11 +118,8 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
-
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/dev'
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
         with:
           registry: ${{ env.REGISTRY }}
@@ -150,21 +148,17 @@ jobs:
             org.opencontainers.image.licenses=MIT
 
       - name: Build for validation
-        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/dev'
+        if: github.event_name == 'pull_request'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           file: docker/Dockerfile
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          push: false
-          cache-from: type=gha,scope=build-${{ matrix.platform }}
-          cache-to: type=gha,mode=max,scope=build-${{ matrix.platform }}
-          provenance: true
-          sbom: true
+          outputs: type=cacheonly
 
       - name: Build and push by digest
-        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/dev'
+        if: github.event_name != 'pull_request'
         id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
@@ -172,26 +166,24 @@ jobs:
           file: docker/Dockerfile
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Docker Hub only receives release (tag) builds; main/sha stay on GHCR.
+          # Docker Hub only receives release (tag) builds; branch/sha tags stay on GHCR.
           outputs: |
             type=image,name=${{ env.GHCR_IMAGE }},push-by-digest=true,name-canonical=true,push=true
             ${{ needs.publish-gate.outputs.stable-release == 'true' && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.DOCKERHUB_IMAGE) || '' }}
-          cache-from: type=gha,scope=build-${{ matrix.platform }}
-          cache-to: type=gha,mode=max,scope=build-${{ matrix.platform }}
           # Disabled: attestation manifests break push-by-digest manifest merge
           # (different index digest per registry; outputs.digest reports only one).
           provenance: false
           sbom: false
 
       - name: Export digest
-        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/dev'
+        if: github.event_name != 'pull_request'
         run: |
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
 
       - name: Upload digest
-        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/dev'
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: digests-${{ github.run_id }}-${{ strategy.job-index }}
@@ -202,15 +194,13 @@ jobs:
 
   merge:
     name: Merge Multi-Arch Manifests
-    if: github.event_name != 'pull_request' && github.ref != 'refs/heads/dev'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     needs: [publish-gate, build]
     permissions:
       contents: read
       packages: write
-    environment:
-      name: production
-      url: https://app.hidemyemail.dev
+    environment: ${{ (github.ref == 'refs/heads/main' || needs.publish-gate.outputs.stable-release == 'true') && 'production' || null }}
     steps:
       - name: Download digests
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -237,7 +227,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # GHCR: full set — branch (main), sha, semver, and latest on main.
+      # GHCR: branch (dev/main), sha, semver, and latest on main only.
       - name: Extract GHCR metadata
         id: meta-ghcr
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6

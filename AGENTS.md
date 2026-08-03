@@ -29,6 +29,9 @@ Do not add:
 - Observations already captured in the file
 - General best practices (only project-specific ones)
 - Redundant restatements of existing entries
+- Machine-specific paths, device names, host OS quirks, or instructions tied
+  to one agent's environment; describe required tool versions and portable
+  environment discovery instead
 
 ## What this project is
 
@@ -72,10 +75,10 @@ built dashboard assets.
   `ApiClient.kt` and `APIClient.swift` in feature parity. Build:
   `cd android && ./gradlew :app:assembleDebug` (needs `JAVA_HOME` +
   `ANDROID_HOME`). CI: `.github/workflows/android.yml` (build + lint).
-- **Toolchain quirk:** Homebrew cannot install anything on this Mac (macOS 27
-  beta → `unknown or unsupported macOS version`). The Android toolchain is
-  hand-installed — source `~/dev-tools/env.sh` for JDK 21, Gradle, Android
-  SDK 35, and PATH.
+- Android builds require JDK 21 and Android SDK 35. Discover the installed
+  toolchains in the current environment and set `JAVA_HOME`, `ANDROID_HOME`,
+  and `PATH` accordingly; do not assume a package manager, fixed filesystem
+  location, or host-specific setup script.
 
 ## Build & test
 
