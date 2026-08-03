@@ -17,14 +17,14 @@ struct MFAView: View {
                     .foregroundStyle(Theme.accent)
                 Text("Two-Factor Authentication")
                     .font(Theme.display(24, .bold))
-                Text("Enter the 6-digit code from your authenticator app, or an 8-character backup code.")
+                Text("Enter the 6-digit code from your authenticator app, or a 128-bit grouped backup code.")
                     .font(.footnote)
                     .foregroundStyle(Theme.textSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
 
                 TextField("Code", text: $code)
-                    // ASCII (not numberPad): backup codes are 8 alphanumeric
+                    // ASCII (not numberPad): backup codes are grouped alphanumeric text
                     // characters, not just digits. The Worker normalises case
                     // and strips separators, so disable autocorrect/caps to
                     // avoid mangling what the user types.

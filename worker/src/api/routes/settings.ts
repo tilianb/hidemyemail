@@ -101,9 +101,10 @@ export function settingsRoutes() {
     // Store pending (not yet enabled) secret. Conditional ON CONFLICT keeps an
     // enabled row immutable as a second line of defence against races between
     // the check above and the write.
-    await c.env.DB.prepare(
-      "INSERT INTO mfa (user_id, totp_secret, totp_enabled) VALUES (?, ?, 0) ON CONFLICT(user_id) DO UPDATE SET totp_secret = excluded.totp_secret, totp_enabled = 0, totp_backup_codes = NULL WHERE totp_enabled = 0"
-    ).bind(userId, encryptedSecret).run();
+    const stored = await c.env.DB.prepare(
+      "INSERT INTO mfa (user_id, totp_secret, totp_enabled) SELECT ?, ?, 0 FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL AND auth_version = ? ON CONFLICT(user_id) DO UPDATE SET totp_secret = excluded.totp_secret, totp_enabled = 0, totp_backup_codes = NULL WHERE totp_enabled = 0"
+    ).bind(userId, encryptedSecret, userId, c.get("authVersion")).run();
+    if (stored.meta.changes !== 1) return c.json({ error: "Session expired" }, 401);
 
     const user = await c.env.DB.prepare("SELECT name FROM users WHERE id = ?").bind(userId).first<{ name: string | null }>();
     const account = user?.name || (userId === 1 ? "Admin" : `User ${userId}`);
@@ -133,15 +134,17 @@ export function settingsRoutes() {
 
     const secret = await decryptDestination(mfa.totp_secret, c.env.DESTINATION_ENCRYPTION_KEY);
 
-    if (!(await verifyTOTP(secret, code))) {
+    const counter = await verifyTOTP(secret, code);
+    if (counter === null) {
       return c.json({ error: "Code does not match — check your authenticator app clock" }, 400);
     }
 
     const { plain, hashed } = await generateBackupCodes();
 
-    await c.env.DB.prepare(
-      "UPDATE mfa SET totp_enabled = 1, totp_backup_codes = ? WHERE user_id = ?"
-    ).bind(JSON.stringify(hashed), userId).run();
+    const activated = await c.env.DB.prepare(
+      "UPDATE mfa SET totp_enabled = 1, totp_backup_codes = ?, totp_last_used_counter = ? WHERE user_id = ? AND totp_enabled = 0 AND EXISTS (SELECT 1 FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL AND auth_version = ?)"
+    ).bind(JSON.stringify(hashed), counter, userId, userId, c.get("authVersion")).run();
+    if (activated.meta.changes !== 1) return c.json({ error: "No pending setup found" }, 400);
 
     return c.json({ ok: true, backupCodes: plain });
   });
@@ -155,8 +158,8 @@ export function settingsRoutes() {
     if (!code) return c.json({ error: "Code required" }, 400);
 
     const mfa = await c.env.DB.prepare(
-      "SELECT totp_secret, totp_backup_codes FROM mfa WHERE user_id = ? AND totp_enabled = 1"
-    ).bind(userId).first<{ totp_secret: string; totp_backup_codes: string | null }>();
+      "SELECT totp_secret, totp_backup_codes, totp_last_used_counter FROM mfa WHERE user_id = ? AND totp_enabled = 1"
+    ).bind(userId).first<{ totp_secret: string; totp_backup_codes: string | null; totp_last_used_counter: number | null }>();
 
     if (!mfa) return c.json({ error: "MFA not enabled" }, 400);
 
@@ -166,13 +169,16 @@ export function settingsRoutes() {
     const secret = await decryptDestination(mfa.totp_secret, c.env.DESTINATION_ENCRYPTION_KEY);
 
     let verified = false;
+    let counter: number | null = null;
 
     if (/^\d{6}$/.test(code)) {
-      verified = await verifyTOTP(secret, code);
+      counter = await verifyTOTP(secret, code);
+      const lastCounter = mfa.totp_last_used_counter;
+      verified = counter !== null && (lastCounter === null || counter > lastCounter);
     } else {
       const normalized = code.replace(/[^A-Z0-9]/gi, "").toUpperCase();
       const hashedCodes: string[] = mfa.totp_backup_codes ? JSON.parse(mfa.totp_backup_codes) : [];
-      verified = (await verifyBackupCode(normalized, hashedCodes)) !== -1;
+      verified = normalized.length === 26 && (await verifyBackupCode(normalized, hashedCodes)) !== -1;
     }
 
     if (!verified) {
@@ -181,8 +187,8 @@ export function settingsRoutes() {
     }
 
     const disabled = await c.env.DB.prepare(
-      "UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL WHERE user_id = ? AND totp_enabled = 1 AND totp_backup_codes IS ?"
-    ).bind(userId, mfa.totp_backup_codes).run();
+      "UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL, totp_last_used_counter = ? WHERE user_id = ? AND totp_enabled = 1 AND totp_backup_codes IS ? AND (? IS NULL OR totp_last_used_counter IS NULL OR totp_last_used_counter < ?) AND EXISTS (SELECT 1 FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL AND auth_version = ?)"
+    ).bind(counter, userId, mfa.totp_backup_codes, counter, counter, userId, c.get("authVersion")).run();
     if (disabled.meta.changes !== 1) {
       markFailedAttempt(c);
       return c.json({ error: "Invalid code" }, 401);
@@ -202,8 +208,8 @@ export function settingsRoutes() {
     }
 
     const mfa = await c.env.DB.prepare(
-      "SELECT totp_secret FROM mfa WHERE user_id = ? AND totp_enabled = 1"
-    ).bind(userId).first<{ totp_secret: string }>();
+      "SELECT totp_secret, totp_last_used_counter FROM mfa WHERE user_id = ? AND totp_enabled = 1"
+    ).bind(userId).first<{ totp_secret: string; totp_last_used_counter: number | null }>();
 
     if (!mfa) return c.json({ error: "MFA not enabled" }, 400);
 
@@ -212,16 +218,22 @@ export function settingsRoutes() {
 
     const secret = await decryptDestination(mfa.totp_secret, c.env.DESTINATION_ENCRYPTION_KEY);
 
-    if (!(await verifyTOTP(secret, code))) {
+    const counter = await verifyTOTP(secret, code);
+    const lastCounter = mfa.totp_last_used_counter;
+    if (counter === null || (lastCounter !== null && counter <= lastCounter)) {
       markFailedAttempt(c);
       return c.json({ error: "Invalid code" }, 401);
     }
 
     const { plain, hashed } = await generateBackupCodes();
 
-    await c.env.DB.prepare(
-      "UPDATE mfa SET totp_backup_codes = ? WHERE user_id = ?"
-    ).bind(JSON.stringify(hashed), userId).run();
+    const regenerated = await c.env.DB.prepare(
+      "UPDATE mfa SET totp_backup_codes = ?, totp_last_used_counter = ? WHERE user_id = ? AND totp_enabled = 1 AND (totp_last_used_counter IS NULL OR totp_last_used_counter < ?) AND EXISTS (SELECT 1 FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL AND auth_version = ?)"
+    ).bind(JSON.stringify(hashed), counter, userId, counter, userId, c.get("authVersion")).run();
+    if (regenerated.meta.changes !== 1) {
+      markFailedAttempt(c);
+      return c.json({ error: "Invalid code" }, 401);
+    }
 
     return c.json({ ok: true, backupCodes: plain });
   });
@@ -276,6 +288,10 @@ export function settingsRoutes() {
     if (!signed || signed.userId !== c.get("userId") || signed.authVersion !== c.get("authVersion") || signed.action !== body.action) {
       return c.json({ error: "Invalid or expired passkey challenge" }, 401);
     }
+    const mfa = await c.env.DB.prepare(
+      "SELECT totp_backup_codes FROM mfa WHERE user_id = ? AND totp_enabled = 1"
+    ).bind(signed.userId).first<{ totp_backup_codes: string | null }>();
+    if (!mfa) return c.json({ error: "MFA not enabled" }, 400);
     const credential = await c.env.DB.prepare(
       "SELECT public_key, sign_count, transports FROM passkey_credentials WHERE id = ? AND user_id = ?"
     ).bind(body.response.id, signed.userId).first<{ public_key: string; sign_count: number; transports: string | null }>();
@@ -322,16 +338,16 @@ export function settingsRoutes() {
 
     if (signed.action === "disable") {
       const disabled = await c.env.DB.prepare(
-        "UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL WHERE user_id = ? AND totp_enabled = 1"
-      ).bind(signed.userId).run();
+        "UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL, totp_last_used_counter = NULL WHERE user_id = ? AND totp_enabled = 1 AND EXISTS (SELECT 1 FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL AND auth_version = ?)"
+      ).bind(signed.userId, signed.userId, signed.authVersion).run();
       if (disabled.meta.changes !== 1) return c.json({ error: "MFA not enabled" }, 400);
       return c.json({ ok: true });
     }
 
     const { plain, hashed } = await (await import("../../lib/totp")).generateBackupCodes();
     const regenerated = await c.env.DB.prepare(
-      "UPDATE mfa SET totp_backup_codes = ? WHERE user_id = ? AND totp_enabled = 1"
-    ).bind(JSON.stringify(hashed), signed.userId).run();
+      "UPDATE mfa SET totp_backup_codes = ? WHERE user_id = ? AND totp_enabled = 1 AND totp_backup_codes IS ? AND EXISTS (SELECT 1 FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL AND auth_version = ?)"
+    ).bind(JSON.stringify(hashed), signed.userId, mfa.totp_backup_codes, signed.userId, signed.authVersion).run();
     if (regenerated.meta.changes !== 1) return c.json({ error: "MFA not enabled" }, 400);
     return c.json({ ok: true, backupCodes: plain });
   });
@@ -448,9 +464,10 @@ export function settingsRoutes() {
 
     const transports = response.response.transports ?? [];
 
-    await c.env.DB.prepare(
-      "INSERT INTO passkey_credentials (id, user_id, public_key, sign_count, transports, device_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-    ).bind(credId, sessionUserId, toBase64url(credential.publicKey), credential.counter, JSON.stringify(transports), deviceName || null, Date.now()).run();
+    const inserted = await c.env.DB.prepare(
+      "INSERT INTO passkey_credentials (id, user_id, public_key, sign_count, transports, device_name, created_at) SELECT ?, ?, ?, ?, ?, ?, ? FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL AND auth_version = ?"
+    ).bind(credId, sessionUserId, toBase64url(credential.publicKey), credential.counter, JSON.stringify(transports), deviceName || null, Date.now(), sessionUserId, c.get("authVersion")).run();
+    if (inserted.meta.changes !== 1) return c.json({ error: "Session expired" }, 401);
 
     deleteCookie(c, "__Host-passkey-reg", { path: "/", secure: true });
 

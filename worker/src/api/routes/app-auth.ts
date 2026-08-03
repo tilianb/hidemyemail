@@ -13,6 +13,7 @@ import {
 } from "../../lib/auth";
 import { consumeAuthArtifact, markFailedAttempt, rateLimitFailures } from "../../lib/auth-security";
 import { clearAuthenticatedCookies } from "../auth-route-helpers";
+import { getRpFromOrigin } from "../../lib/webauthn";
 
 const SESSION_TTL = 60 * 60 * 24 * 7;
 const FRESH_AUTH_TTL = 60 * 10;
@@ -24,6 +25,10 @@ export function appAuthRoutes() {
   r.use("/exchange", rateLimitFailures());
 
   r.post("/authorize", async (c) => {
+    let canonicalOrigin: string;
+    try { canonicalOrigin = getRpFromOrigin(c.env.APP_ORIGIN).expectedOrigin; }
+    catch { return c.json({ error: "Application origin is not configured" }, 500); }
+    if (c.req.header("Origin") !== canonicalOrigin) return c.json({ error: "Forbidden" }, 403);
     const body = await c.req.parseBody();
     const challenge = typeof body.challenge === "string" ? body.challenge : "";
     if (!/^[A-Za-z0-9_-]{43}$/.test(challenge)) {
@@ -33,6 +38,8 @@ export function appAuthRoutes() {
     const sessionCookie = getCookie(c, "__Host-session");
     const principal = sessionCookie ? await verifySession(c.env.SESSION_SECRET, sessionCookie) : null;
     if (principal === null) return c.json({ error: "Unauthorized" }, 401);
+    const { isSessionRevoked } = await import("../../lib/session-revocation");
+    if (await isSessionRevoked(c.env.DB, sessionCookie!)) return c.json({ error: "Unauthorized" }, 401);
 
     const freshAuth = getCookie(c, "__Host-fresh-auth");
     if (!freshAuth || !(await verifyFreshAuth(c.env.SESSION_SECRET, freshAuth, principal.userId, principal.authVersion))) {

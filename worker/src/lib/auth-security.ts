@@ -142,3 +142,30 @@ export async function finalizeMfaBackupCode(
     throw error;
   }
 }
+
+export async function finalizeMfaTotp(
+  db: D1Database,
+  challenge: string,
+  expiresAt: number,
+  userId: number,
+  counter: number,
+): Promise<boolean> {
+  const artifactHash = await sha256Base64url(challenge);
+  await db.prepare("DELETE FROM consumed_auth_artifacts WHERE expires_at <= unixepoch()").run();
+  try {
+    await db.batch([
+      db.prepare(
+        "UPDATE mfa SET totp_last_used_counter = ? WHERE user_id = ? AND (totp_last_used_counter IS NULL OR totp_last_used_counter < ?)"
+      ).bind(counter, userId, counter),
+      db.prepare(
+        "INSERT INTO consumed_auth_artifacts (artifact_hash, expires_at) VALUES (?, CASE WHEN changes() = 1 AND ? > unixepoch() THEN ? ELSE NULL END)"
+      ).bind(artifactHash, expiresAt, expiresAt),
+    ]);
+    return true;
+  } catch (error) {
+    const message = String(error);
+    if (message.includes("UNIQUE constraint failed: consumed_auth_artifacts.artifact_hash") ||
+        message.includes("NOT NULL constraint failed: consumed_auth_artifacts.expires_at")) return false;
+    throw error;
+  }
+}
