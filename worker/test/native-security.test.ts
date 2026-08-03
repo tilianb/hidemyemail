@@ -4,6 +4,7 @@ import { createApp } from "../src/api/app";
 import { derivePassphraseHash, hashPassword, signFreshAuth, signSession, verifyFreshAuth } from "../src/lib/auth";
 import { encryptDestination } from "../src/lib/crypto";
 import { hashBackupCode } from "../src/lib/totp";
+import { revokeSession } from "../src/lib/session-revocation";
 
 let testEnv: Record<string, unknown>;
 let bearer: string;
@@ -25,6 +26,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   await (env.DB as D1Database).prepare("DELETE FROM rate_limits").run();
   await (env.DB as D1Database).prepare("DELETE FROM consumed_auth_artifacts").run();
+  await (env.DB as D1Database).prepare("DELETE FROM revoked_sessions").run();
   await (env.DB as D1Database).prepare("DELETE FROM passkey_credentials WHERE id LIKE 'reauth-test-%'").run();
   await (env.DB as D1Database).prepare("DELETE FROM mfa WHERE user_id = 1").run();
   await (env.DB as D1Database).prepare("DELETE FROM users WHERE id = 2").run();
@@ -359,6 +361,23 @@ describe("native Security browser handoff", () => {
       body: new URLSearchParams({ code }).toString(),
     }, testEnv);
     expect(replay.status).toBe(401);
+  });
+
+  test("GET ignores a revoked session cookie when checking the handoff account", async () => {
+    const hash = await derivePassphraseHash("other", testEnv.AUTH_PASSWORD_SALT as string);
+    await (env.DB as D1Database).prepare("INSERT INTO users (id, passphrase_hash, created_at) VALUES (2, ?, ?)")
+      .bind(hash, Date.now()).run();
+    const revokedCookie = await signSession("native-security-secret", 2, 3600, 0);
+    const minted = await createApp().request("/api/settings/security-handoff", {
+      method: "POST", headers: nativeHeaders(true),
+    }, testEnv);
+    const url = new URL((await minted.json() as { url: string }).url);
+    await revokeSession(env.DB as D1Database, revokedCookie, Math.floor(Date.now() / 1000) + 3600);
+    const response = await createApp().request(url.pathname + url.search, {
+      headers: { Cookie: `__Host-session=${revokedCookie}` },
+    }, testEnv);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("Continue to Security settings");
   });
 
   test("POST rejects missing and cross-origin Origin", async () => {

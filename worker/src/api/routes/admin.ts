@@ -101,6 +101,26 @@ export function adminRoutes() {
 
     const { sendEmail } = await c.req.json<{ sendEmail?: boolean }>().catch(() => ({} as any));
 
+    let delivery: { email: string; origin: string } | null = null;
+    if (sendEmail) {
+      const dest = await db.prepare("SELECT email FROM destinations WHERE user_id = ? AND is_default = 1").bind(id).first<{ email: string }>();
+      if (!dest) return c.json({ error: "User has no default destination email" }, 400);
+      const { decryptDestination } = await import("../../lib/crypto");
+      let email: string;
+      try {
+        email = await decryptDestination(dest.email, c.env.DESTINATION_ENCRYPTION_KEY);
+      } catch {
+        return c.json({ error: "Recovery email is not configured" }, 500);
+      }
+      let origin: string;
+      try {
+        origin = getRpFromOrigin(c.env.APP_ORIGIN).expectedOrigin;
+      } catch {
+        return c.json({ error: "Application origin is not configured" }, 500);
+      }
+      delivery = { email, origin };
+    }
+
     const token = generateRecoveryToken();
     const tokenHash = await recoveryDigest(c.env.SESSION_SECRET, "token", token);
     const expiresAt = Date.now() + 24 * 3600 * 1000; // 24 hours
@@ -109,19 +129,10 @@ export function adminRoutes() {
       .bind(tokenHash, expiresAt, id, c.get("authVersion")).run();
     if (issued.meta.changes !== 1) return c.json({ error: "User not found" }, 404);
 
-    if (sendEmail) {
-      const { decryptDestination } = await import("../../lib/crypto");
+    if (delivery) {
       const { sendRaw } = await import("../../lib/ses");
       const { buildRecoveryEmail } = await import("../../lib/emails");
-      
-      const dest = await db.prepare("SELECT email FROM destinations WHERE user_id = ? AND is_default = 1").bind(id).first<{ email: string }>();
-      if (!dest) return c.json({ error: "User has no default destination email" }, 400);
-
-      const email = await decryptDestination(dest.email, c.env.DESTINATION_ENCRYPTION_KEY);
-      let origin: string;
-      try { origin = getRpFromOrigin(c.env.APP_ORIGIN).expectedOrigin; }
-      catch { return c.json({ error: "Application origin is not configured" }, 500); }
-      const url = `${origin}/recover?token=${encodeURIComponent(token)}`;
+      const url = `${delivery.origin}/recover?token=${encodeURIComponent(token)}`;
       // rawBase64 will be built in the sendRaw block with mainGlobalDomain
 
       const sesAccessKeyId = await getEnvWithOverride(db, c.env, "ses_access_key_id");
@@ -136,8 +147,8 @@ export function adminRoutes() {
           region: sesRegion
         }, {
           from: `HideMyEmail <noreply@${mainGlobalDomain}>`,
-          to: email,
-          rawBase64: buildRecoveryEmail(email, url, mainGlobalDomain)
+          to: delivery.email,
+          rawBase64: buildRecoveryEmail(delivery.email, url, mainGlobalDomain)
         });
       }
       return c.json({ ok: true });

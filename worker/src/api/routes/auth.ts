@@ -7,6 +7,7 @@ import { getEnvWithOverride, getMainGlobalDomain } from "../../lib/settings";
 import { consumeAuthArtifact, finalizeMfaBackupCode, finalizeMfaTotp, finalizePasskeyAssertion, markFailedAttempt, rateLimitFailures } from "../../lib/auth-security";
 import { clearAuthenticatedCookies, randomSixDigitCode, setAuthenticatedCookies, wantsToken } from "../auth-route-helpers";
 import { recoveryDigest } from "../../lib/recovery-auth";
+import { getRpFromOrigin } from "../../lib/webauthn";
 
 const SESSION_TTL = 60 * 60 * 24 * 7; // 7 days
 const FRESH_AUTH_TTL = 60 * 10; // 10 minutes
@@ -196,7 +197,7 @@ export function authRoutes() {
     const origin = c.req.header("Origin");
     if (origin) {
       let canonicalOrigin: string;
-      try { canonicalOrigin = new URL(c.env.APP_ORIGIN!).origin; }
+      try { canonicalOrigin = getRpFromOrigin(c.env.APP_ORIGIN).expectedOrigin; }
       catch { return c.json({ error: "Application origin is not configured" }, 500); }
       if (origin !== canonicalOrigin) return c.json({ error: "Forbidden" }, 403);
     }
@@ -607,9 +608,6 @@ export function authRoutes() {
       markFailedAttempt(c);
       return c.json({ error: "Invalid username or recovery code" }, 400);
     }
-
-    // Consume the used code so it can't be replayed.
-    hashed.splice(idx, 1);
 
     const { generatePassphrase } = await import("../../lib/passphrase");
     const newPassphrase = generatePassphrase();

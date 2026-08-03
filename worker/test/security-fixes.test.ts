@@ -59,12 +59,16 @@ beforeEach(async () => {
   await db.prepare("DELETE FROM passkey_credentials").run();
   await db.prepare("DELETE FROM api_keys").run();
   await db.prepare("DELETE FROM consumed_auth_artifacts").run();
+  await db.prepare("DELETE FROM destinations WHERE user_id > 1").run();
   await db.prepare("DELETE FROM users WHERE id > 1").run();
   await db.prepare("UPDATE users SET active = 1 WHERE id = 1").run();
   await db.prepare("DELETE FROM rate_limits").run();
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 test("P1: DELETE /domains/:id returns 404 for another user's domain (no IDOR leak)", async () => {
   const app = createApp();
@@ -325,6 +329,9 @@ test("MFA login challenge is one-use while independent logins remain valid", asy
 });
 
 test("the same TOTP step cannot complete two independent login challenges", async () => {
+  const stableNow = Math.floor(Date.now() / 30_000) * 30_000 + 15_000;
+  vi.useFakeTimers();
+  vi.setSystemTime(stableNow);
   const app = createApp();
   const password = "totp-replay-password";
   const userId = await makeUser();
@@ -353,6 +360,33 @@ test("the same TOTP step cannot complete two independent login challenges", asyn
   const row = await (env.DB as D1Database).prepare("SELECT totp_last_used_counter FROM mfa WHERE user_id = ?")
     .bind(userId).first<{ totp_last_used_counter: number | null }>();
   expect(row?.totp_last_used_counter).toBe(counter);
+  vi.useRealTimers();
+});
+
+test("backup-code regeneration loses a concurrent MFA disable race", async () => {
+  const stableNow = Math.floor(Date.now() / 30_000) * 30_000 + 15_000;
+  vi.useFakeTimers();
+  vi.setSystemTime(stableNow);
+  const app = createApp();
+  const userId = await makeUser(1);
+  const { secret, code } = await currentTotp();
+  await (env.DB as D1Database).prepare(
+    "INSERT INTO mfa (user_id, totp_secret, totp_enabled, totp_backup_codes) VALUES (?, ?, 1, '[]')"
+  ).bind(userId, await encryptDestination(secret, testEnv.DESTINATION_ENCRYPTION_KEY)).run();
+  const cookie = `__Host-session=${await signSession("sek", userId, 3600)}; __Host-fresh-auth=${await signFreshAuth("sek", userId, 300)}`;
+  const request = (path: string) => app.request(path, {
+    method: "POST", headers: { cookie, "Content-Type": "application/json" }, body: JSON.stringify({ code }),
+  }, testEnv);
+
+  const responses = await Promise.all([
+    request("/api/settings/mfa/backup-codes"),
+    request("/api/settings/mfa/disable"),
+  ]);
+  expect(responses.filter(response => response.status === 200)).toHaveLength(1);
+  const enabled = (await (env.DB as D1Database).prepare("SELECT totp_enabled FROM mfa WHERE user_id = ?")
+    .bind(userId).first<{ totp_enabled: number }>())?.totp_enabled;
+  expect(enabled).toBe(responses[1]?.status === 200 ? 0 : 1);
+  vi.useRealTimers();
 });
 
 test("P3: /api/settings/mfa/setup refuses to overwrite enabled MFA (re-enrol bypass)", async () => {
@@ -442,6 +476,22 @@ test("administrative recovery issuance requires fresh authentication", async () 
     .bind(userId).first<{ recovery_token: string | null; recovery_token_hash: string | null }>();
   expect(row?.recovery_token).toBeNull();
   expect(row?.recovery_token_hash).toBe(await recoveryDigest(testEnv.SESSION_SECRET, "token", token));
+});
+
+test("emailed administrative recovery validates prerequisites before replacing recovery state", async () => {
+  const app = createApp();
+  const userId = await makeUser();
+  await (env.DB as D1Database).prepare("UPDATE users SET recovery_token_hash = 'existing' WHERE id = ?").bind(userId).run();
+  await (env.DB as D1Database).prepare(
+    "INSERT INTO destinations (user_id, email, email_hash, token, is_default, created_at) VALUES (?, ?, ?, ?, 1, ?)"
+  ).bind(userId, await encryptDestination("recovery@example.com", testEnv.DESTINATION_ENCRYPTION_KEY), `recovery-${userId}`, `token-${userId}`, Date.now()).run();
+  const cookie = `__Host-session=${await signSession("sek", 1, 3600)}; __Host-fresh-auth=${await signFreshAuth("sek", 1, 300)}`;
+  const response = await app.request(`/api/admin/users/${userId}/recovery`, {
+    method: "POST", headers: { cookie, "Content-Type": "application/json" }, body: JSON.stringify({ sendEmail: true }),
+  }, { ...testEnv, APP_ORIGIN: "not-an-origin" });
+  expect(response.status).toBe(500);
+  expect((await (env.DB as D1Database).prepare("SELECT recovery_token_hash FROM users WHERE id = ?")
+    .bind(userId).first<{ recovery_token_hash: string }>())?.recovery_token_hash).toBe("existing");
 });
 
 test("P4: generated recovery passphrases have at least 100 bits of entropy from current word list", () => {

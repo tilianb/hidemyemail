@@ -2,6 +2,11 @@
 
 ## What Has Worked
 
+**2026-08-03 — Recovery issuance ordering**
+- Observation: Replacing administrative recovery state before validating the encrypted destination and canonical application origin can invalidate a usable recovery token even though email issuance cannot proceed.
+- Action: Resolve and validate all recovery-email prerequisites before the compare-and-swap that installs new recovery state, then reuse those resolved values for delivery.
+- Confidence: high
+
 **2026-08-03 — Authentication-generation fencing**
 - Observation: The Worker session guard captures `auth_version` before route execution, so recovery or deletion can rotate credentials while an already-authorized request is still preparing a durable API key, passkey, MFA enrollment, or recovery-code write.
 - Action: Bind every final credential-minting SQL statement to the live user's active, non-deleted `auth_version` in that same statement, and never return plaintext credentials when the generation predicate loses.

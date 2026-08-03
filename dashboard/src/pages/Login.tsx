@@ -191,7 +191,7 @@ export function Login() {
                   id="mfa-code"
                   className="input"
                   type="text"
-                  inputMode="numeric"
+                  inputMode="text"
                   value={mfaCode}
                   onChange={e => setMfaCode(e.target.value.replace(/\s/g, ""))}
                   placeholder="000000 or XXXX-XXXX-…"

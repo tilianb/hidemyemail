@@ -318,6 +318,7 @@ test("account-bound passkey MFA challenge restricts credentials and rejects miss
     authVersion: 4,
     challenge: body.challenge,
     parentArtifactHash: await sha256Base64url(mfaToken),
+    expiresAt: expect.any(Number),
   });
 });
 
@@ -350,6 +351,7 @@ test("bound passkey challenge rejects stale auth version and issues native token
     userId: 1,
     authVersion: 8,
     parentArtifactHash: await sha256Base64url(currentToken),
+    expiresAt: expect.any(Number),
   });
 });
 

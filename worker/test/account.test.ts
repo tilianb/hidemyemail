@@ -267,7 +267,9 @@ test("delete: valid → revokes credentials before restoration and blocks copied
   await DB().prepare(
     "INSERT INTO api_keys (user_id, name, token_hash, token_prefix, created_at) VALUES (?, 'old-key', ?, 'hmek_old', ?)"
   ).bind(userId, crypto.randomUUID().replaceAll("-", "").padEnd(64, "0"), Date.now()).run();
-  await DB().prepare("UPDATE users SET recovery_codes = '[\"old-recovery\"]' WHERE id = ?").bind(userId).run();
+  await DB().prepare(
+    "UPDATE users SET recovery_codes = '[\"old-recovery\"]', recovery_token = 'old-token', recovery_expires_at = 1, recovery_mfa_code = '123456', recovery_token_hash = 'old-token-hash', recovery_code_hash = 'old-code-hash', recovery_code_expires_at = 2, recovery_code_attempts = 4, recovery_code_sent_at = 3, recovery_code_sends = 5 WHERE id = ?"
+  ).bind(userId).run();
 
   const res = await app.request("/api/account/delete", {
     method: "POST",
@@ -284,8 +286,8 @@ test("delete: valid → revokes credentials before restoration and blocks copied
 
   // DB state: deleted_at is set, active=0, forwarding=0
   const row = await DB().prepare(
-    "SELECT active, forwarding, deleted_at FROM users WHERE id = ?"
-  ).bind(userId).first<{ active: number; forwarding: number; deleted_at: number | null }>();
+    "SELECT active, forwarding, deleted_at, recovery_codes, recovery_token, recovery_expires_at, recovery_mfa_code, recovery_token_hash, recovery_code_hash, recovery_code_expires_at, recovery_code_attempts, recovery_code_sent_at, recovery_code_sends FROM users WHERE id = ?"
+  ).bind(userId).first<Record<string, number | string | null>>();
   expect(row?.active).toBe(0);
   expect(row?.forwarding).toBe(0);
   expect(row?.deleted_at).toBeTypeOf("number");
@@ -295,8 +297,12 @@ test("delete: valid → revokes credentials before restoration and blocks copied
   const mfa = await DB().prepare("SELECT totp_enabled, totp_secret, totp_backup_codes FROM mfa WHERE user_id = ?")
     .bind(userId).first<{ totp_enabled: number; totp_secret: string | null; totp_backup_codes: string | null }>();
   expect(mfa).toMatchObject({ totp_enabled: 0, totp_secret: null, totp_backup_codes: null });
-  expect((await DB().prepare("SELECT recovery_codes FROM users WHERE id = ?").bind(userId)
-    .first<{ recovery_codes: string | null }>())?.recovery_codes).toBeNull();
+  expect(row).toMatchObject({
+    recovery_codes: null, recovery_token: null, recovery_expires_at: null,
+    recovery_mfa_code: null, recovery_token_hash: null, recovery_code_hash: null,
+    recovery_code_expires_at: null, recovery_code_attempts: 0,
+    recovery_code_sent_at: null, recovery_code_sends: 0,
+  });
 
   // Subsequent login with correct passphrase must be blocked (active=0 / deleted)
   const loginRes = await app.request("/api/login", {

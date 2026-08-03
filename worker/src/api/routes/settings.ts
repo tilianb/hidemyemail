@@ -228,7 +228,7 @@ export function settingsRoutes() {
     const { plain, hashed } = await generateBackupCodes();
 
     const regenerated = await c.env.DB.prepare(
-      "UPDATE mfa SET totp_backup_codes = ?, totp_last_used_counter = ? WHERE user_id = ? AND (totp_last_used_counter IS NULL OR totp_last_used_counter < ?) AND EXISTS (SELECT 1 FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL AND auth_version = ?)"
+      "UPDATE mfa SET totp_backup_codes = ?, totp_last_used_counter = ? WHERE user_id = ? AND totp_enabled = 1 AND (totp_last_used_counter IS NULL OR totp_last_used_counter < ?) AND EXISTS (SELECT 1 FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL AND auth_version = ?)"
     ).bind(JSON.stringify(hashed), counter, userId, counter, userId, c.get("authVersion")).run();
     if (regenerated.meta.changes !== 1) {
       markFailedAttempt(c);
@@ -288,6 +288,10 @@ export function settingsRoutes() {
     if (!signed || signed.userId !== c.get("userId") || signed.authVersion !== c.get("authVersion") || signed.action !== body.action) {
       return c.json({ error: "Invalid or expired passkey challenge" }, 401);
     }
+    const mfa = await c.env.DB.prepare(
+      "SELECT totp_backup_codes FROM mfa WHERE user_id = ? AND totp_enabled = 1"
+    ).bind(signed.userId).first<{ totp_backup_codes: string | null }>();
+    if (!mfa) return c.json({ error: "MFA not enabled" }, 400);
     const credential = await c.env.DB.prepare(
       "SELECT public_key, sign_count, transports FROM passkey_credentials WHERE id = ? AND user_id = ?"
     ).bind(body.response.id, signed.userId).first<{ public_key: string; sign_count: number; transports: string | null }>();
@@ -342,8 +346,8 @@ export function settingsRoutes() {
 
     const { plain, hashed } = await (await import("../../lib/totp")).generateBackupCodes();
     const regenerated = await c.env.DB.prepare(
-      "UPDATE mfa SET totp_backup_codes = ? WHERE user_id = ? AND totp_enabled = 1 AND EXISTS (SELECT 1 FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL AND auth_version = ?)"
-    ).bind(JSON.stringify(hashed), signed.userId, signed.userId, signed.authVersion).run();
+      "UPDATE mfa SET totp_backup_codes = ? WHERE user_id = ? AND totp_enabled = 1 AND totp_backup_codes IS ? AND EXISTS (SELECT 1 FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL AND auth_version = ?)"
+    ).bind(JSON.stringify(hashed), signed.userId, mfa.totp_backup_codes, signed.userId, signed.authVersion).run();
     if (regenerated.meta.changes !== 1) return c.json({ error: "MFA not enabled" }, 400);
     return c.json({ ok: true, backupCodes: plain });
   });
