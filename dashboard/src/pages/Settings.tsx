@@ -902,14 +902,14 @@ export function Settings() {
                 <input
                   className="input"
                   type="text"
-                  inputMode="numeric"
+                  inputMode="text"
                   value={disableCode}
                   onChange={e => setDisableCode(e.target.value.replace(/\s/g, ""))}
-                  placeholder="000000 or XXXX-XXXX"
+                  placeholder="000000 or XXXX-XXXX-…"
                   autoFocus
                   autoComplete="one-time-code"
                   disabled={disableLoading}
-                  maxLength={20}
+                  maxLength={32}
                 />
               </div>
               <div className="inline-actions">
@@ -1484,9 +1484,9 @@ export function Settings() {
               {enabled && (
                 <div className="field field-tight">
                   <label className="field-label" htmlFor="reauth-code">Authentication or backup code</label>
-                  <input id="reauth-code" className="input" type="text" inputMode="numeric" autoComplete="one-time-code"
-                    value={reauthCode} onChange={e => setReauthCode(e.target.value.replace(/\s/g, "").slice(0, 20))}
-                    placeholder="000000 or XXXX-XXXX" disabled={reauthLoading} />
+                  <input id="reauth-code" className="input" type="text" inputMode="text" autoComplete="one-time-code"
+                    value={reauthCode} onChange={e => setReauthCode(e.target.value.replace(/\s/g, "").slice(0, 32))}
+                    placeholder="000000 or XXXX-XXXX-…" disabled={reauthLoading} />
                 </div>
               )}
               {reauthError && <p className="form-error" role="alert">{reauthError}</p>}

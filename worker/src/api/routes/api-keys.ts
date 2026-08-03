@@ -40,10 +40,11 @@ export function apiKeyRoutes() {
 
     const token = generateApiToken();
     const row = await c.env.DB.prepare(
-      "INSERT INTO api_keys (user_id, name, token_hash, token_prefix, created_at) VALUES (?,?,?,?,?) RETURNING id, name, token_prefix, created_at"
-    ).bind(userId, trimmed, await sha256Hex(token), tokenPrefix(token), Date.now())
+      "INSERT INTO api_keys (user_id, name, token_hash, token_prefix, created_at) SELECT ?, ?, ?, ?, ? FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL AND auth_version = ? RETURNING id, name, token_prefix, created_at"
+    ).bind(userId, trimmed, await sha256Hex(token), tokenPrefix(token), Date.now(), userId, c.get("authVersion"))
       .first<{ id: number; name: string; token_prefix: string; created_at: number }>();
 
+    if (!row) return c.json({ error: "Session expired" }, 401);
     return c.json({ ...row!, token });
   });
 

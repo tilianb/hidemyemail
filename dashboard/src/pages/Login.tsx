@@ -191,14 +191,14 @@ export function Login() {
                   id="mfa-code"
                   className="input"
                   type="text"
-                  inputMode="numeric"
+                  inputMode="text"
                   value={mfaCode}
                   onChange={e => setMfaCode(e.target.value.replace(/\s/g, ""))}
-                  placeholder="000000 or XXXX-XXXX"
+                  placeholder="000000 or XXXX-XXXX-…"
                   autoFocus
                   autoComplete="one-time-code"
                   disabled={loading}
-                  maxLength={20}
+                  maxLength={32}
                 />
               </div>
               {err && (

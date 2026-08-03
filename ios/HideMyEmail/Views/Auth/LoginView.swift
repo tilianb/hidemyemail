@@ -182,7 +182,7 @@ struct RecoverWithCodeView: View {
                     } header: {
                         Text("New Passphrase")
                     } footer: {
-                        Text("Save this in your password manager now — it won't be shown again.")
+                        Text("Save this in your password manager now — it won't be shown again. Your old recovery codes are no longer valid; generate a new set in Security settings.")
                     }
                     Section {
                         Button("Continue to App") {

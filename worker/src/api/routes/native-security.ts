@@ -38,17 +38,22 @@ export function nativeSecurityRoutes() {
       : !!user?.passphrase_hash && timingSafeEqual(await derivePassphraseHash(body.passphrase, c.env.AUTH_PASSWORD_SALT), user.passphrase_hash) &&
         (!user.passphrase_verifier || await verifyPassphraseVerifier(body.passphrase, user.passphrase_verifier));
 
-    const mfa = await c.env.DB.prepare("SELECT totp_secret, totp_backup_codes FROM mfa WHERE user_id = ? AND totp_enabled = 1")
-      .bind(userId).first<{ totp_secret: string; totp_backup_codes: string | null }>();
+    const mfa = await c.env.DB.prepare("SELECT totp_secret, totp_backup_codes, totp_last_used_counter FROM mfa WHERE user_id = ? AND totp_enabled = 1")
+      .bind(userId).first<{ totp_secret: string; totp_backup_codes: string | null; totp_last_used_counter: number | null }>();
     let mfaValid = !mfa;
     let remainingBackupCodes: string[] | null = null;
+    let totpCounter: number | null = null;
     if (mfa && typeof body.code === "string") {
       const secret = await decryptDestination(mfa.totp_secret, c.env.DESTINATION_ENCRYPTION_KEY);
-      if (/^\d{6}$/.test(body.code)) mfaValid = await verifyTOTP(secret, body.code);
+      if (/^\d{6}$/.test(body.code)) {
+        totpCounter = await verifyTOTP(secret, body.code);
+        const lastCounter = mfa.totp_last_used_counter;
+        mfaValid = totpCounter !== null && (lastCounter === null || totpCounter > lastCounter);
+      }
       if (!mfaValid) {
         const normalized = body.code.replace(/[^A-Z0-9]/gi, "").toUpperCase();
         const hashes: string[] = mfa.totp_backup_codes ? JSON.parse(mfa.totp_backup_codes) : [];
-        const index = normalized.length === 8 ? await verifyBackupCode(normalized, hashes) : -1;
+        const index = normalized.length === 26 ? await verifyBackupCode(normalized, hashes) : -1;
         if (index !== -1) {
           hashes.splice(index, 1);
           remainingBackupCodes = hashes;
@@ -59,6 +64,11 @@ export function nativeSecurityRoutes() {
     if (!passphraseValid || !mfaValid) {
       markFailedAttempt(c);
       return c.json({ error: "Invalid credentials" }, 401);
+    }
+    if (totpCounter !== null) {
+      const advanced = await c.env.DB.prepare("UPDATE mfa SET totp_last_used_counter = ? WHERE user_id = ? AND (totp_last_used_counter IS NULL OR totp_last_used_counter < ?)")
+        .bind(totpCounter, userId, totpCounter).run();
+      if (advanced.meta.changes !== 1) return c.json({ error: "Invalid credentials" }, 401);
     }
     if (remainingBackupCodes && mfa) {
       const consumed = await c.env.DB.prepare("UPDATE mfa SET totp_backup_codes = ? WHERE user_id = ? AND totp_backup_codes = ?")

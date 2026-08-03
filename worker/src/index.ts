@@ -10,8 +10,9 @@ export default {
 
   async scheduled(_controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
     const now = Date.now();
-    const { purgeDeletedAccounts, pruneOldEvents } = await import("./lib/purge");
+    const { purgeDeletedAccounts, pruneOldEvents, pruneExpiredRevokedSessions } = await import("./lib/purge");
     await purgeDeletedAccounts(env.DB, now);
     await pruneOldEvents(env.DB, now);
+    await pruneExpiredRevokedSessions(env.DB, now);
   },
 } satisfies ExportedHandler<Env>;

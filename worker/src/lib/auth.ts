@@ -221,7 +221,8 @@ export async function verifySecurityHandoff(secret: string, token: string): Prom
 
 export async function signSession(secret: string, userId: number, ttlSeconds: number, authVersion = 0): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
-  const payload = `v3.${userId}.${authVersion}.${exp}`;
+  const nonce = toHex(crypto.getRandomValues(new Uint8Array(16)).buffer);
+  const payload = `v4.${userId}.${authVersion}.${exp}.${nonce}`;
   return `${payload}.${await hmac(secret, payload)}`;
 }
 
@@ -311,8 +312,20 @@ export async function sha256Base64url(input: string): Promise<string> {
   return btoa(s).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
-export async function verifySession(secret: string, token: string): Promise<{ userId: number; authVersion: number } | null> {
+export async function verifySession(secret: string, token: string): Promise<{ userId: number; authVersion: number; expiresAt: number } | null> {
   const parts = token.split(".");
+  if (parts.length === 6 && parts[0] === "v4") {
+    const [v, userIdStr, authVersionStr, expStr, nonce, sig] = parts;
+    const payload = `${v}.${userIdStr}.${authVersionStr}.${expStr}.${nonce}`;
+    if (!timingSafeEqual(sig!, await hmac(secret, payload))) return null;
+    const userId = Number(userIdStr);
+    const authVersion = Number(authVersionStr);
+    const expiresAt = Number(expStr);
+    if (!Number.isSafeInteger(userId) || userId < 1 || !Number.isSafeInteger(authVersion) || authVersion < 0 ||
+        !Number.isSafeInteger(expiresAt) || !/^[a-f0-9]{32}$/.test(nonce!)) return null;
+    if (expiresAt > Math.floor(Date.now() / 1000)) return { userId, authVersion, expiresAt };
+    return null;
+  }
   const legacy = parts.length === 4 && parts[0] === "v2";
   if (legacy || (parts.length === 5 && parts[0] === "v3")) {
     const [v, userIdStr, versionOrExp, expOrSig, newSig] = parts;
@@ -322,7 +335,7 @@ export async function verifySession(secret: string, token: string): Promise<{ us
     const payload = legacy ? `${v}.${userIdStr}.${expStr}` : `${v}.${userIdStr}.${versionOrExp}.${expStr}`;
     const expected = await hmac(secret, payload);
     if (!timingSafeEqual(sig!, expected)) return null;
-    if (Number(expStr) > Math.floor(Date.now() / 1000)) return { userId: Number(userIdStr), authVersion };
+    if (Number(expStr) > Math.floor(Date.now() / 1000)) return { userId: Number(userIdStr), authVersion, expiresAt: Number(expStr) };
     return null;
   }
   return null;

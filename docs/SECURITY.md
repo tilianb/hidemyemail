@@ -135,3 +135,19 @@ Before making an instance public:
   configure an overwrite-only trusted client-IP header when proxying.
 - Back up D1 or the Docker `/data` volume before migrations and do not run old
   and new application versions against the database during an upgrade.
+# Authentication hardening
+
+Administrative recovery links and six-digit verification codes are stored only
+as domain-separated keyed digests. Links are generation-bound; codes expire in
+10 minutes and have persistent attempt and resend limits. Upgrading invalidates
+outstanding legacy recovery links/codes and legacy MFA backup-code sets. New MFA
+backup codes contain 128 bits of randomness and should be regenerated after the
+upgrade.
+
+Logout revokes every session token presented by the request server-side,
+including copied browser cookies and native bearer tokens. Reversible account
+deletion also rotates the account authentication generation and revokes MFA,
+passkeys, API keys, recovery codes, and pending recovery credentials; restoring
+the account does not restore those credentials. Successful recovery likewise
+invalidates every recovery-code generation, so copied unused codes cannot retake
+the account.

@@ -28,6 +28,7 @@ export function Recover() {
   const [recoveryCode, setRecoveryCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [newPassphrase, setNewPassphrase] = useState("");
+  const [mustRegenerateCodes, setMustRegenerateCodes] = useState(false);
 
   async function handleSendCode(e: React.FormEvent) {
     e.preventDefault();
@@ -64,7 +65,10 @@ export function Recover() {
     try {
       const res = await api.recoverWithCode(username.trim(), recoveryCode.trim());
       setNewPassphrase(res.passphrase);
-      toast("Account recovered successfully", "success");
+      setMustRegenerateCodes(res.codes_remaining === 0);
+      toast(res.codes_remaining === 0
+        ? "Account recovered. Generate new recovery codes in Security settings."
+        : "Account recovered successfully", "success");
       setStep(3);
     } catch (err: any) {
       toast(err.message || "Invalid username or recovery code", "error");
@@ -85,6 +89,9 @@ export function Recover() {
           A new master passphrase has been securely generated.
           <strong className="text-primary"> You must save this in your password manager immediately.</strong>
         </p>
+        {mustRegenerateCodes && (
+          <p className="recovery-copy">Your old recovery codes are no longer valid. Generate a new set in Security settings.</p>
+        )}
         <div className="email-badge recovery-passphrase">{newPassphrase}</div>
         <div className="recovery-actions">
           <CopyButton text={newPassphrase} />
