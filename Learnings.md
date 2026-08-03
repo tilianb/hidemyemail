@@ -9,7 +9,7 @@
 
 **2026-08-01 — Cross-platform security changes**
 - Observation: Worker, dashboard, Android, and iOS fresh-auth contracts can drift unless each client is validated against the same response fields and endpoint sequence.
-- Action: For authentication changes, test the Worker contract, dashboard, Android, and iOS, then rely on the iOS simulator CI for Swift validation when working from Linux.
+- Action: For authentication changes, test the Worker contract, dashboard, Android, and iOS, using platform CI whenever the available environment cannot run a required native toolchain.
 - Confidence: high
 
 **2026-08-01 — Extension autofill-overlay coexistence**
@@ -26,12 +26,12 @@
 
 **2026-08-03 — Hybrid Namespace runner allocation**
 - Observation: At this repository's run volume, paid persistent cache storage costs more than the compute time it saves; two concurrent 4x8 Android/Java jobs use only 8 vCPU and 16 GB, while Docker can retain the cacheless default profile's remote builder independently of lightweight workflow jobs.
-- Action: Reserve Namespace 4x8 runners for Android and Java/Kotlin CodeQL, keep only Docker image builds on the Namespace default remote-builder profile, run orchestration and short jobs on free GitHub-hosted runners, and use GitHub-backed dependency caches.
+- Action: Reserve Namespace 4x8 runners for Android and Java/Kotlin CodeQL, Namespace macOS for iOS and TestFlight, and the Namespace default profile for Docker image builds; run lightweight orchestration on GitHub-hosted runners and use GitHub-backed dependency caches.
 - Confidence: high
 
 **2026-08-03 — Local PR-check parity**
-- Observation: This Mac keeps Android toolchains in `~/dev-tools`, Xcode in `Xcode-beta.app`, and Podman behind the `docker` CLI; local Java/Kotlin CodeQL extraction requires Gradle `--no-daemon` so compilation runs under the tracer.
-- Action: Source `~/dev-tools/env.sh`, set `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer`, start the Podman machine, and disable the Gradle daemon when reproducing all PR checks locally.
+- Observation: Local PR-check reproduction requires JDK 21, Android SDK 35, a compatible Xcode selected through `DEVELOPER_DIR`, and a Docker-compatible engine; Java/Kotlin CodeQL extraction requires Gradle `--no-daemon` so compilation runs under the tracer.
+- Action: Discover the available toolchain locations, export the standard environment variables, ensure the container engine is running, and disable the Gradle daemon when reproducing Java/Kotlin CodeQL.
 - Confidence: high
 
 **2026-08-03 — CI runner evaluation**
@@ -51,7 +51,7 @@
 
 **2026-08-03 — Namespace runner cache profiles**
 - Observation: The built-in `namespace-profile-default` provides a remote Docker builder but no runner Cache Volume; npm, Gradle, Xcode, and Git mirror acceleration require a cache-backed custom profile and `nscloud-cache-action` or `nscloud-checkout-action`.
-- Action: Use the default profile for Docker remote-builder orchestration, cache-backed profiles for language builds, disable overlapping GitHub cache transfers, and restrict cache commits to `main` and `dev`.
+- Action: Use the default profile for Docker remote-builder orchestration, add persistent Namespace caches only when measured savings exceed storage cost, and avoid overlapping cache mechanisms.
 - Confidence: high
 
 **2026-08-01 — Web fresh-auth continuations**
