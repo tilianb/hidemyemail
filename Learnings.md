@@ -2,6 +2,11 @@
 
 ## What Has Worked
 
+**2026-08-03 — Fresh-auth action continuations**
+- Observation: Fetching account context before every sensitive action adds a failure point and network round trip even when the existing fresh credential is valid.
+- Action: Attempt the sensitive action first; only after `fresh_auth_required`, reserve one pending continuation, capture the current account while preparing elevation, and verify that account again before a single retry.
+- Confidence: high
+
 **2026-08-03 — Recovery issuance ordering**
 - Observation: Replacing administrative recovery state before validating the encrypted destination and canonical application origin can invalidate a usable recovery token even though email issuance cannot proceed.
 - Action: Resolve and validate all recovery-email prerequisites before the compare-and-swap that installs new recovery state, then reuse those resolved values for delivery.

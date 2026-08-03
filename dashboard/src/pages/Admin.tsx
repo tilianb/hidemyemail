@@ -171,18 +171,14 @@ export function Admin() {
   useEffect(() => { load(); }, []);
 
   async function freshGuard<T>(operation: () => Promise<T>, retry: () => Promise<void>): Promise<{ ok: true; value: T } | { ok: false }> {
-    const profile = await api.profile();
     try {
       return { ok: true, value: await operation() };
     } catch (err) {
       if (!isFreshAuthRequired(err) || pendingFresh.current || retryingFresh.current) throw err;
       pendingFresh.current = retry;
-      pendingFreshProfileId.current = profile.id;
       try {
         const [currentProfile, mfa, passkeys] = await Promise.all([api.profile(), api.mfaStatus(), api.passkeyList()]);
-        if (currentProfile.id !== profile.id) {
-          throw new Error("The signed-in account changed. Please start the action again.");
-        }
+        pendingFreshProfileId.current = currentProfile.id;
         setReauthMfa(mfa.enabled);
         setReauthHasPasskey(passkeys.length > 0);
         setReauthPassphrase("");
