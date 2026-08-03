@@ -159,6 +159,61 @@ test("dev sync only accepts the repository's own dev branch", async () => {
   );
 });
 
+test("Namespace is reserved for right-sized Android, Java CodeQL, and Docker builds", async () => {
+  const workflowNames = [
+    "android",
+    "ci",
+    "codeql",
+    "docker",
+    "docs",
+    "ios",
+    "release",
+    "sync-dev",
+    "testflight",
+  ];
+  const workflows = Object.fromEntries(await Promise.all(workflowNames.map(async (name) => [
+    name,
+    await readFile(new URL(`../.github/workflows/${name}.yml`, import.meta.url), "utf8"),
+  ])));
+
+  const javaCodeql = workflows.codeql.slice(
+    workflows.codeql.indexOf("          - language: java-kotlin"),
+    workflows.codeql.indexOf("    steps:"),
+  );
+  const javascriptCodeql = workflows.codeql.slice(
+    workflows.codeql.indexOf("          - language: javascript-typescript"),
+    workflows.codeql.indexOf("          - language: java-kotlin"),
+  );
+  const dockerBuild = workflows.docker.slice(
+    workflows.docker.indexOf("  build:"),
+    workflows.docker.indexOf("  merge:"),
+  );
+  const dockerMerge = workflows.docker.slice(workflows.docker.indexOf("  merge:"));
+  const releaseAndroid = workflows.release.slice(
+    workflows.release.indexOf("  android:"),
+    workflows.release.indexOf("  extension:"),
+  );
+
+  assert.match(workflows.android, /runs-on: namespace-profile-github-4x8/);
+  assert.match(javaCodeql, /runner: namespace-profile-github-4x8/);
+  assert.match(javascriptCodeql, /runner: ubuntu-latest/);
+  assert.match(dockerBuild, /runs-on: namespace-profile-default/);
+  assert.doesNotMatch(dockerBuild, /docker\/setup-buildx-action|cache-(?:from|to): type=gha/);
+  assert.match(dockerMerge, /runs-on: ubuntu-latest/);
+  assert.match(dockerMerge, /docker\/setup-buildx-action/);
+  assert.match(releaseAndroid, /runs-on: namespace-profile-github-4x8/);
+
+  for (const [name, workflow] of Object.entries(workflows)) {
+    assert.doesNotMatch(workflow, /namespacelabs\/nscloud-cache-action/, `${name} uses paid Namespace caching`);
+    const expectedNamespaceJobs = ["android", "codeql", "docker", "release"].includes(name) ? 1 : 0;
+    assert.equal(
+      workflow.match(/namespace-profile-/g)?.length ?? 0,
+      expectedNamespaceJobs,
+      `${name} has an unexpected number of Namespace jobs`,
+    );
+  }
+});
+
 test("release publications depend on the validated tag and required artifacts", async () => {
   const [release, docker, testflight] = await Promise.all(
     ["release", "docker", "testflight"].map((name) =>

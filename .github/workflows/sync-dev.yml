@@ -15,10 +15,10 @@ jobs:
       github.event.pull_request.merged == true &&
       github.event.pull_request.head.ref == 'dev' &&
       github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: namespace-profile-github-light
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: namespacelabs/nscloud-checkout-action@445c25d7009680597d73eb03c4e1cd5be522ed73 # v9
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: main
           fetch-depth: 0

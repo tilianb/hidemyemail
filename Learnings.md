@@ -24,6 +24,11 @@
 
 ## Patterns and Preferences
 
+**2026-08-03 — Hybrid Namespace runner allocation**
+- Observation: At this repository's run volume, paid persistent cache storage costs more than the compute time it saves; two concurrent 4x8 Android/Java jobs use only 8 vCPU and 16 GB, while Docker can retain the cacheless default profile's remote builder independently of lightweight workflow jobs.
+- Action: Reserve Namespace 4x8 runners for Android and Java/Kotlin CodeQL, keep only Docker image builds on the Namespace default remote-builder profile, run orchestration and short jobs on free GitHub-hosted runners, and use GitHub-backed dependency caches.
+- Confidence: high
+
 **2026-08-03 — Local PR-check parity**
 - Observation: This Mac keeps Android toolchains in `~/dev-tools`, Xcode in `Xcode-beta.app`, and Podman behind the `docker` CLI; local Java/Kotlin CodeQL extraction requires Gradle `--no-daemon` so compilation runs under the tracer.
 - Action: Source `~/dev-tools/env.sh`, set `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer`, start the Podman machine, and disable the Gradle daemon when reproducing all PR checks locally.

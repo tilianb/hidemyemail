@@ -23,14 +23,14 @@ concurrency:
 jobs:
   build:
     name: Build & Lint (Debug)
-    runs-on: namespace-profile-github
+    runs-on: namespace-profile-github-4x8
     defaults:
       run:
         working-directory: android
 
     steps:
       - name: Checkout code
-        uses: namespacelabs/nscloud-checkout-action@445c25d7009680597d73eb03c4e1cd5be522ed73 # v9
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Set up JDK 17
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
@@ -38,15 +38,8 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Set up Namespace Gradle cache
-        uses: namespacelabs/nscloud-cache-action@c5f8dab7560444c4bf8dbc64f1b203431873c547 # v1.6.1
-        with:
-          cache: gradle
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
-        with:
-          cache-disabled: true
 
       - name: Build, lint & test
         run: ./gradlew assembleDebug lintDebug testDebugUnitTest

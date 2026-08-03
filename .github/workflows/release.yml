@@ -14,12 +14,12 @@ concurrency:
 jobs:
   validate:
     name: Validate release source
-    runs-on: namespace-profile-github-light
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - name: Checkout protected history
-        uses: namespacelabs/nscloud-checkout-action@445c25d7009680597d73eb03c4e1cd5be522ed73 # v9
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -49,13 +49,13 @@ jobs:
   android:
     name: Build signed Android APK
     needs: validate
-    runs-on: namespace-profile-github
+    runs-on: namespace-profile-github-4x8
     environment: production
     permissions:
       contents: read
     steps:
       - name: Checkout exact tag
-        uses: namespacelabs/nscloud-checkout-action@445c25d7009680597d73eb03c4e1cd5be522ed73 # v9
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
@@ -64,14 +64,8 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
-      - name: Set up Namespace Gradle cache
-        uses: namespacelabs/nscloud-cache-action@c5f8dab7560444c4bf8dbc64f1b203431873c547 # v1.6.1
-        with:
-          cache: gradle
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
-        with:
-          cache-disabled: true
       - name: Decrypt keystore
         env:
           ANDROID_KEYSTORE_DECRYPT_PASS: ${{ secrets.ANDROID_KEYSTORE_DECRYPT_PASS }}
@@ -106,12 +100,12 @@ jobs:
   extension:
     name: Build Chromium extension
     needs: validate
-    runs-on: namespace-profile-github-light
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - name: Checkout exact tag
-        uses: namespacelabs/nscloud-checkout-action@445c25d7009680597d73eb03c4e1cd5be522ed73 # v9
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
@@ -119,11 +113,8 @@ jobs:
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
-          package-manager-cache: false
-      - name: Set up Namespace npm cache
-        uses: namespacelabs/nscloud-cache-action@c5f8dab7560444c4bf8dbc64f1b203431873c547 # v1.6.1
-        with:
           cache: npm
+          cache-dependency-path: extension/package-lock.json
       - name: Install, test, and package extension
         working-directory: extension
         run: npm ci && npm test && npm run zip
@@ -202,13 +193,13 @@ jobs:
   release:
     name: Publish GitHub release
     needs: [validate, android, extension, testflight, containers]
-    runs-on: namespace-profile-github-light
+    runs-on: ubuntu-latest
     environment: production
     permissions:
       contents: write
     steps:
       - name: Checkout exact tag
-        uses: namespacelabs/nscloud-checkout-action@445c25d7009680597d73eb03c4e1cd5be522ed73 # v9
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
           persist-credentials: false

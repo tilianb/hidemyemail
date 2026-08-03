@@ -23,24 +23,25 @@ concurrency:
 jobs:
   build-test:
     name: Build & Test (iOS Simulator)
-    runs-on: namespace-profile-github-macos
+    runs-on: macos-15
     defaults:
       run:
         working-directory: ios
 
     steps:
       - name: Checkout code
-        uses: namespacelabs/nscloud-checkout-action@445c25d7009680597d73eb03c4e1cd5be522ed73 # v9
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Select Xcode
         run: sudo xcode-select -switch /Applications/Xcode.app
 
-      - name: Set up Namespace Apple build caches
-        uses: namespacelabs/nscloud-cache-action@c5f8dab7560444c4bf8dbc64f1b203431873c547 # v1.6.1
+      - name: Cache Homebrew downloads
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
-          cache: |
-            brew
-            xcode
+          path: ~/Library/Caches/Homebrew
+          key: brew-xcodegen-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ios/project.yml') }}
+          restore-keys: |
+            brew-xcodegen-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install XcodeGen
         run: brew install xcodegen

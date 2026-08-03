@@ -31,25 +31,21 @@ concurrency:
 jobs:
   worker-checks:
     name: Worker Checks
-    runs-on: namespace-profile-github-light
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: worker
 
     steps:
       - name: Checkout code
-        uses: namespacelabs/nscloud-checkout-action@445c25d7009680597d73eb03c4e1cd5be522ed73 # v9
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Setup Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22 # Matching the node types version in worker package.json
-          package-manager-cache: false
-
-      - name: Set up Namespace npm cache
-        uses: namespacelabs/nscloud-cache-action@c5f8dab7560444c4bf8dbc64f1b203431873c547 # v1.6.1
-        with:
-          cache: npm
+          cache: 'npm'
+          cache-dependency-path: worker/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -62,25 +58,21 @@ jobs:
 
   dashboard-checks:
     name: Dashboard Checks
-    runs-on: namespace-profile-github-light
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: dashboard
 
     steps:
       - name: Checkout code
-        uses: namespacelabs/nscloud-checkout-action@445c25d7009680597d73eb03c4e1cd5be522ed73 # v9
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Setup Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
-          package-manager-cache: false
-
-      - name: Set up Namespace npm cache
-        uses: namespacelabs/nscloud-cache-action@c5f8dab7560444c4bf8dbc64f1b203431873c547 # v1.6.1
-        with:
-          cache: npm
+          cache: 'npm'
+          cache-dependency-path: dashboard/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -90,22 +82,19 @@ jobs:
 
   extension-checks:
     name: Extension Checks
-    runs-on: namespace-profile-github-light
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: extension
     steps:
       - name: Checkout code
-        uses: namespacelabs/nscloud-checkout-action@445c25d7009680597d73eb03c4e1cd5be522ed73 # v9
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Setup Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
-          package-manager-cache: false
-      - name: Set up Namespace npm cache
-        uses: namespacelabs/nscloud-cache-action@c5f8dab7560444c4bf8dbc64f1b203431873c547 # v1.6.1
-        with:
-          cache: npm
+          cache: 'npm'
+          cache-dependency-path: extension/package-lock.json
       - name: Install dependencies
         run: npm ci
       - name: Run tests
