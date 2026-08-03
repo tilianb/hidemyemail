@@ -77,7 +77,7 @@ fun MfaScreen(app: AppViewModel) {
             Text("Two-Factor Authentication", style = Theme.displayStyle(24.sp, FontWeight.Bold))
             Spacer(Modifier.height(8.dp))
             Text(
-                "Enter the 6-digit code from your authenticator app, or an 8-character backup code.",
+                "Enter the 6-digit code from your authenticator app, or a 128-bit grouped backup code.",
                 style = Theme.bodyStyle(13.sp).copy(color = Theme.textSecondary),
                 textAlign = TextAlign.Center,
             )

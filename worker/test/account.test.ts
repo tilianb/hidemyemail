@@ -91,6 +91,7 @@ test("export returns only the caller's data", async () => {
   }, testEnv);
 
   expect(res.status).toBe(200);
+  expect(res.headers.get("Cache-Control")).toBe("private, no-store");
   expect(res.headers.get("Content-Disposition")).toContain("attachment");
   expect(res.headers.get("Content-Disposition")).toContain(".json");
 
@@ -254,9 +255,19 @@ test("delete: userId 1 (admin) → 403", async () => {
   expect(body.error).toContain("admin");
 });
 
-test("delete: valid → sets deleted_at, active=0, forwarding=0; subsequent login blocked", async () => {
+test("delete: valid → revokes credentials before restoration and blocks copied sessions", async () => {
   const app = createApp();
-  const { userId, cookie } = await makeUser("correct-passphrase");
+  const { userId, cookie, staleCookie } = await makeUser("correct-passphrase");
+  await DB().prepare(
+    "INSERT INTO mfa (user_id, totp_secret, totp_enabled, totp_backup_codes) VALUES (?, 'old-secret', 1, '[\"old-code\"]')"
+  ).bind(userId).run();
+  await DB().prepare(
+    "INSERT INTO passkey_credentials (id, user_id, public_key, sign_count, created_at) VALUES (?, ?, 'old-key', 0, ?)"
+  ).bind(`delete-passkey-${userId}`, userId, Date.now()).run();
+  await DB().prepare(
+    "INSERT INTO api_keys (user_id, name, token_hash, token_prefix, created_at) VALUES (?, 'old-key', ?, 'hmek_old', ?)"
+  ).bind(userId, crypto.randomUUID().replaceAll("-", "").padEnd(64, "0"), Date.now()).run();
+  await DB().prepare("UPDATE users SET recovery_codes = '[\"old-recovery\"]' WHERE id = ?").bind(userId).run();
 
   const res = await app.request("/api/account/delete", {
     method: "POST",
@@ -279,6 +290,14 @@ test("delete: valid → sets deleted_at, active=0, forwarding=0; subsequent logi
   expect(row?.forwarding).toBe(0);
   expect(row?.deleted_at).toBeTypeOf("number");
 
+  expect(await DB().prepare("SELECT id FROM passkey_credentials WHERE user_id = ?").bind(userId).first()).toBeNull();
+  expect(await DB().prepare("SELECT id FROM api_keys WHERE user_id = ?").bind(userId).first()).toBeNull();
+  const mfa = await DB().prepare("SELECT totp_enabled, totp_secret, totp_backup_codes FROM mfa WHERE user_id = ?")
+    .bind(userId).first<{ totp_enabled: number; totp_secret: string | null; totp_backup_codes: string | null }>();
+  expect(mfa).toMatchObject({ totp_enabled: 0, totp_secret: null, totp_backup_codes: null });
+  expect((await DB().prepare("SELECT recovery_codes FROM users WHERE id = ?").bind(userId)
+    .first<{ recovery_codes: string | null }>())?.recovery_codes).toBeNull();
+
   // Subsequent login with correct passphrase must be blocked (active=0 / deleted)
   const loginRes = await app.request("/api/login", {
     method: "POST",
@@ -286,6 +305,15 @@ test("delete: valid → sets deleted_at, active=0, forwarding=0; subsequent logi
     body: JSON.stringify({ password: "correct-passphrase" }),
   }, testEnv);
   expect(loginRes.status).toBe(403);
+
+  const restored = await app.request("/api/restore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password: "correct-passphrase" }),
+  }, testEnv);
+  expect(restored.status).toBe(200);
+  const copiedSession = await app.request("/api/stats", { headers: { cookie: staleCookie } }, testEnv);
+  expect(copiedSession.status).toBe(401);
 });
 
 test("delete requires fresh auth — session + correct password alone is rejected", async () => {

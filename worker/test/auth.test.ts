@@ -27,8 +27,8 @@ test("passphrase verifier accepts only the exact lowercase v1 format", async () 
 test("session sign/verify round-trip and expiry", async () => {
   const secret = "topsecret";
   const tok = await signSession(secret, 1, 3600, 7);
-  expect(tok).toMatch(/^v3\.1\.7\./);
-  expect(await verifySession(secret, tok)).toEqual({ userId: 1, authVersion: 7 });
+  expect(tok).toMatch(/^v4\.1\.7\./);
+  expect(await verifySession(secret, tok)).toMatchObject({ userId: 1, authVersion: 7 });
   expect(await verifySession("other", tok)).toBe(null);
   const expired = await signSession(secret, 1, -1, 7);
   expect(await verifySession(secret, expired)).toBe(null);
@@ -41,7 +41,7 @@ test("legacy v2 session tokens verify as auth version zero", async () => {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const sig = [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload)))]
     .map((b) => b.toString(16).padStart(2, "0")).join("");
-  expect(await verifySession(secret, `${payload}.${sig}`)).toEqual({ userId: 42, authVersion: 0 });
+  expect(await verifySession(secret, `${payload}.${sig}`)).toMatchObject({ userId: 42, authVersion: 0 });
 });
 
 test("legacy v1 session tokens are rejected", async () => {

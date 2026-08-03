@@ -2,6 +2,16 @@
 
 ## What Has Worked
 
+**2026-08-03 — Authentication-generation fencing**
+- Observation: The Worker session guard captures `auth_version` before route execution, so recovery or deletion can rotate credentials while an already-authorized request is still preparing a durable API key, passkey, MFA enrollment, or recovery-code write.
+- Action: Bind every final credential-minting SQL statement to the live user's active, non-deleted `auth_version` in that same statement, and never return plaintext credentials when the generation predicate loses.
+- Confidence: high
+
+**2026-08-03 — TOTP replay prevention**
+- Observation: Verifying a TOTP value cryptographically does not make its 30-second counter one-use; concurrent login and reauthentication paths can otherwise accept the same value independently.
+- Action: Persist the last accepted TOTP counter and advance it with a compare-and-swap in the same atomic finalization as the associated authentication artifact or security mutation.
+- Confidence: high
+
 **2026-08-03 — Release image tag consistency**
 - Observation: Applying `latest` during branch publication lets it diverge from the stable SemVer image published later by the reusable release workflow.
 - Action: Apply mutable stable aliases such as `latest` in the same manifest operation as validated release tags, and keep branch aliases separate.

@@ -121,7 +121,7 @@ describe("inline native reauthentication", () => {
   });
 
   test("consumes a valid MFA backup code only after the passphrase also succeeds", async () => {
-    const backupCode = "ABCD1234";
+    const backupCode = "ABCD-EFGH-JKLM-NPQR-STUV-WXYZ-AB";
     const encrypted = await encryptDestination("JBSWY3DPEHPK3PXP", testEnv.DESTINATION_ENCRYPTION_KEY as string);
     await (env.DB as D1Database).prepare(
       "INSERT INTO mfa (user_id, totp_secret, totp_enabled, totp_backup_codes) VALUES (1, ?, 1, ?)"

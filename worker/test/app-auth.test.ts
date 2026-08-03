@@ -15,6 +15,7 @@ let testEnv: any;
 beforeAll(async () => {
   const { saltHex, hashHex } = await hashPassword("hunter2");
   testEnv = { ...env, SESSION_SECRET: "sek", AUTH_PASSWORD_SALT: saltHex, AUTH_PASSWORD_HASH: hashHex };
+  testEnv.APP_ORIGIN = "https://app.hidemyemail.dev";
 });
 
 beforeEach(async () => {
@@ -41,10 +42,24 @@ async function loginCookie(app: ReturnType<typeof createApp>): Promise<string> {
 async function authorize(app: ReturnType<typeof createApp>, cookie: string, challenge: string) {
   return app.request("/api/app-auth/authorize", {
     method: "POST",
-    headers: { cookie, "Content-Type": "application/x-www-form-urlencoded" },
+    headers: { cookie, Origin: new URL(testEnv.APP_ORIGIN).origin, "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ challenge }),
   }, testEnv);
 }
+
+test("authorization rejects missing and cross-origin form submissions", async () => {
+  const app = createApp();
+  const cookie = await loginCookie(app);
+  const challenge = await sha256Base64url(VERIFIER);
+  for (const origin of [undefined, "https://evil.hidemyemail.dev"]) {
+    const response = await app.request("/api/app-auth/authorize", {
+      method: "POST",
+      headers: { cookie, ...(origin ? { Origin: origin } : {}), "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ challenge }),
+    }, testEnv);
+    expect(response.status).toBe(403);
+  }
+});
 
 function codeFromRedirect(response: Response): string {
   const location = response.headers.get("location");

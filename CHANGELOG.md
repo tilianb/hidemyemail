@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Hardened administrative account recovery with hashed, generation-bound
+  links and codes, persistent attempt/resend limits, and atomic credential
+  revocation. Upgrading invalidates outstanding recovery links/codes.
+- MFA backup codes now contain 128 bits of entropy. Existing shorter MFA backup
+  code sets are invalidated on upgrade and must be regenerated.
+- Logout now revokes the exact server-side session (including copied cookies or
+  native bearer tokens), and account deletion rotates sessions and revokes MFA,
+  passkeys, API keys, recovery codes, and pending recovery credentials so
+  restore cannot resurrect them.
+- Account data exports are now explicitly marked private and non-cacheable.
+
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
