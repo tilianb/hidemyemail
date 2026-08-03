@@ -6,6 +6,11 @@ removed when shipped; see CHANGELOG.md for what already landed.
 
 ## Recently shipped
 
+- [x] **Passkey reauthentication for sensitive actions.** Web, iOS, and
+  Android clients can refresh the ten-minute fresh-auth window with an
+  account- and auth-version-bound passkey assertion. Challenges are tied to
+  the requesting channel, canonical origins, and one-use consumption without
+  switching the active account.
 - [x] **v1.3.0 secure foundations and aliases on demand.** Added native MFA
   and passkey setup, fail-closed destination encryption, migration-safe
   deploys, Docker AASA parity, release gates and artifacts, a minimal Chromium
@@ -85,18 +90,6 @@ order (the abstraction is the enabler; later items get cheaper once it lands):
 - [ ] **In-dashboard "setup doctor"** _(self-hosting)_. An admin-panel health
   check that reports which secrets, DNS records, and AWS resources are missing
   or misconfigured, so onboarding is guided rather than doc-driven.
-- [ ] **Passkey reauthentication for sensitive actions** _(authentication)_ —
-  complete the existing passwordless experience before adding external identity
-  providers. After the ten-minute fresh-auth window expires, let an already
-  authenticated user satisfy the fresh-auth gate with a passkey assertion
-  instead of requiring their passphrase for MFA/passkey changes, API keys,
-  export, and account deletion. The assertion must be bound to the current
-  `user_id` and `auth_version`, issue only a short-lived fresh-auth credential,
-  and never switch the active session to the passkey's owner. Derive the RP ID
-  and browser expected origin only from canonical `APP_ORIGIN`, accept native
-  enrollment origins only from the existing configured allowlist, and consume
-  every challenge once. Support the web, iOS, and Android flows in parity,
-  including replay and cross-account tests.
 - [ ] **Guided passkey setup after registration** _(authentication / onboarding)_
   — after showing the one-time recovery codes, offer to create and name a
   passkey while the new session is still fresh. Recommend it prominently but
