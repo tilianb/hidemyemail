@@ -85,6 +85,33 @@ order (the abstraction is the enabler; later items get cheaper once it lands):
 - [ ] **In-dashboard "setup doctor"** _(self-hosting)_. An admin-panel health
   check that reports which secrets, DNS records, and AWS resources are missing
   or misconfigured, so onboarding is guided rather than doc-driven.
+- [ ] **Passkey reauthentication for sensitive actions** _(authentication)_ —
+  complete the existing passwordless experience before adding external identity
+  providers. After the ten-minute fresh-auth window expires, let an already
+  authenticated user satisfy the fresh-auth gate with a passkey assertion
+  instead of requiring their passphrase for MFA/passkey changes, API keys,
+  export, and account deletion. The assertion must be bound to the current
+  `user_id` and `auth_version`, issue only a short-lived fresh-auth credential,
+  and never switch the active session to the passkey's owner. Support the web,
+  iOS, and Android flows in parity, including replay and cross-account tests.
+- [ ] **Guided passkey setup after registration** _(authentication / onboarding)_
+  — after showing the one-time recovery codes, offer to create and name a
+  passkey while the new session is still fresh. Recommend it prominently but
+  allow skipping; retain the passphrase and existing recovery model. Do not add
+  passkey-only accounts until account identification, device loss, and recovery
+  have a complete design.
+- [ ] **Invite-only user onboarding** _(multi-user / self-hosting)_ — let an
+  admin create, revoke, and copy an expiring, one-use registration link or code
+  while public registration remains disabled. Invitations create ordinary users
+  only, reveal no account-existence information, and use atomic consumption so
+  concurrent requests cannot redeem one invitation twice. Add optional expiry
+  and usage count only if there is a demonstrated need beyond the one-use flow.
+- [ ] **Account security and recovery health** _(authentication / onboarding)_
+  — a Security checklist showing whether the user has a passkey (ideally more
+  than one), a recovery username, remaining recovery codes, MFA status, and a
+  verified default destination. Recommend two independent ways back into the
+  account and warn when codes are exhausted, but do not block normal use or
+  imply that a destination inbox alone can recover every account.
 - [ ] **AWS infrastructure-as-code** _(self-hosting)_. A CloudFormation/Terraform
   template (or scripted `aws` flow) for the SES receipt rule set, S3 inbound
   bucket + policy, SNS topic + subscription, and the scoped IAM user — the
@@ -111,6 +138,60 @@ order (the abstraction is the enabler; later items get cheaper once it lands):
 
 ## P3 — Later / opportunistic
 
+- [ ] **Optional federated login, when the deployment model warrants it**
+  _(authentication / advanced self-hosting or hosted growth)_. **Assessment:
+  useful integration, but not a core product goal.** HideMyEmail is
+  differentiated by serverless email aliases without a mail stack; federation
+  does not improve that path, overlaps with the existing passkey login, adds
+  another configuration and availability dependency, and creates substantial
+  account-linking and recovery risk. Prioritise mail-provider flexibility,
+  easier deployment, custom domains, and in-context alias creation first.
+  - Reconsider when organization-scale installations need SSO with an existing
+    Authentik, Authelia, Keycloak, Zitadel, or Pocket ID deployment. Implement
+    standards-based **OIDC** (not generic OAuth) and keep it opt-in, with local
+    passphrase/passkey recovery so provider failure cannot lock out the admin.
+  - Treat **social login as a separate hosted-service growth feature**, not a
+    self-hosting default. It is valuable only if the official hosted service
+    needs lower signup friction; each self-hoster otherwise has to register and
+    maintain provider credentials, while users reveal to that provider that
+    they use HideMyEmail. If demand justifies it, evaluate in this order:
+    1. **Sign in with Apple** — best privacy and native-iOS fit, but requires an
+       Apple developer setup and specialised client-secret/key handling.
+    2. **Google** — broadest consumer reach and straightforward OIDC, but the
+       weakest privacy fit; offer it as a choice, never the only login route.
+    3. **Microsoft** — useful if hosted or organization users request it; OIDC
+       is standard, but tenant policy needs careful configuration.
+    4. **GitHub** — relevant mainly to the developer audience and uses a
+       provider-specific OAuth identity flow rather than standard OIDC; defer
+       unless usage data shows it would materially improve adoption.
+    Do not add all providers speculatively. Ship one only after measuring signup
+    abandonment or receiving sustained operator demand, and preserve a provider-
+    independent passkey/passphrase path.
+  - Start with fresh-authenticated linking to existing accounts. Identify a
+    binding only by immutable `(issuer, subject)`; never merge by email, infer
+    admin rights from claims, or auto-link the permanent `id = 1` administrator.
+    Just-in-time account creation should be a separate, default-off follow-up.
+  - Preserve local MFA, `auth_version` revocation, account recovery, and the
+    existing native `/app-auth` PKCE handoff. Use Authorization Code + PKCE with
+    exact issuer/redirect validation and one-use state/nonce; treat bindings as
+    credentials during recovery and deletion. Require focused takeover, replay,
+    account-link CSRF, registration-policy, and provider-outage tests.
+  - Only after organization-scale adoption, assess required-SSO policies,
+    group-based admission, automatic deactivation, or SCIM. External claims
+    must never grant admin access or control the permanent administrator.
+- [ ] **Session and device controls** _(authentication)_. Start with a simple
+  **Sign out everywhere** action backed by the existing `auth_version`
+  revocation behavior. Before adding individual-session revocation, assess the
+  cost of replacing stateless sessions with durable records; if justified, show
+  creation/last-use time and a user-supplied device label without fingerprinting,
+  and let users revoke one web/native session. Reconcile this view with existing
+  registered push devices so the two lists do not imply false equivalence.
+- [ ] **Approve login from an existing device, only if passkeys leave a proven
+  usability gap** _(authentication / native apps)_. A QR or short-code flow could
+  let an authenticated phone approve a browser, but it duplicates passkey
+  cross-device authentication and introduces one-use-code, account-binding, and
+  approval-confusion risks. Keep conditional at P3 rather than building it for
+  feature parity with other services.
 - [ ] **AutoFill integration** so aliases can be generated inside the browser /
   signup forms without opening the app _(native apps)_.
   - iOS: AutoFill credential provider (works in Safari).
@@ -134,3 +215,22 @@ order (the abstraction is the enabler; later items get cheaper once it lands):
   submit to awesome-selfhosted, selfh.st, AlternativeTo; a "Email aliases
   without a mail server" blog post (SES + Workers) to r/selfhosted and Show HN,
   sequenced after the deliverability fixes; a hosted demo with a throwaway login.
+
+## Authentication ideas assessed but not recommended
+
+These are intentionally not backlog items unless the threat model or product
+direction changes:
+
+- **Email magic-link login:** makes the destination inbox both the protected
+  resource and an authentication authority; inbox compromise would directly
+  compromise the alias account.
+- **SMS login or recovery:** adds cost, personal-data exposure, delivery
+  dependency, and SIM-swap risk for less benefit than passkeys and recovery
+  codes.
+- **Security questions:** low-entropy, guessable recovery credentials.
+- **Automatic account linking by email:** an unsafe trust bridge between
+  providers, even when an email claim is marked verified. Use explicit,
+  fresh-authenticated linking by immutable provider subject instead.
+- **Trusted reverse-proxy identity headers:** easy to misconfigure and a poor fit
+  for the primary Cloudflare Worker deployment. Prefer a verified OIDC flow if
+  federation eventually becomes justified.
