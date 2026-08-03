@@ -24,6 +24,31 @@
 
 ## Patterns and Preferences
 
+**2026-08-03 — Local PR-check parity**
+- Observation: This Mac keeps Android toolchains in `~/dev-tools`, Xcode in `Xcode-beta.app`, and Podman behind the `docker` CLI; local Java/Kotlin CodeQL extraction requires Gradle `--no-daemon` so compilation runs under the tracer.
+- Action: Source `~/dev-tools/env.sh`, set `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer`, start the Podman machine, and disable the Gradle daemon when reproducing all PR checks locally.
+- Confidence: high
+
+**2026-08-03 — CI runner evaluation**
+- Observation: This public repository's standard GitHub-hosted Linux, ARM64, and macOS jobs are free and unlimited; recent validation jobs usually complete in under five minutes, while release jobs hold signing and registry credentials.
+- Action: Keep GitHub-hosted runners as the default; require measured wall-clock gains and isolate secretless validation jobs before piloting any third-party runner provider.
+- Confidence: high
+
+**2026-08-03 — Namespace Linux runner benchmark**
+- Observation: The Namespace Linux profile cut Android and Java/Kotlin CodeQL execution by more than half, but burst scheduling added 73–160 seconds to later fan-out jobs and its Docker validation build took nearly three times as long as GitHub-hosted Ubuntu.
+- Action: Use Namespace selectively for Android and CodeQL compute-heavy jobs; retain GitHub-hosted Ubuntu for short fan-out and Docker validation jobs unless concurrency and Docker caching are improved.
+- Confidence: high
+
+**2026-08-03 — Namespace Docker remote builders**
+- Observation: `docker/setup-buildx-action` replaces the builder preconfigured by a Namespace runner with a local `docker-container` driver; skipping that action and using `outputs: type=cacheonly` preserves the `nsc-remote` builder and its persistent NVMe layer cache.
+- Action: On Namespace validation runners, use the profile-provided Buildx configuration directly; reserve `setup-buildx-action` for GitHub-hosted production publishing jobs.
+- Confidence: high
+
+**2026-08-03 — Namespace runner cache profiles**
+- Observation: The built-in `namespace-profile-default` provides a remote Docker builder but no runner Cache Volume; npm, Gradle, Xcode, and Git mirror acceleration require a cache-backed custom profile and `nscloud-cache-action` or `nscloud-checkout-action`.
+- Action: Use the default profile for Docker remote-builder orchestration, cache-backed profiles for language builds, disable overlapping GitHub cache transfers, and restrict cache commits to `main` and `dev`.
+- Confidence: high
+
 **2026-08-01 — Web fresh-auth continuations**
 - Observation: Dashboard requests use ambient HttpOnly cookies, so a captured continuation is not account-bound merely because it retains the same API module reference.
 - Action: Capture the profile ID before the first sensitive request and compare that bound ID again before queuing and replaying a fresh-auth continuation.
