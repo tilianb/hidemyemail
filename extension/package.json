@@ -9,11 +9,11 @@
     "zip": "npm run build && rm -f hidemyemail-extension.zip && find dist -type f -exec touch -t 198001010000 {} + && cd dist && find . -type f | LC_ALL=C sort | zip -X -q ../hidemyemail-extension.zip -@"
   },
   "devDependencies": {
-    "@types/chrome": "^0.2.2",
+    "@types/chrome": "^0.2.5",
     "@types/node": "^26.1.2",
     "happy-dom": "^20.11.1",
     "typescript": "^7.0.2",
-    "vite": "^8.1.5",
+    "vite": "^8.2.0",
     "vitest": "^4.1.10"
   }
 }
