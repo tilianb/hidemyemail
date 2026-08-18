@@ -1,4 +1,5 @@
 import SwiftUI
+import AuthenticationServices
 
 struct MFAView: View {
     @Environment(AppState.self) private var app
@@ -16,14 +17,14 @@ struct MFAView: View {
                     .foregroundStyle(Theme.accent)
                 Text("Two-Factor Authentication")
                     .font(Theme.display(24, .bold))
-                Text("Enter the 6-digit code from your authenticator app, or an 8-character backup code.")
+                Text("Enter the 6-digit code from your authenticator app, or a 128-bit grouped backup code.")
                     .font(.footnote)
                     .foregroundStyle(Theme.textSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
 
                 TextField("Code", text: $code)
-                    // ASCII (not numberPad): backup codes are 8 alphanumeric
+                    // ASCII (not numberPad): backup codes are grouped alphanumeric text
                     // characters, not just digits. The Worker normalises case
                     // and strips separators, so disable autocorrect/caps to
                     // avoid mangling what the user types.
@@ -53,6 +54,26 @@ struct MFAView: View {
                 .padding(.horizontal)
                 .disabled(busy || code.isEmpty)
 
+                if app.serverURLString == AppState.defaultServer {
+                    Button(action: usePasskey) {
+                        Label("Use Passkey", systemImage: "person.badge.key").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .padding(.horizontal)
+                    .disabled(busy)
+                } else {
+                    Button(action: webLogin) {
+                        Label("Start a Separate Web Sign-In", systemImage: "safari").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .padding(.horizontal)
+                    .disabled(busy)
+                    Text("This replaces the pending MFA sign-in; it does not complete MFA for the same account.")
+                        .font(.caption2).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
+                }
+
                 Spacer()
             }
             .padding()
@@ -76,6 +97,26 @@ struct MFAView: View {
             } catch {
                 self.error = error.localizedDescription
             }
+        }
+    }
+
+    private func usePasskey() {
+        error = nil; busy = true
+        Task {
+            defer { busy = false }
+            do { try await app.loginWithPasskey() }
+            catch let e as ASAuthorizationError where e.code == .canceled { }
+            catch { self.error = error.localizedDescription }
+        }
+    }
+
+    private func webLogin() {
+        error = nil; busy = true
+        Task {
+            defer { busy = false }
+            do { try await app.loginViaWebSession() }
+            catch let e as ASWebAuthenticationSessionError where e.code == .canceledLogin { }
+            catch { self.error = error.localizedDescription }
         }
     }
 }

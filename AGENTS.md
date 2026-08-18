@@ -7,6 +7,32 @@ Guidance for AI coding agents (and new contributors) working in this repo.
 > invariant listed here, update this file in the same PR. Treat a stale
 > AGENTS.md as a bug.
 
+## Memory and Learning
+
+**Before starting any task:**
+Read `Learnings.md` in full. Apply all entries under "What Has Worked"
+and "Patterns and Preferences." Avoid all patterns listed under
+"What Has Failed."
+
+**After completing any task:**
+Update `Learnings.md` with new observations using this format:
+
+**[Date] — [Task type]**
+- Observation: [what you noticed]
+- Action: [what to do or avoid going forward]
+- Confidence: [high / medium / low]
+
+Be specific. "Avoid relative imports in /utils — the build step
+resolves them incorrectly" is useful. "Be careful with imports" is not.
+
+Do not add:
+- Observations already captured in the file
+- General best practices (only project-specific ones)
+- Redundant restatements of existing entries
+- Machine-specific paths, device names, host OS quirks, or instructions tied
+  to one agent's environment; describe required tool versions and portable
+  environment discovery instead
+
 ## What this project is
 
 Self-hosted, serverless email alias service ("hide my email" style):
@@ -49,10 +75,10 @@ built dashboard assets.
   `ApiClient.kt` and `APIClient.swift` in feature parity. Build:
   `cd android && ./gradlew :app:assembleDebug` (needs `JAVA_HOME` +
   `ANDROID_HOME`). CI: `.github/workflows/android.yml` (build + lint).
-- **Toolchain quirk:** Homebrew cannot install anything on this Mac (macOS 27
-  beta → `unknown or unsupported macOS version`). The Android toolchain is
-  hand-installed — source `~/dev-tools/env.sh` for JDK 21, Gradle, Android
-  SDK 35, and PATH.
+- Android builds require JDK 21 and Android SDK 35. Discover the installed
+  toolchains in the current environment and set `JAVA_HOME`, `ANDROID_HOME`,
+  and `PATH` accordingly; do not assume a package manager, fixed filesystem
+  location, or host-specific setup script.
 
 ## Build & test
 

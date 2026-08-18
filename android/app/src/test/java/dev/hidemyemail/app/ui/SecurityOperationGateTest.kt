@@ -59,4 +59,10 @@ class SecurityOperationGateTest {
         assertNull(message)
         assertEquals("Invalid code", securityErrorMessage(ApiException.Server(401, "Invalid code")) {})
     }
+
+    @Test fun mfaPasskeyOptionRequiresCredentialAndOfficialHostedOrigin() {
+        assertTrue(canUsePasskeyForMfa(1, "https://app.hidemyemail.dev"))
+        assertFalse(canUsePasskeyForMfa(0, "https://app.hidemyemail.dev"))
+        assertFalse(canUsePasskeyForMfa(1, "https://self.example"))
+    }
 }

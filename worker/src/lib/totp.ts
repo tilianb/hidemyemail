@@ -61,13 +61,13 @@ async function hotp(keyBytes: Uint8Array, counter: number): Promise<string> {
 // Accepts ±1 time-step window to tolerate clock drift.
 // Compares all three windows in constant time so the response timing
 // doesn't reveal which window (if any) matched.
-export async function verifyTOTP(secret: string, token: string): Promise<boolean> {
-  if (!/^\d{6}$/.test(token)) return false;
+export async function verifyTOTP(secret: string, token: string): Promise<number | null> {
+  if (!/^\d{6}$/.test(token)) return null;
   const keyBytes = base32Decode(secret);
   const counter = Math.floor(Date.now() / 1000 / 30);
-  let matched = false;
+  let matched: number | null = null;
   for (let i = -1; i <= 1; i++) {
-    if (timingSafeEqual(await hotp(keyBytes, counter + i), token)) matched = true;
+    if (timingSafeEqual(await hotp(keyBytes, counter + i), token)) matched = counter + i;
   }
   return matched;
 }
@@ -85,13 +85,13 @@ export async function hashBackupCode(code: string): Promise<string> {
   return toHex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(normalized)));
 }
 
-// 8 codes, each 5 bytes (40 bits) → 8 base32 chars displayed as XXXX-XXXX
+// 8 codes, each 16 bytes (128 bits), displayed in readable groups.
 export async function generateBackupCodes(): Promise<{ plain: string[]; hashed: string[] }> {
   const plain: string[] = [];
   for (let i = 0; i < 8; i++) {
-    const bytes = crypto.getRandomValues(new Uint8Array(5));
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
     const encoded = base32Encode(bytes);
-    plain.push(`${encoded.slice(0, 4)}-${encoded.slice(4, 8)}`);
+    plain.push(encoded.match(/.{1,4}/g)!.join("-"));
   }
   const hashed = await Promise.all(plain.map(hashBackupCode));
   return { plain, hashed };

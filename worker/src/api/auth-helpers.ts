@@ -20,3 +20,7 @@ export async function hasFreshAuth(c: Context<AppEnv>): Promise<boolean> {
 export function isAuthenticatedNative(c: Context<AppEnv>): boolean {
   return c.get("authSource") === "bearer" && c.req.header("X-Auth-Mode") === "token" && !c.req.header("Origin");
 }
+
+export function freshAuthRequired(c: Context<AppEnv>): Response {
+  return c.json({ error: "Fresh authentication required", code: "fresh_auth_required" }, 401);
+}

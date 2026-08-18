@@ -68,3 +68,9 @@ export async function pruneOldEvents(db: D1Database, now: number): Promise<numbe
   const r = await db.prepare("DELETE FROM events WHERE ts < ?").bind(cutoff).run();
   return r.meta?.changes ?? 0;
 }
+
+export async function pruneExpiredRevokedSessions(db: D1Database, now: number): Promise<number> {
+  const result = await db.prepare("DELETE FROM revoked_sessions WHERE expires_at <= ?")
+    .bind(Math.floor(now / 1000)).run();
+  return result.meta?.changes ?? 0;
+}

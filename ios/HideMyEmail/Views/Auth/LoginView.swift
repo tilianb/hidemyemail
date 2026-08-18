@@ -55,13 +55,15 @@ struct LoginView: View {
                     .controlSize(.large)
                     .disabled(busy || password.isEmpty || !app.hasServer)
 
-                    Button(action: passkeyLogin) {
-                        Label("Sign in with Passkey", systemImage: "person.badge.key")
-                            .frame(maxWidth: .infinity)
+                    if app.serverURLString == AppState.defaultServer {
+                        Button(action: passkeyLogin) {
+                            Label("Sign in with Passkey", systemImage: "person.badge.key")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                        .disabled(busy || !app.hasServer)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .disabled(busy || !app.hasServer)
 
                     // Native passkey association only covers our own domain;
                     // self-hosters sign in through their server's web login
@@ -180,7 +182,7 @@ struct RecoverWithCodeView: View {
                     } header: {
                         Text("New Passphrase")
                     } footer: {
-                        Text("Save this in your password manager now — it won't be shown again.")
+                        Text("Save this in your password manager now — it won't be shown again. Your old recovery codes are no longer valid; generate a new set in Security settings.")
                     }
                     Section {
                         Button("Continue to App") {

@@ -6,7 +6,7 @@
 import { env } from "cloudflare:test";
 import { beforeEach, expect, test } from "vitest";
 import * as q from "../src/db/queries";
-import { pruneOldEvents } from "../src/lib/purge";
+import { pruneExpiredRevokedSessions, pruneOldEvents } from "../src/lib/purge";
 import { resetDb } from "./helpers";
 
 const DB = () => env.DB as D1Database;
@@ -38,6 +38,15 @@ test("pruneOldEvents deletes events older than retention, keeps recent", async (
 
   const remaining = await DB().prepare("SELECT COUNT(*) AS n FROM events").first<{ n: number }>();
   expect(remaining?.n).toBe(1);
+});
+
+test("scheduled purge removes only expired revoked sessions", async () => {
+  const now = Date.now();
+  await DB().prepare("INSERT INTO revoked_sessions (token_hash, expires_at, revoked_at) VALUES ('expired', ?, ?), ('current', ?, ?)")
+    .bind(Math.floor(now / 1000) - 1, now, Math.floor(now / 1000) + 60, now).run();
+  expect(await pruneExpiredRevokedSessions(DB(), now)).toBe(1);
+  expect((await DB().prepare("SELECT token_hash FROM revoked_sessions").all()).results)
+    .toEqual([{ token_hash: "current" }]);
 });
 
 test("pruneOldEvents with retention -1 is a no-op", async () => {
