@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeAll, beforeEach, expect, test } from "vitest";
 import { createApp } from "../src/api/app";
+import { recoveryDigest } from "../src/lib/recovery-auth";
 import { hashPassword } from "../src/lib/auth";
 
 let testEnv: any;
@@ -93,12 +94,12 @@ test("recover with username + recovery code resets passphrase and consumes the c
   const wrong = await app.request("/api/recover/code", { method: "POST", body: JSON.stringify({ username: "recoverme", code: "ZZZZ-ZZZZ" }), headers: TOKEN }, testEnv);
   expect(wrong.status).toBe(400);
 
-  // Correct code → new passphrase, one code consumed (9 remain).
+  // Correct code → new passphrase and the entire recovery-code generation is revoked.
   const ok = await app.request("/api/recover/code", { method: "POST", body: JSON.stringify({ username: "RecoverMe", code }), headers: TOKEN }, testEnv);
   expect(ok.status).toBe(200);
   const body = await ok.json() as any;
   expect(typeof body.passphrase).toBe("string");
-  expect(body.codes_remaining).toBe(9);
+  expect(body.codes_remaining).toBe(0);
 
   // The new passphrase logs in.
   const login = await app.request("/api/login", { method: "POST", body: JSON.stringify({ password: body.passphrase }), headers: J }, testEnv);
@@ -107,12 +108,25 @@ test("recover with username + recovery code resets passphrase and consumes the c
   // The used code can't be replayed.
   const replay = await app.request("/api/recover/code", { method: "POST", body: JSON.stringify({ username: "recoverme", code }), headers: TOKEN }, testEnv);
   expect(replay.status).toBe(400);
+  const secondCopiedCode = await app.request("/api/recover/code", { method: "POST", body: JSON.stringify({ username: "recoverme", code: a.codes[1] }), headers: TOKEN }, testEnv);
+  expect(secondCopiedCode.status).toBe(400);
 });
 
 test("recovery invalidates old session and fresh-auth credentials", async () => {
   const app = createApp();
   const a = await register(app, "horse-staple-battery-invalidate");
   await app.request("/api/account/username", { method: "PATCH", body: JSON.stringify({ username: "invalidate-me" }), headers: { ...J, Authorization: `Bearer ${a.token}` } }, testEnv);
+
+  const adminToken = "admin-recovery-token";
+  const adminCode = "123456";
+  const expiresAt = Date.now() + 60_000;
+  await (env.DB as D1Database).prepare(
+    "UPDATE users SET recovery_token_hash = ?, recovery_code_hash = ?, recovery_expires_at = ?, recovery_code_expires_at = ? WHERE id = ?"
+  ).bind(
+    await recoveryDigest(testEnv.SESSION_SECRET, "token", adminToken),
+    await recoveryDigest(testEnv.SESSION_SECRET, "code", adminCode),
+    expiresAt, expiresAt, a.userId,
+  ).run();
 
   const recovered = await app.request("/api/recover/code", { method: "POST", body: JSON.stringify({ username: "invalidate-me", code: a.codes[0] }), headers: TOKEN }, testEnv);
   expect(recovered.status).toBe(200);
@@ -121,6 +135,12 @@ test("recovery invalidates old session and fresh-auth credentials", async () => 
   expect(oldSession.status).toBe(401);
   const oldFresh = await app.request("/api/account/recovery-codes", { method: "POST", headers: { Authorization: `Bearer ${a.token}`, "X-Fresh-Auth": a.fresh } }, testEnv);
   expect(oldFresh.status).toBe(401);
+  const staleAdminRecovery = await app.request("/api/recover/verify", {
+    method: "POST",
+    headers: TOKEN,
+    body: JSON.stringify({ token: adminToken, code: adminCode }),
+  }, testEnv);
+  expect(staleAdminRecovery.status).toBe(400);
 });
 
 test("concurrent recovery-code redemption has exactly one winner", async () => {

@@ -40,12 +40,17 @@ All endpoints require the bearer key. Errors use addy.io's
 | --- | --- | --- |
 | GET | `/api/v1/api-token-details` | Validate the token; returns its name |
 | GET | `/api/v1/domain-options` | Domains you can create aliases on |
+| GET | `/api/v1/destination-options` | Verified destinations available to the authenticated user |
 | GET | `/api/v1/aliases` | List aliases (`filter[search]=` supported) |
 | POST | `/api/v1/aliases` | Create an alias |
 | GET | `/api/v1/aliases/:id` | Fetch one alias |
 | DELETE | `/api/v1/aliases/:id` | Delete an alias (204) |
 | POST | `/api/v1/active-aliases` | Activate an alias (`{"id": …}`) |
 | DELETE | `/api/v1/active-aliases/:id` | Deactivate an alias (204) |
+
+`GET /api/v1/domain-options` includes `customAliasDomains`, the subset of
+returned domains on which the authenticated user may create a chosen local
+part. Clients should only offer the `custom` format for those domains.
 
 ### POST /api/v1/aliases
 
@@ -54,7 +59,8 @@ All endpoints require the bearer key. Errors use addy.io's
   "domain": "hidemyemail.dev",        // optional — defaults to the main global domain
   "description": "Website: example.com", // optional — stored as the alias label
   "format": "random_characters",      // optional — random_characters (default) | uuid | custom
-  "local_part": "shop"                // required when format is "custom"
+  "local_part": "shop",               // required when format is "custom"
+  "destination_id": "7"               // optional — verified destination from destination-options
 }
 ```
 
@@ -84,4 +90,7 @@ Notes:
   when exceeded).
 - `custom` local parts on a global domain require the admin to enable
   *custom aliases* for that domain; on your own subdomains they always work.
+- `destination_id`, when provided, must identify one of the authenticated
+  user's verified destinations. Without it, global aliases use the user's
+  default verified destination as before.
 - Aliases created here record `source = "api"`.

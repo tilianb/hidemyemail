@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { getCookie } from "hono/cookie";
 import type { Env } from "../types";
 import { verifySession } from "../lib/auth";
+import { isSessionRevoked } from "../lib/session-revocation";
 import { authRoutes } from "./routes/auth";
 import { appAuthRoutes } from "./routes/app-auth";
 import { domainRoutes } from "./routes/domains";
@@ -42,7 +43,7 @@ async function validCookieUser(c: Context<AppEnv>): Promise<number | null> {
   const token = getCookie(c, "__Host-session");
   if (!token) return null;
   const principal = await verifySession(c.env.SESSION_SECRET, token);
-  if (!principal) return null;
+  if (!principal || await isSessionRevoked(c.env.DB, token)) return null;
   const user = await c.env.DB.prepare("SELECT active, deleted_at, auth_version FROM users WHERE id = ?")
     .bind(principal.userId).first<{ active: number; deleted_at: number | null; auth_version: number }>();
   return user?.active === 1 && user.deleted_at === null && user.auth_version === principal.authVersion
@@ -194,6 +195,7 @@ export function createApp() {
     if (!token) return c.json({ error: "Unauthorized" }, 401);
     const principal = await verifySession(c.env.SESSION_SECRET, token);
     if (principal === null) return c.json({ error: "Unauthorized" }, 401);
+    if (await isSessionRevoked(c.env.DB, token)) return c.json({ error: "Unauthorized" }, 401);
     const user = await c.env.DB.prepare("SELECT active, deleted_at, auth_version FROM users WHERE id = ?")
       .bind(principal.userId).first<{ active: number; deleted_at: number | null; auth_version: number }>();
     if (user && user.auth_version !== principal.authVersion) return c.json({ error: "Unauthorized" }, 401);

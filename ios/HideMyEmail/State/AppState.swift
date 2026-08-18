@@ -3,7 +3,7 @@ import Observation
 
 enum AuthPhase: Equatable {
     case loggedOut
-    case awaitingMFA(token: String?)
+    case awaitingMFA(token: String)
     case loggedIn
 }
 
@@ -17,6 +17,9 @@ final class AppState {
     }
 
     private(set) var phase: AuthPhase = .loggedOut
+    /// Changes whenever the in-memory API credential/client generation changes.
+    /// Settings uses this to discard pending sensitive-operation replays.
+    private(set) var sessionGeneration: UInt = 0
     var userName: String = ""
     var isAdmin: Bool = false
 
@@ -66,6 +69,7 @@ final class AppState {
             deleteToken()
             await client?.invalidate()
             client = nil
+            sessionGeneration &+= 1
             userName = ""
             isAdmin = false
             phase = .loggedOut
@@ -82,6 +86,7 @@ final class AppState {
         let token = loadToken(snapshot.origin)
         let operationClient = makeClient(baseURL, token)
         client = operationClient
+        sessionGeneration &+= 1
         guard token != nil else { phase = .loggedOut; return }
         // Validate the restored token by fetching stats.
         do {
@@ -114,7 +119,10 @@ final class AppState {
         let res = try await client.login(password: password)
         try requireCurrent(snapshot, client: client)
         if res.mfaRequired == true {
-            phase = .awaitingMFA(token: res.mfaToken)
+            guard let token = res.mfaToken, !token.isEmpty else {
+                throw APIError.server(status: -1, message: "Server returned an invalid MFA challenge")
+            }
+            phase = .awaitingMFA(token: token)
             return
         }
         try await finishLogin(token: res.token, freshAuth: res.freshAuth, snapshot: snapshot, client: client)
@@ -147,30 +155,40 @@ final class AppState {
         let snapshot = binding.snapshot()
         let client = client ?? makeClient(baseURL, nil)
         self.client = client
+        let mfaToken: String?
+        if case .awaitingMFA(let token) = phase { mfaToken = token } else { mfaToken = nil }
 
-        let opts = try await client.passkeyChallenge()
+        let opts = try await client.passkeyChallenge(mfaToken: mfaToken)
         try requireCurrent(snapshot)
+        guard let passkeyToken = opts.passkeyToken, !passkeyToken.isEmpty else {
+            throw APIError.server(status: -1, message: "Server returned an invalid passkey challenge")
+        }
         guard let challengeData = Data(base64urlEncoded: opts.challenge) else {
             throw APIError.server(status: -1, message: "Malformed challenge")
         }
+        let allowedCredentialIDs = try opts.allowCredentials?.map { credential in
+            guard let id = Data(base64urlEncoded: credential.id) else {
+                throw APIError.server(status: -1, message: "Malformed passkey credential")
+            }
+            return id
+        }
         let rp = opts.rpId ?? baseURL.host ?? "app.hidemyemail.dev"
+        try NativePasskey.validate(origin: ServerOrigin(snapshot.origin), rpID: rp)
 
-        let assertion = try await PasskeyAuthenticator().assert(relyingParty: rp, challenge: challengeData)
+        let assertion = try await PasskeyAuthenticator().assert(
+            relyingParty: rp, challenge: challengeData,
+            allowedCredentialIDs: allowedCredentialIDs
+        )
         try requireCurrent(snapshot)
 
-        var response: [String: Any] = [
-            "id": assertion.credentialID.base64urlEncodedString(),
-            "rawId": assertion.credentialID.base64urlEncodedString(),
-            "type": "public-key",
-            "clientExtensionResults": [String: Any](),
-            "response": [
-                "clientDataJSON": assertion.rawClientDataJSON.base64urlEncodedString(),
-                "authenticatorData": assertion.rawAuthenticatorData.base64urlEncodedString(),
-                "signature": assertion.signature.base64urlEncodedString(),
-                "userHandle": assertion.userID.base64urlEncodedString(),
-            ],
-        ]
-        if let token = opts.passkeyToken { response["passkey_token"] = token }
+        let response = PasskeyAssertionResponse.make(
+            credentialID: assertion.credentialID,
+            clientDataJSON: assertion.rawClientDataJSON,
+            authenticatorData: assertion.rawAuthenticatorData,
+            signature: assertion.signature,
+            userID: assertion.userID,
+            passkeyToken: passkeyToken
+        )
 
         let res = try await client.passkeyVerify(assertion: response)
         try await finishLogin(token: res.token, freshAuth: res.freshAuth, snapshot: snapshot, client: client)
@@ -179,8 +197,9 @@ final class AppState {
     func completeMFA(code: String) async throws {
         let snapshot = binding.snapshot()
         guard let client else { throw APIError.notConfigured }
-        let mfaToken: String?
-        if case .awaitingMFA(let t) = phase { mfaToken = t } else { mfaToken = nil }
+        guard case .awaitingMFA(let mfaToken) = phase else {
+            throw APIError.server(status: -1, message: "No pending MFA challenge")
+        }
         let res = try await client.completeMFA(code: code, mfaToken: mfaToken)
         try await finishLogin(token: res.token, freshAuth: res.freshAuth, snapshot: snapshot, client: client)
     }
@@ -191,6 +210,7 @@ final class AppState {
         await client.setToken(token)
         await client.setFreshAuth(freshAuth)
         saveToken(token, snapshot.origin)
+        sessionGeneration &+= 1
         try await refreshIdentity(client: client, snapshot: snapshot)
         try requireCurrent(snapshot, client: client)
         phase = .loggedIn
@@ -250,6 +270,7 @@ final class AppState {
         // Clear local auth before any suspension. Push cleanup uses the captured
         // old client and cannot later erase a replacement session.
         binding.invalidate()
+        sessionGeneration &+= 1
         deleteToken()
         client = nil
         pendingRecovery = nil
@@ -265,6 +286,7 @@ final class AppState {
 
     private func signOut(snapshot: CredentialBinding.Snapshot, client operationClient: APIClient) async {
         guard isCurrent(snapshot, client: operationClient) else { return }
+        sessionGeneration &+= 1
         deleteToken()
         client = nil
         userName = ""

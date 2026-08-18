@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeAll, expect, test } from "vitest";
 import { createApp } from "../src/api/app";
-import { hashPassword } from "../src/lib/auth";
+import { hashPassword, sha256Base64url, signMfaChallenge, signPasskeyAuthChallenge, signPasskeyMfaChallenge, verifyMfaChallenge, verifyPasskeyMfaChallenge } from "../src/lib/auth";
 import { SETTING_DEFAULTS } from "../src/config";
 
 let testEnv: any;
@@ -49,7 +49,7 @@ test("native bearer flow: login returns token, guarded route accepts it", async 
   expect(login.status).toBe(200);
   const token = (await login.json() as any).token as string;
   expect(typeof token).toBe("string");
-  expect(token.split(".")[0]).toBe("v3");
+  expect(token.split(".")[0]).toBe("v4");
 
   // Guarded route accepts the bearer token without any cookie.
   const authed = await app.request("/api/stats", { headers: { Authorization: `Bearer ${token}` } }, testEnv);
@@ -58,6 +58,74 @@ test("native bearer flow: login returns token, guarded route accepts it", async 
   // A bogus bearer token is rejected.
   const bad = await app.request("/api/stats", { headers: { Authorization: "Bearer not.a.real.token" } }, testEnv);
   expect(bad.status).toBe(401);
+});
+
+test("auth mutations reject form-compatible content types", async () => {
+  const app = createApp();
+  await (env.DB as D1Database).prepare("DELETE FROM rate_limits").run();
+  for (const path of ["/api/login", "/api/register"]) {
+    const response = await app.request(path, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ password: "hunter2" }),
+    }, testEnv);
+    expect(response.status).toBe(415);
+  }
+});
+
+test("logout revokes a copied cookie session and enforces browser origin", async () => {
+  const app = createApp();
+  const requestEnv = { ...testEnv, APP_ORIGIN: "https://app.hidemyemail.dev" };
+  const token = await (await import("../src/lib/auth")).signSession("sek", 1, 3600);
+  const cookie = `__Host-session=${token}`;
+
+  const crossOrigin = await app.request("/api/logout", {
+    method: "POST",
+    headers: { cookie, Origin: "https://evil.example", "Content-Type": "application/json" },
+    body: "{}",
+  }, requestEnv);
+  expect(crossOrigin.status).toBe(403);
+  expect((await app.request("/api/stats", { headers: { cookie } }, requestEnv)).status).toBe(200);
+
+  const logout = await app.request("/api/logout", {
+    method: "POST",
+    headers: { cookie, Origin: requestEnv.APP_ORIGIN, "Content-Type": "application/json" },
+    body: "{}",
+  }, requestEnv);
+  expect(logout.status).toBe(200);
+  expect(logout.headers.get("Cache-Control")).toBe("no-store");
+  expect((await app.request("/api/stats", { headers: { cookie } }, requestEnv)).status).toBe(401);
+});
+
+test("originless native logout revokes its bearer token", async () => {
+  const app = createApp();
+  const token = await (await import("../src/lib/auth")).signSession("sek", 1, 3600);
+  const headers = { Authorization: `Bearer ${token}` };
+  const logout = await app.request("/api/logout", {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: "{}",
+  }, testEnv);
+  expect(logout.status).toBe(200);
+  expect((await app.request("/api/stats", { headers }, testEnv)).status).toBe(401);
+});
+
+test("logout revokes both cookie and bearer sessions when both are presented", async () => {
+  const app = createApp();
+  const cookieToken = await (await import("../src/lib/auth")).signSession("sek", 1, 3600);
+  const bearerToken = await (await import("../src/lib/auth")).signSession("sek", 1, 3600);
+  const logout = await app.request("/api/logout", {
+    method: "POST",
+    headers: {
+      cookie: `__Host-session=${cookieToken}`,
+      Authorization: `Bearer ${bearerToken}`,
+      "Content-Type": "application/json",
+    },
+    body: "{}",
+  }, testEnv);
+  expect(logout.status).toBe(200);
+  expect((await app.request("/api/stats", { headers: { Authorization: `Bearer ${cookieToken}` } }, testEnv)).status).toBe(401);
+  expect((await app.request("/api/stats", { headers: { Authorization: `Bearer ${bearerToken}` } }, testEnv)).status).toBe(401);
 });
 
 test("native bearer flow: fresh_auth token unlocks fresh-auth-gated routes", async () => {
@@ -180,7 +248,8 @@ test("native passkey challenge echoes the challenge token; web does not", async 
   // client can return it on verify.
   const native = await app.request("/api/passkey/challenge", {
     method: "POST",
-    headers: { "X-Auth-Mode": "token" },
+    headers: { "X-Auth-Mode": "token", "Content-Type": "application/json" },
+    body: "{}",
   }, appEnv);
   expect(native.status).toBe(200);
   const nbody = await native.json() as any;
@@ -190,14 +259,15 @@ test("native passkey challenge echoes the challenge token; web does not", async 
   // Web: Origin present → no token leaked into the body.
   const web = await app.request("/api/passkey/challenge", {
     method: "POST",
-    headers: { Origin: "https://app.hidemyemail.dev" },
+    headers: { Origin: "https://app.hidemyemail.dev", "Content-Type": "application/json" },
+    body: "{}",
   }, appEnv);
   expect(web.status).toBe(200);
   expect((await web.json() as any).passkey_token).toBeUndefined();
-});
+}, 10_000);
 
 test("passkey challenge uses the configured custom-domain RP ID", async () => {
-  const res = await createApp().request("/api/passkey/challenge", { method: "POST" }, {
+  const res = await createApp().request("/api/passkey/challenge", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }, {
     ...testEnv,
     APP_ORIGIN: "https://mail.example.net",
   });
@@ -209,10 +279,128 @@ test("passkey challenge fails with a controlled configuration error when APP_ORI
   const app = createApp();
   for (const appOrigin of [undefined, "http://mail.example.net", "not a URL"]) {
     const requestEnv = { ...testEnv, APP_ORIGIN: appOrigin };
-    const res = await app.request("/api/passkey/challenge", { method: "POST" }, requestEnv);
+    const res = await app.request("/api/passkey/challenge", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }, requestEnv);
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ error: "Passkey authentication is not configured" });
   }
+});
+
+test("account-bound passkey MFA challenge restricts credentials and rejects missing passkeys", async () => {
+  const app = createApp();
+  const db = env.DB as D1Database;
+  const requestEnv = { ...testEnv, APP_ORIGIN: "https://app.hidemyemail.dev" };
+  await db.prepare("UPDATE users SET active = 1, deleted_at = NULL, auth_version = 4 WHERE id = 1").run();
+  await db.prepare("DELETE FROM mfa WHERE user_id = 1").run();
+  await db.prepare("DELETE FROM passkey_credentials WHERE user_id = 1").run();
+  await db.prepare("INSERT INTO mfa (user_id, totp_secret, totp_enabled, totp_backup_codes) VALUES (1, 'secret', 1, '[]')").run();
+  const mfaToken = await signMfaChallenge("sek", 1, 4);
+  const cookie = `__Host-mfa-challenge=${mfaToken}`;
+
+  const missing = await app.request("/api/passkey/challenge", {
+    method: "POST", headers: { "Content-Type": "application/json", cookie }, body: JSON.stringify({ mfa: true }),
+  }, requestEnv);
+  expect(missing.status).toBe(409);
+  expect(await missing.json()).toEqual({ error: "No passkeys registered for this account" });
+
+  await db.prepare("INSERT INTO passkey_credentials (id, user_id, public_key, sign_count, transports, created_at) VALUES (?, 1, 'key', 0, ?, ?)")
+    .bind("mfa-credential", JSON.stringify(["internal"]), Date.now()).run();
+  const challenge = await app.request("/api/passkey/challenge", {
+    method: "POST", headers: { "Content-Type": "application/json", cookie }, body: JSON.stringify({ mfa: true }),
+  }, requestEnv);
+  expect(challenge.status).toBe(200);
+  const body = await challenge.json() as any;
+  expect(body.allowCredentials).toEqual([{ id: "mfa-credential", type: "public-key", transports: ["internal"] }]);
+  expect(body.passkey_token).toBeUndefined();
+  const passkeyCookie = challenge.headers.get("set-cookie")!;
+  const signed = decodeURIComponent(passkeyCookie.match(/__Host-passkey-challenge=([^;]+)/)![1]!);
+  expect(await verifyPasskeyMfaChallenge("sek", signed)).toMatchObject({
+    userId: 1,
+    authVersion: 4,
+    challenge: body.challenge,
+    parentArtifactHash: await sha256Base64url(mfaToken),
+    expiresAt: expect.any(Number),
+  });
+});
+
+test("bound passkey challenge rejects stale auth version and issues native token", async () => {
+  const app = createApp();
+  const db = env.DB as D1Database;
+  const requestEnv = { ...testEnv, APP_ORIGIN: "https://app.hidemyemail.dev" };
+  await db.prepare("UPDATE users SET active = 1, deleted_at = NULL, auth_version = 8 WHERE id = 1").run();
+  await db.prepare("DELETE FROM mfa WHERE user_id = 1").run();
+  await db.prepare("DELETE FROM passkey_credentials WHERE user_id = 1").run();
+  await db.prepare("INSERT INTO mfa (user_id, totp_secret, totp_enabled, totp_backup_codes) VALUES (1, 'secret', 1, '[]')").run();
+  await db.prepare("INSERT INTO passkey_credentials (id, user_id, public_key, sign_count, created_at) VALUES ('native-mfa-credential', 1, 'key', 0, ?)").bind(Date.now()).run();
+
+  const staleToken = await signMfaChallenge("sek", 1, 7);
+  const stale = await app.request("/api/passkey/challenge", {
+    method: "POST", headers: { "Content-Type": "application/json", "X-Auth-Mode": "token" },
+    body: JSON.stringify({ mfa: true, mfa_token: staleToken }),
+  }, requestEnv);
+  expect(stale.status).toBe(401);
+
+  const currentToken = await signMfaChallenge("sek", 1, 8);
+  const native = await app.request("/api/passkey/challenge", {
+    method: "POST", headers: { "Content-Type": "application/json", "X-Auth-Mode": "token" },
+    body: JSON.stringify({ mfa: true, mfa_token: currentToken }),
+  }, requestEnv);
+  expect(native.status).toBe(200);
+  const body = await native.json() as any;
+  expect(body.allowCredentials.map((credential: any) => credential.id)).toEqual(["native-mfa-credential"]);
+  expect(await verifyPasskeyMfaChallenge("sek", body.passkey_token)).toMatchObject({
+    userId: 1,
+    authVersion: 8,
+    parentArtifactHash: await sha256Base64url(currentToken),
+    expiresAt: expect.any(Number),
+  });
+});
+
+test("bound passkey verification rejects another account's credential before admission", async () => {
+  const app = createApp();
+  const db = env.DB as D1Database;
+  await db.prepare("UPDATE users SET active = 1, deleted_at = NULL, auth_version = 3 WHERE id = 1").run();
+  const other = await db.prepare(
+    "INSERT INTO users (passphrase_hash, active, auth_version, created_at) VALUES (?, 1, 3, ?)"
+  ).bind(`other-passkey-user-${crypto.randomUUID()}`, Date.now()).run();
+  const otherId = Number(other.meta.last_row_id);
+  await db.prepare(
+    "INSERT INTO passkey_credentials (id, user_id, public_key, sign_count, created_at) VALUES ('other-account-credential', ?, 'key', 0, ?)"
+  ).bind(otherId, Date.now()).run();
+  const parent = await signMfaChallenge("sek", 1, 3);
+  const principal = await verifyMfaChallenge("sek", parent);
+  const token = await signPasskeyMfaChallenge("sek", 1, 3, "challenge", await sha256Base64url(parent), principal!.expiresAt);
+
+  const response = await app.request("/api/passkey/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Auth-Mode": "token" },
+    body: JSON.stringify({ id: "other-account-credential", passkey_token: token }),
+  }, { ...testEnv, APP_ORIGIN: "https://app.hidemyemail.dev" });
+
+  expect(response.status).toBe(401);
+  const body = await response.json() as Record<string, unknown>;
+  expect(body.token).toBeUndefined();
+  expect(body.fresh_auth).toBeUndefined();
+});
+
+test("passkey completion keeps web and native challenge transports separate", async () => {
+  const app = createApp();
+  const token = await signPasskeyAuthChallenge("sek", "challenge");
+  const request = (headers: Record<string, string>) => app.request("/api/passkey/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify({ id: "missing-credential", passkey_token: token }),
+  }, { ...testEnv, APP_ORIGIN: "https://app.hidemyemail.dev" });
+
+  const native = await request({
+    "X-Auth-Mode": "token",
+    cookie: "__Host-passkey-challenge=stale-cookie",
+  });
+  expect(native.status).toBe(401);
+  expect(await native.json()).toEqual({ error: "Unknown credential" });
+
+  const web = await request({});
+  expect(web.status).toBe(401);
+  expect(await web.json()).toEqual({ error: "No challenge" });
 });
 
 test("apple-app-site-association: 404 until APPLE_APP_ID is configured", async () => {
