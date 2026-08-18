@@ -40,6 +40,9 @@ import androidx.compose.ui.unit.sp
 import androidx.credentials.CreatePublicKeyCredentialRequest
 import androidx.credentials.CreatePublicKeyCredentialResponse
 import androidx.credentials.CredentialManager
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.GetPublicKeyCredentialOption
+import androidx.credentials.PublicKeyCredential
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.MultiFormatWriter
 import com.google.zxing.common.BitMatrix
@@ -68,6 +71,9 @@ internal class SecurityOperationGate {
 
 internal fun isCurrentPendingRetry(current: (() -> Unit)?, captured: () -> Unit) = current === captured
 
+internal fun canUsePasskeyForMfa(passkeyCount: Int, serverUrl: String) =
+    passkeyCount > 0 && usesNativePasskeys(serverUrl)
+
 internal fun reauthenticationContinuation(
     retry: () -> Unit,
     replacement: (() -> Unit)?,
@@ -82,7 +88,7 @@ internal fun securityErrorMessage(error: Exception, onUnauthorized: () -> Unit):
 }
 
 @Composable
-fun SecuritySection(app: AppViewModel) {
+internal fun SecuritySection(app: AppViewModel, freshAuth: FreshAuthCoordinator) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var mfa by remember { mutableStateOf<MfaStatus?>(null) }
@@ -98,7 +104,6 @@ fun SecuritySection(app: AppViewModel) {
     var namingPasskey by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableStateOf(0) }
-    var pending by remember { mutableStateOf<(() -> Unit)?>(null) }
     var busy by remember { mutableStateOf(false) }
     val operationGate = remember { SecurityOperationGate() }
 
@@ -119,7 +124,7 @@ fun SecuritySection(app: AppViewModel) {
                 error = null
             } catch (e: CancellationException) {
                 clearSecrets()
-                pending = null
+                freshAuth.clear()
                 throw e
             } catch (e: Exception) {
                 error = securityErrorMessage(e) { client?.let(app::handleAuthFailure) }
@@ -143,13 +148,17 @@ fun SecuritySection(app: AppViewModel) {
                 if (client != null) action(client)
                 error = null
             } catch (e: CancellationException) {
-                clearSecrets(); pending = null; throw e
+                clearSecrets(); freshAuth.clear(); throw e
             } catch (e: Exception) {
                 if (shouldRequestReauthentication(e, mayReauthenticate)) {
-                    pending = reauthenticationContinuation(
-                        retry = { sensitive(mayReauthenticate = false, action = action) },
-                        replacement = afterReauthentication,
-                    )
+                    if (client != null) {
+                        val retry: suspend () -> Unit = if (afterReauthentication != null) {
+                            { afterReauthentication() }
+                        } else {
+                            { action(client) }
+                        }
+                        freshAuth.request(client, retry) { error = it }
+                    }
                 } else error = securityErrorMessage(e) { client?.let(app::handleAuthFailure) }
             } finally {
                 busy = false
@@ -162,9 +171,10 @@ fun SecuritySection(app: AppViewModel) {
         val client = app.api() ?: return@LaunchedEffect
         try {
             mfa = client.mfaStatus()
+            freshAuth.updateMfaEnabled(mfa?.enabled == true)
             passkeys = client.passkeys()
         } catch (e: CancellationException) {
-            clearSecrets(); pending = null; throw e
+            clearSecrets(); freshAuth.clear(); throw e
         } catch (e: Exception) { error = securityErrorMessage(e) { app.handleAuthFailure(client) } }
     }
 
@@ -229,7 +239,9 @@ fun SecuritySection(app: AppViewModel) {
     SectionFooter(error ?: "Protect your account with an authenticator app and device-bound passkeys.")
 
     setup?.let { value -> MfaSetupDialog(value, error, onDismiss = ::clearSecrets) { entered ->
-        operation { client ->
+        // Verification has an action-bound TOTP. If freshness expires here,
+        // keep the setup dialog and require a newly entered code after elevation.
+        sensitive(afterReauthentication = {}) { client ->
                 codes = client.verifyMfa(entered).backupCodes
                 setup = null
                 reload++
@@ -238,40 +250,37 @@ fun SecuritySection(app: AppViewModel) {
     if (codes.isNotEmpty()) BackupCodesDialog(codes, onDismiss = ::clearSecrets)
     codePurpose?.let { purpose ->
         val regenerating = !purpose.startsWith("Disable")
-        CodeDialog(purpose, code, { code = it }, regenerating, onDismiss = ::clearSecrets) {
+        CodeDialog(purpose, code, { code = it }, regenerating, onDismiss = ::clearSecrets, onUsePasskey =
+            if (canUsePasskeyForMfa(passkeys.size, app.serverUrl.value)) {{
+                clearSecrets()
+                operation { client ->
+                    val action = if (regenerating) "backup-codes" else "disable"
+                    val challenge = client.passkeyMfaChallenge(action)
+                    check(isValidNativePasskeyChallenge(app.serverUrl.value, challenge.rpId)) {
+                        "Server returned an invalid passkey RP ID"
+                    }
+                    val credential = CredentialManager.create(context).getCredential(
+                        context,
+                        GetCredentialRequest(listOf(GetPublicKeyCredentialOption(challenge.requestOptionsJson))),
+                    ).credential as? PublicKeyCredential
+                        ?: error("Credential provider returned an unexpected response")
+                    val result = client.completePasskeyMfa(
+                        action, credential.authenticationResponseJson, challenge.passkeyToken,
+                    )
+                    if (regenerating) codes = result.backupCodes
+                    reload++
+                }
+            }} else null,
+        ) {
         val entered = code
         clearSecrets()
-        val afterReauthentication = if (regenerating) null else {
-            { codePurpose = "Disable two-factor auth" }
-        }
+        // Action-bound codes are never retained across elevation. Prompt for a
+        // new code after reauthentication for both mutations.
+        val afterReauthentication = { codePurpose = purpose }
         sensitive(afterReauthentication = afterReauthentication) { client ->
             if (!regenerating) client.disableMfa(entered)
             else codes = client.regenerateMfaBackupCodes(entered).backupCodes
             reload++
-        }
-    } }
-    pending?.let { retry -> ReauthDialog(mfa?.enabled == true, error, onDismiss = { pending = null }) { passphrase, mfaCode ->
-        scope.launch {
-            if (!operationGate.tryAcquire()) return@launch
-            busy = true
-            val client = app.api()
-            var succeeded = false
-            try {
-                if (client != null) client.reauthenticate(passphrase, mfaCode)
-                if (client != null && isCurrentPendingRetry(pending, retry)) {
-                    pending = null
-                    error = null
-                    succeeded = true
-                }
-            } catch (e: CancellationException) {
-                clearSecrets(); pending = null; throw e
-            } catch (e: Exception) {
-                error = securityErrorMessage(e) { client?.let(app::handleAuthFailure) }
-            } finally {
-                busy = false
-                operationGate.release()
-            }
-            if (succeeded) retry()
         }
     } }
     renaming?.let { pk -> NameDialog("Rename Passkey", renameDraft, { renameDraft = it }, { renaming = null }) {
@@ -335,17 +344,17 @@ private fun BackupCodesDialog(codes: List<String>, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun ReauthDialog(mfa: Boolean, error: String?, onDismiss: () -> Unit, onSubmit: (String, String?) -> Unit) {
+internal fun ReauthDialog(mfa: Boolean, error: String?, busy: Boolean = false, onDismiss: () -> Unit, onUsePasskey: (() -> Unit)? = null, onSubmit: (String, String?) -> Unit) {
     var passphrase by remember { mutableStateOf("") }; var code by remember { mutableStateOf("") }
-    AlertDialog(onDismissRequest = { passphrase = ""; code = ""; onDismiss() }, containerColor = Theme.surface2,
+    AlertDialog(onDismissRequest = { if (!busy) { passphrase = ""; code = ""; onDismiss() } }, containerColor = Theme.surface2,
         title = { Text("Confirm it's you", style = Theme.displayStyle(18.sp)) },
         text = { Column { OutlinedTextField(passphrase, { passphrase = it }, label = { Text("Passphrase") }, visualTransformation = PasswordVisualTransformation(), singleLine = true); if (mfa) OutlinedTextField(code, { code = it.take(64) }, label = { Text("Authenticator or backup code") }, singleLine = true, modifier = Modifier.padding(top = 8.dp)); error?.let { Text(it, color = Theme.red, style = Theme.bodyStyle(13.sp), modifier = Modifier.padding(top = 8.dp)) } } },
-        confirmButton = { TextButton(enabled = passphrase.isNotEmpty() && (!mfa || code.isNotBlank()), onClick = { val p = passphrase; val c = code.takeIf { it.isNotBlank() }; passphrase = ""; code = ""; onSubmit(p, c) }) { Text("Continue") } },
-        dismissButton = { TextButton(onClick = { passphrase = ""; code = ""; onDismiss() }) { Text("Cancel") } })
+        confirmButton = { Column { TextButton(enabled = !busy && passphrase.isNotEmpty() && (!mfa || code.isNotBlank()), onClick = { val p = passphrase; val c = code.takeIf { it.isNotBlank() }; passphrase = ""; code = ""; onSubmit(p, c) }) { Text("Continue") }; onUsePasskey?.let { TextButton(enabled = !busy, onClick = it) { Text("Use Passkey") } } } },
+        dismissButton = { TextButton(enabled = !busy, onClick = { passphrase = ""; code = ""; onDismiss() }) { Text("Cancel") } })
 }
 
-@Composable private fun CodeDialog(title: String, value: String, onValue: (String) -> Unit, totpOnly: Boolean, onDismiss: () -> Unit, onSubmit: () -> Unit) =
-    AlertDialog(onDismissRequest = onDismiss, containerColor = Theme.surface2, title = { Text(title, style = Theme.displayStyle(18.sp)) }, text = { OutlinedTextField(value, { onValue(if (totpOnly) it.filter(Char::isDigit).take(6) else it.take(64)) }, label = { Text(if (totpOnly) "6-digit authenticator code" else "Authenticator or backup code") }, singleLine = true) }, confirmButton = { TextButton(enabled = if (totpOnly) value.length == 6 else value.isNotBlank(), onClick = onSubmit) { Text("Continue") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+@Composable private fun CodeDialog(title: String, value: String, onValue: (String) -> Unit, totpOnly: Boolean, onDismiss: () -> Unit, onUsePasskey: (() -> Unit)?, onSubmit: () -> Unit) =
+    AlertDialog(onDismissRequest = onDismiss, containerColor = Theme.surface2, title = { Text(title, style = Theme.displayStyle(18.sp)) }, text = { OutlinedTextField(value, { onValue(if (totpOnly) it.filter(Char::isDigit).take(6) else it.take(64)) }, label = { Text(if (totpOnly) "6-digit authenticator code" else "Authenticator or backup code") }, singleLine = true) }, confirmButton = { Column { TextButton(enabled = if (totpOnly) value.length == 6 else value.isNotBlank(), onClick = onSubmit) { Text("Continue") }; onUsePasskey?.let { TextButton(onClick = it) { Text("Use Passkey") } } } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 
 @Composable private fun NameDialog(title: String, value: String, onValue: (String) -> Unit, onDismiss: () -> Unit, onSubmit: () -> Unit) =
     AlertDialog(onDismissRequest = onDismiss, containerColor = Theme.surface2, title = { Text(title, style = Theme.displayStyle(18.sp)) }, text = { OutlinedTextField(value, onValue, label = { Text("Device name (optional)") }, singleLine = true) }, confirmButton = { TextButton(onClick = onSubmit) { Text("Continue") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })

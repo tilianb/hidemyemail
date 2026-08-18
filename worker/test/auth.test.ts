@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { createPassphraseVerifier, hashPassword, verifyPassphraseVerifier, verifyPassword, signFreshAuth, signSession, verifyFreshAuth, verifySession } from "../src/lib/auth";
+import { createPassphraseVerifier, hashPassword, verifyPassphraseVerifier, verifyPassword, signFreshAuth, signMfaPasskeyChallenge, signSession, verifyFreshAuth, verifyMfaPasskeyChallenge, verifySession } from "../src/lib/auth";
 
 test("password hash + verify", async () => {
   const { saltHex, hashHex } = await hashPassword("hunter2");
@@ -27,8 +27,12 @@ test("passphrase verifier accepts only the exact lowercase v1 format", async () 
 test("session sign/verify round-trip and expiry", async () => {
   const secret = "topsecret";
   const tok = await signSession(secret, 1, 3600, 7);
-  expect(tok).toMatch(/^v3\.1\.7\./);
-  expect(await verifySession(secret, tok)).toEqual({ userId: 1, authVersion: 7 });
+  expect(tok).toMatch(/^v4\.1\.7\./);
+  expect(await verifySession(secret, tok)).toMatchObject({
+    userId: 1,
+    authVersion: 7,
+    expiresAt: Number(tok.split(".")[3]),
+  });
   expect(await verifySession("other", tok)).toBe(null);
   const expired = await signSession(secret, 1, -1, 7);
   expect(await verifySession(secret, expired)).toBe(null);
@@ -41,7 +45,7 @@ test("legacy v2 session tokens verify as auth version zero", async () => {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const sig = [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload)))]
     .map((b) => b.toString(16).padStart(2, "0")).join("");
-  expect(await verifySession(secret, `${payload}.${sig}`)).toEqual({ userId: 42, authVersion: 0 });
+  expect(await verifySession(secret, `${payload}.${sig}`)).toMatchObject({ userId: 42, authVersion: 0, expiresAt: exp });
 });
 
 test("legacy v1 session tokens are rejected", async () => {
@@ -65,6 +69,17 @@ test("fresh auth token is user-bound and short-lived", async () => {
   expect(await verifyFreshAuth(secret, tok, 43, 3)).toBe(false);
   const expired = await signFreshAuth(secret, 42, -1, 3);
   expect(await verifyFreshAuth(secret, expired, 42, 3)).toBe(false);
+});
+
+test("MFA passkey challenge is bound to user, auth version, and action", async () => {
+  const token = await signMfaPasskeyChallenge("topsecret", 42, 3, "disable", "challenge");
+  expect(await verifyMfaPasskeyChallenge("topsecret", token)).toMatchObject({
+    userId: 42,
+    authVersion: 3,
+    action: "disable",
+    challenge: "challenge",
+  });
+  expect(await verifyMfaPasskeyChallenge("wrong", token)).toBeNull();
 });
 
 test("legacy fresh auth tokens verify only as auth version zero", async () => {

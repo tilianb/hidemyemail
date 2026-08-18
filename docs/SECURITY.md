@@ -42,7 +42,20 @@ the AWS signature and certificate before checking the exact `TopicArn`.
 - Authentication rate-limit admission and MFA backup-code consumption use
   conditional D1 writes so concurrent requests cannot share the final slot or
   code.
-- Passkey challenges and native app-auth codes are one-time artifacts.
+- Password-authenticated MFA login challenges contain a random nonce and are
+  claimed once in D1. TOTP, backup-code, and passkey completion share that
+  parent claim, and backup-code or passkey state changes commit atomically with
+  it so a replay cannot mint another session or partially advance state.
+- Passkey challenges and native app-auth codes are one-time artifacts. Passkey
+  assertion counters use compare-and-swap updates, so concurrent assertions
+  verified against the same positive counter cannot both succeed.
+- Sensitive account operations require a 10-minute fresh-auth credential in
+  addition to the seven-day session. When it expires, the dashboard and native
+  apps confirm the current account in place with its passphrase and enabled MFA
+  or with one of that account's passkeys, then retry only the interrupted
+  operation once. Web elevation replaces only the HttpOnly fresh-auth cookie;
+  native elevation replaces only the memory-held fresh-auth token. Neither path
+  changes the session principal or returns a bearer credential to browser code.
 - Account recovery revokes sessions, fresh-auth credentials, MFA, passkeys,
   and API keys by advancing `auth_version` in the winning transaction.
 - Native credentials are bound to canonical HTTPS origins. Origin changes,
@@ -108,7 +121,13 @@ Before making an instance public:
 - Use least-privilege AWS IAM credentials.
 - Verify SPF, DKIM, and DMARC for every sending domain.
 - Configure exact SNS topic ARNs.
-- Configure exact `APP_ORIGIN` before enabling passkeys.
+- Configure exact `APP_ORIGIN` before enabling passkeys. A newly verified
+  passkey can also confirm MFA disable and MFA backup-code regeneration without
+  requiring access to the current authenticator. The Worker binds each
+  passkey challenge to the current account, authentication version, and one
+  selected MFA action, then consumes it once without replacing the session.
+  The same account-bound passkey can refresh the 10-minute authorization window
+  for exports, recovery-code changes, API-key management, and passkey changes.
 - Confirm SES production access if needed.
 - Run a full send-forward-reply test.
 - Monitor SES bounces, complaints, and quotas.
@@ -116,3 +135,19 @@ Before making an instance public:
   configure an overwrite-only trusted client-IP header when proxying.
 - Back up D1 or the Docker `/data` volume before migrations and do not run old
   and new application versions against the database during an upgrade.
+# Authentication hardening
+
+Administrative recovery links and six-digit verification codes are stored only
+as domain-separated keyed digests. Links are generation-bound; codes expire in
+10 minutes and have persistent attempt and resend limits. Upgrading invalidates
+outstanding legacy recovery links/codes and legacy MFA backup-code sets. New MFA
+backup codes contain 128 bits of randomness and should be regenerated after the
+upgrade.
+
+Logout revokes every session token presented by the request server-side,
+including copied browser cookies and native bearer tokens. Reversible account
+deletion also rotates the account authentication generation and revokes MFA,
+passkeys, API keys, recovery codes, and pending recovery credentials; restoring
+the account does not restore those credentials. Successful recovery likewise
+invalidates every recovery-code generation, so copied unused codes cannot retake
+the account.

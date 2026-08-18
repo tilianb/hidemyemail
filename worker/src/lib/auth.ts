@@ -42,10 +42,31 @@ export async function verifyPassphraseVerifier(passphrase: string, verifier: str
   return version === "v1" && !!saltHex && !!hashHex && await verifyPassword(passphrase, saltHex, hashHex);
 }
 
-export async function updatePasskeySignCount(db: D1Database, credentialId: string, newCounter: number): Promise<void> {
-  await db.prepare(
-    "UPDATE passkey_credentials SET sign_count = MAX(sign_count, ?) WHERE id = ?"
-  ).bind(newCounter, credentialId).run();
+export async function updatePasskeySignCount(db: D1Database, credentialId: string, oldCounter: number, newCounter: number): Promise<boolean> {
+  const result = await db.prepare(
+    "UPDATE passkey_credentials SET sign_count = ? WHERE id = ? AND sign_count = ?"
+  ).bind(newCounter, credentialId, oldCounter).run();
+  return result.meta.changes === 1;
+}
+
+export function passkeyArtifactExpiresAt(token: string): number | null {
+  const parts = token.split(".");
+  let index: number;
+  switch (parts[0]) {
+    case "pauth":
+      index = 1;
+      break;
+    case "pauthmfa2":
+      index = 3;
+      break;
+    case "mfa-passkey1":
+      index = 4;
+      break;
+    default:
+      return null;
+  }
+  const value = Number(parts[index]);
+  return Number.isSafeInteger(value) ? value : null;
 }
 
 export async function verifyPassword(password: string, saltHex: string, hashHex: string): Promise<boolean> {
@@ -62,21 +83,24 @@ async function hmac(secret: string, data: string): Promise<string> {
 
 export async function signMfaChallenge(secret: string, userId: number, authVersion: number): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + 300; // 5 minutes
-  const payload = `mfa2.${userId}.${authVersion}.${exp}`;
+  const nonce = toHex(crypto.getRandomValues(new Uint8Array(16)).buffer);
+  const payload = `mfa3.${userId}.${authVersion}.${exp}.${nonce}`;
   return `${payload}.${await hmac(secret, payload)}`;
 }
 
-export async function verifyMfaChallenge(secret: string, token: string): Promise<{ userId: number; authVersion: number } | null> {
+export async function verifyMfaChallenge(secret: string, token: string): Promise<{ userId: number; authVersion: number; expiresAt: number } | null> {
   const parts = token.split(".");
-  if (parts.length !== 5 || parts[0] !== "mfa2") return null;
-  const [, userIdStr, authVersionStr, expStr, sig] = parts;
-  const payload = `mfa2.${userIdStr}.${authVersionStr}.${expStr}`;
+  if (parts.length !== 6 || parts[0] !== "mfa3") return null;
+  const [, userIdStr, authVersionStr, expStr, nonce, sig] = parts;
+  const payload = `mfa3.${userIdStr}.${authVersionStr}.${expStr}.${nonce}`;
   const expected = await hmac(secret, payload);
   if (!timingSafeEqual(sig!, expected)) return null;
-  if (Number(expStr) > Math.floor(Date.now() / 1000)) {
-    return { userId: Number(userIdStr), authVersion: Number(authVersionStr) };
-  }
-  return null;
+  const userId = Number(userIdStr);
+  const authVersion = Number(authVersionStr);
+  const expiresAt = Number(expStr);
+  if (!Number.isSafeInteger(userId) || userId < 1 || !Number.isSafeInteger(authVersion) || authVersion < 0 ||
+      !Number.isSafeInteger(expiresAt) || expiresAt <= Math.floor(Date.now() / 1000) || !/^[a-f0-9]{32}$/.test(nonce!)) return null;
+  return { userId, authVersion, expiresAt };
 }
 
 // Passkey auth challenge (no userId — discoverable credential flow)
@@ -96,6 +120,64 @@ export async function verifyPasskeyAuthChallenge(secret: string, token: string):
   if (!timingSafeEqual(sig!, expected)) return null;
   if (Number(expStr) > Math.floor(Date.now() / 1000)) return challenge!;
   return null;
+}
+
+// Account-bound passkey MFA challenge. This is deliberately a distinct
+// artifact from the discoverable, standalone `pauth` login token: the server
+// derives MFA mode and its principal exclusively from this signed payload. The
+// parent artifact hash binds admission to one password-authenticated login.
+// Format: pauthmfa2.{userId}.{authVersion}.{exp}.{challengeB64url}.{parentHash}.{hmac}
+export async function signPasskeyMfaChallenge(
+  secret: string,
+  userId: number,
+  authVersion: number,
+  challenge: string,
+  parentArtifactHash: string,
+  parentExpiresAt: number,
+): Promise<string> {
+  const exp = Math.min(Math.floor(Date.now() / 1000) + 300, parentExpiresAt);
+  const payload = `pauthmfa2.${userId}.${authVersion}.${exp}.${challenge}.${parentArtifactHash}`;
+  return `${payload}.${await hmac(secret, payload)}`;
+}
+
+export async function verifyPasskeyMfaChallenge(secret: string, token: string): Promise<{
+  userId: number;
+  authVersion: number;
+  challenge: string;
+  parentArtifactHash: string;
+  expiresAt: number;
+} | null> {
+  const parts = token.split(".");
+  if (parts.length !== 7 || parts[0] !== "pauthmfa2") return null;
+  const [, userIdStr, authVersionStr, expStr, challenge, parentArtifactHash, sig] = parts;
+  const payload = `pauthmfa2.${userIdStr}.${authVersionStr}.${expStr}.${challenge}.${parentArtifactHash}`;
+  if (!timingSafeEqual(sig!, await hmac(secret, payload))) return null;
+  const userId = Number(userIdStr);
+  const authVersion = Number(authVersionStr);
+  const exp = Number(expStr);
+  if (!Number.isSafeInteger(userId) || userId < 1 || !Number.isSafeInteger(authVersion) || authVersion < 0 ||
+      !Number.isSafeInteger(exp) || exp <= Math.floor(Date.now() / 1000) || !challenge ||
+      !/^[A-Za-z0-9_-]{43}$/.test(parentArtifactHash!)) return null;
+  return { userId, authVersion, challenge, parentArtifactHash: parentArtifactHash!, expiresAt: exp };
+}
+
+export type ReauthChannel = "web" | "native";
+export async function signReauthPasskeyChallenge(secret: string, userId: number, authVersion: number, channel: ReauthChannel, challenge: string): Promise<string> {
+  const exp = Math.floor(Date.now() / 1000) + 300;
+  const payload = `reauthpk1.${userId}.${authVersion}.${channel}.${exp}.${challenge}`;
+  return `${payload}.${await hmac(secret, payload)}`;
+}
+
+export async function verifyReauthPasskeyChallenge(secret: string, token: string): Promise<{ userId: number; authVersion: number; channel: ReauthChannel; challenge: string; expiresAt: number } | null> {
+  const parts = token.split(".");
+  if (parts.length !== 7 || parts[0] !== "reauthpk1") return null;
+  const [, userId, version, channel, expiration, challenge, signature] = parts;
+  if (channel !== "web" && channel !== "native") return null;
+  const payload = `reauthpk1.${userId}.${version}.${channel}.${expiration}.${challenge}`;
+  if (!timingSafeEqual(signature!, await hmac(secret, payload))) return null;
+  const expiresAt = Number(expiration);
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= Math.floor(Date.now() / 1000)) return null;
+  return { userId: Number(userId), authVersion: Number(version), channel, challenge: challenge!, expiresAt };
 }
 
 // Passkey registration challenge (userId included, user already authenticated)
@@ -139,7 +221,8 @@ export async function verifySecurityHandoff(secret: string, token: string): Prom
 
 export async function signSession(secret: string, userId: number, ttlSeconds: number, authVersion = 0): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
-  const payload = `v3.${userId}.${authVersion}.${exp}`;
+  const nonce = toHex(crypto.getRandomValues(new Uint8Array(16)).buffer);
+  const payload = `v4.${userId}.${authVersion}.${exp}.${nonce}`;
   return `${payload}.${await hmac(secret, payload)}`;
 }
 
@@ -162,6 +245,34 @@ export async function verifyFreshAuth(secret: string, token: string, userId: num
   const expected = await hmac(secret, payload);
   if (!timingSafeEqual(sig!, expected)) return false;
   return Number(expStr) > Math.floor(Date.now() / 1000);
+}
+
+export type MfaPasskeyAction = "disable" | "backup-codes";
+
+export async function signMfaPasskeyChallenge(
+  secret: string,
+  userId: number,
+  authVersion: number,
+  action: MfaPasskeyAction,
+  challenge: string,
+): Promise<string> {
+  const exp = Math.floor(Date.now() / 1000) + 300;
+  const payload = `mfa-passkey1.${userId}.${authVersion}.${action}.${exp}.${challenge}`;
+  return `${payload}.${await hmac(secret, payload)}`;
+}
+
+export async function verifyMfaPasskeyChallenge(
+  secret: string,
+  token: string,
+): Promise<{ userId: number; authVersion: number; action: MfaPasskeyAction; challenge: string } | null> {
+  const parts = token.split(".");
+  if (parts.length !== 7 || parts[0] !== "mfa-passkey1") return null;
+  const [, userIdStr, authVersionStr, action, expStr, challenge, sig] = parts;
+  if (action !== "disable" && action !== "backup-codes") return null;
+  const payload = `mfa-passkey1.${userIdStr}.${authVersionStr}.${action}.${expStr}.${challenge}`;
+  if (!timingSafeEqual(sig!, await hmac(secret, payload))) return null;
+  if (Number(expStr) <= Math.floor(Date.now() / 1000)) return null;
+  return { userId: Number(userIdStr), authVersion: Number(authVersionStr), action, challenge: challenge! };
 }
 
 // App-auth handoff codes (web-session login → native bearer token).
@@ -201,8 +312,20 @@ export async function sha256Base64url(input: string): Promise<string> {
   return btoa(s).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
-export async function verifySession(secret: string, token: string): Promise<{ userId: number; authVersion: number } | null> {
+export async function verifySession(secret: string, token: string): Promise<{ userId: number; authVersion: number; expiresAt: number } | null> {
   const parts = token.split(".");
+  if (parts.length === 6 && parts[0] === "v4") {
+    const [v, userIdStr, authVersionStr, expStr, nonce, sig] = parts;
+    const payload = `${v}.${userIdStr}.${authVersionStr}.${expStr}.${nonce}`;
+    if (!timingSafeEqual(sig!, await hmac(secret, payload))) return null;
+    const userId = Number(userIdStr);
+    const authVersion = Number(authVersionStr);
+    const expiresAt = Number(expStr);
+    if (!Number.isSafeInteger(userId) || userId < 1 || !Number.isSafeInteger(authVersion) || authVersion < 0 ||
+        !Number.isSafeInteger(expiresAt) || !/^[a-f0-9]{32}$/.test(nonce!)) return null;
+    if (expiresAt > Math.floor(Date.now() / 1000)) return { userId, authVersion, expiresAt };
+    return null;
+  }
   const legacy = parts.length === 4 && parts[0] === "v2";
   if (legacy || (parts.length === 5 && parts[0] === "v3")) {
     const [v, userIdStr, versionOrExp, expOrSig, newSig] = parts;
@@ -212,7 +335,7 @@ export async function verifySession(secret: string, token: string): Promise<{ us
     const payload = legacy ? `${v}.${userIdStr}.${expStr}` : `${v}.${userIdStr}.${versionOrExp}.${expStr}`;
     const expected = await hmac(secret, payload);
     if (!timingSafeEqual(sig!, expected)) return null;
-    if (Number(expStr) > Math.floor(Date.now() / 1000)) return { userId: Number(userIdStr), authVersion };
+    if (Number(expStr) > Math.floor(Date.now() / 1000)) return { userId: Number(userIdStr), authVersion, expiresAt: Number(expStr) };
     return null;
   }
   return null;

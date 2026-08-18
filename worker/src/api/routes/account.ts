@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { deleteCookie } from "hono/cookie";
 import type { AppEnv } from "../app";
 import { derivePassphraseHash, timingSafeEqual } from "../../lib/auth";
-import { hasFreshAuth } from "../auth-helpers";
+import { freshAuthRequired, hasFreshAuth } from "../auth-helpers";
 import { decryptDestination } from "../../lib/crypto";
 import { validateUsername } from "../../lib/username";
 import { generateRecoveryCodes } from "../../lib/recovery";
@@ -22,7 +22,7 @@ export function accountRoutes() {
    * plaintext, so a stolen long-lived session cookie alone must not reach it.
    */
   r.get("/export", async (c) => {
-    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
+    if (!(await hasFreshAuth(c))) return freshAuthRequired(c);
     const userId = c.get("userId");
     const db = c.env.DB;
     const key = c.env.DESTINATION_ENCRYPTION_KEY;
@@ -138,6 +138,7 @@ export function accountRoutes() {
       headers: {
         "Content-Type": "application/json",
         "Content-Disposition": `attachment; filename="hidemyemail-export-${ts}.json"`,
+        "Cache-Control": "private, no-store",
       },
     });
   });
@@ -152,7 +153,7 @@ export function accountRoutes() {
   r.post("/delete", async (c) => {
     // Fresh-auth gated on top of the password check: with MFA enabled, a
     // stolen session + password alone must not be able to destroy the account.
-    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
+    if (!(await hasFreshAuth(c))) return freshAuthRequired(c);
     const userId = c.get("userId");
     if (userId === 1) {
       return c.json({ error: "The admin account cannot be self-deleted" }, 403);
@@ -187,9 +188,14 @@ export function accountRoutes() {
 
     // Tombstone the account: stop forwarding & login immediately; schedule purge
     const now = Date.now();
-    await db.prepare(
-      "UPDATE users SET deleted_at = ?, active = 0, forwarding = 0 WHERE id = ?"
-    ).bind(now, userId).run();
+    const authVersion = c.get("authVersion");
+    const [deleted] = await db.batch([
+      db.prepare("UPDATE users SET deleted_at = ?, active = 0, forwarding = 0, auth_version = auth_version + 1, recovery_token = NULL, recovery_expires_at = NULL, recovery_mfa_code = NULL, recovery_token_hash = NULL, recovery_code_hash = NULL, recovery_code_expires_at = NULL, recovery_code_attempts = 0, recovery_code_sent_at = NULL, recovery_code_sends = 0, recovery_codes = NULL WHERE id = ? AND active = 1 AND deleted_at IS NULL AND auth_version = ?").bind(now, userId, authVersion),
+      db.prepare("DELETE FROM api_keys WHERE user_id = ? AND EXISTS (SELECT 1 FROM users WHERE id = ? AND deleted_at = ? AND auth_version = ?)").bind(userId, userId, now, authVersion + 1),
+      db.prepare("DELETE FROM passkey_credentials WHERE user_id = ? AND EXISTS (SELECT 1 FROM users WHERE id = ? AND deleted_at = ? AND auth_version = ?)").bind(userId, userId, now, authVersion + 1),
+      db.prepare("UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL, totp_last_used_counter = NULL WHERE user_id = ? AND EXISTS (SELECT 1 FROM users WHERE id = ? AND deleted_at = ? AND auth_version = ?)").bind(userId, userId, now, authVersion + 1),
+    ]);
+    if (deleted?.meta.changes !== 1) return c.json({ error: "Session expired" }, 401);
 
     // Clear session cookies so the client is logged out immediately
     deleteCookie(c, "__Host-session", { path: "/", secure: true });
@@ -270,11 +276,12 @@ export function accountRoutes() {
    * the kind of operation a stolen long-lived cookie must not be able to do.
    */
   r.post("/recovery-codes", async (c) => {
-    if (!(await hasFreshAuth(c))) return c.json({ error: "Fresh authentication required" }, 401);
+    if (!(await hasFreshAuth(c))) return freshAuthRequired(c);
     const userId = c.get("userId");
     const { plain, hashed } = await generateRecoveryCodes();
-    await c.env.DB.prepare("UPDATE users SET recovery_codes = ? WHERE id = ?")
-      .bind(JSON.stringify(hashed), userId).run();
+    const updated = await c.env.DB.prepare("UPDATE users SET recovery_codes = ? WHERE id = ? AND active = 1 AND deleted_at IS NULL AND auth_version = ?")
+      .bind(JSON.stringify(hashed), userId, c.get("authVersion")).run();
+    if (updated.meta.changes !== 1) return c.json({ error: "Session expired" }, 401);
     return c.json({ codes: plain });
   });
 

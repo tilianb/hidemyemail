@@ -29,9 +29,9 @@ test("base32Encode round-trips fixed bytes", () => {
 
 test("verifyTOTP rejects wrong length code", async () => {
   const secret = generateTOTPSecret();
-  expect(await verifyTOTP(secret, "12345")).toBe(false);
-  expect(await verifyTOTP(secret, "1234567")).toBe(false);
-  expect(await verifyTOTP(secret, "abcdef")).toBe(false);
+  expect(await verifyTOTP(secret, "12345")).toBe(null);
+  expect(await verifyTOTP(secret, "1234567")).toBe(null);
+  expect(await verifyTOTP(secret, "abcdef")).toBe(null);
 });
 
 test("verifyTOTP accepts current code (live clock)", async () => {
@@ -61,8 +61,8 @@ test("verifyTOTP accepts current code (live clock)", async () => {
     (digest[offset + 3]! & 0xff);
   const token = (code % 1_000_000).toString().padStart(6, "0");
 
-  expect(await verifyTOTP(secret, token)).toBe(true);
-  expect(await verifyTOTP(secret, "000000" === token ? "000001" : "000000")).toBe(false);
+  expect(await verifyTOTP(secret, token)).toBe(counter);
+  expect(await verifyTOTP(secret, "000000" === token ? "000001" : "000000")).toBe(null);
 });
 
 test("makeTOTPUri format", () => {
@@ -79,7 +79,7 @@ test("backup codes format and uniqueness", async () => {
   expect(plain).toHaveLength(8);
   expect(hashed).toHaveLength(8);
   for (const code of plain) {
-    expect(code).toMatch(/^[A-Z2-7]{4}-[A-Z2-7]{4}$/);
+    expect(code.replaceAll("-", "")).toMatch(/^[A-Z2-7]{26}$/);
   }
   const unique = new Set(plain);
   expect(unique.size).toBe(8);
@@ -103,9 +103,15 @@ test("verifyBackupCode finds and returns index", async () => {
 test("MFA challenge sign and verify", async () => {
   const secret = "test-secret";
   const token = await signMfaChallenge(secret, 42, 7);
-  expect(token).toMatch(/^mfa2\.42\.7\.\d+\.[a-f0-9]+$/);
-  expect(await verifyMfaChallenge(secret, token)).toEqual({ userId: 42, authVersion: 7 });
+  expect(token).toMatch(/^mfa3\.42\.7\.\d+\.[a-f0-9]{32}\.[a-f0-9]+$/);
+  expect(await verifyMfaChallenge(secret, token)).toMatchObject({ userId: 42, authVersion: 7 });
   expect(await verifyMfaChallenge("wrong-secret", token)).toBeNull();
+});
+
+test("independent MFA challenges do not collide", async () => {
+  const first = await signMfaChallenge("secret", 1, 0);
+  const second = await signMfaChallenge("secret", 1, 0);
+  expect(second).not.toBe(first);
 });
 
 test("MFA challenge with wrong secret returns null", async () => {

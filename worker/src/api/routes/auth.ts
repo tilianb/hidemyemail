@@ -1,16 +1,25 @@
 import { Hono } from "hono";
 import { setCookie, deleteCookie, getCookie } from "hono/cookie";
 import type { AppEnv } from "../app";
-import { verifyPassword, signFreshAuth, verifyFreshAuth, signSession, verifySession, derivePassphraseHash, createPassphraseVerifier, verifyPassphraseVerifier, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge, updatePasskeySignCount } from "../../lib/auth";
+import { verifyPassword, signFreshAuth, verifyFreshAuth, signSession, verifySession, derivePassphraseHash, createPassphraseVerifier, verifyPassphraseVerifier, signMfaChallenge, verifyMfaChallenge, signPasskeyAuthChallenge, verifyPasskeyAuthChallenge, signPasskeyMfaChallenge, verifyPasskeyMfaChallenge, passkeyArtifactExpiresAt, sha256Base64url, timingSafeEqual } from "../../lib/auth";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { getEnvWithOverride, getMainGlobalDomain } from "../../lib/settings";
-import { consumeAuthArtifact, markFailedAttempt, rateLimitFailures } from "../../lib/auth-security";
-import { randomSixDigitCode, setAuthenticatedCookies, wantsToken } from "../auth-route-helpers";
+import { consumeAuthArtifact, finalizeMfaBackupCode, finalizeMfaTotp, finalizePasskeyAssertion, markFailedAttempt, rateLimitFailures } from "../../lib/auth-security";
+import { clearAuthenticatedCookies, randomSixDigitCode, setAuthenticatedCookies, wantsToken } from "../auth-route-helpers";
+import { recoveryDigest } from "../../lib/recovery-auth";
+import { getRpFromOrigin } from "../../lib/webauthn";
 
 const SESSION_TTL = 60 * 60 * 24 * 7; // 7 days
 const FRESH_AUTH_TTL = 60 * 10; // 10 minutes
 export function authRoutes() {
   const r = new Hono<AppEnv>();
+  const jsonMutations = ["/login", "/register", "/restore", "/mfa/complete", "/passkey/challenge", "/passkey/verify", "/recover/send-code", "/recover/verify", "/recover/code", "/logout"];
+  for (const path of jsonMutations) r.use(path, async (c, next) => {
+    if ((c.req.header("Content-Type") ?? "").split(";", 1)[0]!.trim().toLowerCase() !== "application/json") {
+      return c.json({ error: "Content-Type must be application/json" }, 415);
+    }
+    await next();
+  });
   for (const path of ["/login", "/restore", "/register", "/mfa/complete", "/passkey/verify", "/recover/send-code", "/recover/verify", "/recover/code"]) {
     r.use(path, rateLimitFailures());
   }
@@ -105,7 +114,7 @@ export function authRoutes() {
    * Cancels a pending account deletion during the 7-day grace window. Public
    * (the tombstoned user cannot log in), authenticated by passphrase and
    * IP-rate-limited like /login. Restoring re-enables login and forwarding;
-   * with MFA enabled the restored account still requires MFA to log in.
+   * credentials revoked during deletion remain revoked.
    */
   r.post("/restore", async (c) => {
     const { password } = await c.req.json<{ password?: string }>().catch(() => ({ password: "" }));
@@ -184,17 +193,37 @@ export function authRoutes() {
     }
   });
 
-  r.post("/logout", (c) => {
-    deleteCookie(c, "__Host-session", { path: "/", secure: true });
-    deleteCookie(c, "__Host-fresh-auth", { path: "/", secure: true });
+  r.post("/logout", async (c) => {
+    const origin = c.req.header("Origin");
+    if (origin) {
+      let canonicalOrigin: string;
+      try { canonicalOrigin = getRpFromOrigin(c.env.APP_ORIGIN).expectedOrigin; }
+      catch { return c.json({ error: "Application origin is not configured" }, 500); }
+      if (origin !== canonicalOrigin) return c.json({ error: "Forbidden" }, 403);
+    }
+    const tokens = new Set<string>();
+    const cookieToken = getCookie(c, "__Host-session");
+    if (cookieToken) tokens.add(cookieToken);
+    const header = c.req.header("Authorization");
+    if (header?.startsWith("Bearer ")) tokens.add(header.slice(7).trim());
+    for (const token of tokens) {
+      const principal = await verifySession(c.env.SESSION_SECRET, token);
+      if (principal) {
+        const { revokeSession } = await import("../../lib/session-revocation");
+        await revokeSession(c.env.DB, token, principal.expiresAt);
+      }
+    }
+    clearAuthenticatedCookies(c);
+    c.header("Clear-Site-Data", '"cookies", "storage", "cache"');
+    c.header("Cache-Control", "no-store");
     return c.json({ ok: true });
   });
 
   r.post("/mfa/complete", async (c) => {
     const { code, mfa_token } = await c.req.json<{ code: string; mfa_token?: string }>().catch(() => ({ code: "", mfa_token: undefined }));
 
-    // Cookie for the web app; body fallback (mfa_token) for native bearer clients.
-    const challenge = getCookie(c, "__Host-mfa-challenge") || mfa_token;
+    // Keep web artifacts HttpOnly and native artifacts explicitly body-carried.
+    const challenge = wantsToken(c) ? mfa_token ?? null : getCookie(c, "__Host-mfa-challenge") ?? null;
     if (!challenge) return c.json({ error: "No challenge" }, 401);
 
     const principal = await verifyMfaChallenge(c.env.SESSION_SECRET, challenge);
@@ -204,8 +233,8 @@ export function authRoutes() {
     if (!code) return c.json({ error: "Missing code" }, 400);
 
     const mfa = await c.env.DB.prepare(
-      "SELECT m.totp_secret, m.totp_backup_codes, u.auth_version FROM mfa m JOIN users u ON u.id = m.user_id WHERE m.user_id = ? AND m.totp_enabled = 1"
-    ).bind(userId).first<{ totp_secret: string; totp_backup_codes: string | null; auth_version: number }>();
+      "SELECT m.totp_secret, m.totp_backup_codes, m.totp_last_used_counter, u.auth_version FROM mfa m JOIN users u ON u.id = m.user_id WHERE m.user_id = ? AND m.totp_enabled = 1"
+    ).bind(userId).first<{ totp_secret: string; totp_backup_codes: string | null; totp_last_used_counter: number | null; auth_version: number }>();
 
     if (!mfa) return c.json({ error: "MFA not configured" }, 401);
     if (mfa.auth_version !== principal.authVersion) return c.json({ error: "Challenge expired" }, 401);
@@ -216,22 +245,23 @@ export function authRoutes() {
     const secret = await decryptDestination(mfa.totp_secret, c.env.DESTINATION_ENCRYPTION_KEY);
 
     let verified = false;
+    let backupCode = false;
+    let totpCounter: number | null = null;
 
     if (/^\d{6}$/.test(code)) {
-      verified = await verifyTOTP(secret, code);
+      totpCounter = await verifyTOTP(secret, code);
+      const lastCounter = mfa.totp_last_used_counter;
+      verified = totpCounter !== null && (lastCounter === null || totpCounter > lastCounter);
     }
 
     if (!verified) {
       const normalized = code.replace(/[^A-Z0-9]/gi, "").toUpperCase();
-      if (normalized.length === 8) {
+      if (normalized.length === 26) {
         const hashedCodes: string[] = mfa.totp_backup_codes ? JSON.parse(mfa.totp_backup_codes) : [];
         const idx = await verifyBackupCode(normalized, hashedCodes);
         if (idx !== -1) {
-          hashedCodes.splice(idx, 1);
-          const consumed = await c.env.DB.prepare(
-            "UPDATE mfa SET totp_backup_codes = ? WHERE user_id = ? AND totp_backup_codes = ?"
-          ).bind(JSON.stringify(hashedCodes), userId, mfa.totp_backup_codes).run();
-          verified = consumed.meta.changes === 1;
+          backupCode = true;
+          verified = true;
         }
       }
     }
@@ -239,6 +269,35 @@ export function authRoutes() {
     if (!verified) {
       markFailedAttempt(c);
       return c.json({ error: "Invalid code" }, 401);
+    }
+
+    if (backupCode) {
+      let committed = false;
+      // A different challenge may consume a different code after our initial
+      // read. Retry once against that new list so independent logins do not
+      // invalidate each other; replayed parents still lose the artifact insert.
+      for (let attempt = 0; attempt < 2 && !committed; attempt++) {
+        const codesJson = attempt === 0
+          ? mfa.totp_backup_codes
+          : (await c.env.DB.prepare("SELECT totp_backup_codes FROM mfa WHERE user_id = ?")
+              .bind(userId).first<{ totp_backup_codes: string | null }>())?.totp_backup_codes ?? null;
+        const hashedCodes: string[] = codesJson ? JSON.parse(codesJson) : [];
+        const idx = await verifyBackupCode(code, hashedCodes);
+        if (idx === -1) break;
+        hashedCodes.splice(idx, 1);
+        committed = await finalizeMfaBackupCode(
+          c.env.DB, challenge, principal.expiresAt, userId, codesJson!, JSON.stringify(hashedCodes),
+        );
+      }
+      if (!committed) {
+        markFailedAttempt(c);
+        return c.json({ error: "Challenge expired" }, 401);
+      }
+    } else {
+      if (!(await finalizeMfaTotp(c.env.DB, challenge, principal.expiresAt, userId, totpCounter!))) {
+        markFailedAttempt(c);
+        return c.json({ error: "Challenge expired" }, 401);
+      }
     }
 
     deleteCookie(c, "__Host-mfa-challenge", { path: "/", secure: true });
@@ -251,6 +310,8 @@ export function authRoutes() {
   r.post("/passkey/challenge", async (c) => {
     const { generateAuthenticationOptions } = await import("@simplewebauthn/server");
     const { getRpFromOrigin } = await import("../../lib/webauthn");
+    const body: { mfa?: true; mfa_token?: string } = await c.req.json<{ mfa?: true; mfa_token?: string }>().catch(() => ({}));
+    const mfaMode = body.mfa === true;
 
     let rpID: string;
     try {
@@ -259,13 +320,51 @@ export function authRoutes() {
       return c.json({ error: "Passkey authentication is not configured" }, 500);
     }
 
+    let mfaPrincipal: { userId: number; authVersion: number; expiresAt: number } | null = null;
+    let mfaChallenge: string | null = null;
+    let allowCredentials: { id: string; transports?: any[] }[] | undefined;
+    if (mfaMode) {
+      // Web requests use only the HttpOnly cookie; native token mode uses only
+      // the explicit body token. Never let either transport silently fall back
+      // to a standalone ceremony.
+      mfaChallenge = wantsToken(c) ? body.mfa_token ?? null : getCookie(c, "__Host-mfa-challenge") ?? null;
+      if (!mfaChallenge) return c.json({ error: "No MFA challenge" }, 401);
+      mfaPrincipal = await verifyMfaChallenge(c.env.SESSION_SECRET, mfaChallenge);
+      if (!mfaPrincipal) return c.json({ error: "MFA challenge expired" }, 401);
+
+      const user = await c.env.DB.prepare(
+        "SELECT u.active, u.deleted_at, u.auth_version, m.totp_enabled FROM users u JOIN mfa m ON m.user_id = u.id WHERE u.id = ?"
+      ).bind(mfaPrincipal.userId).first<{ active: number; deleted_at: number | null; auth_version: number; totp_enabled: number }>();
+      if (!user || user.active !== 1 || user.deleted_at !== null || user.auth_version !== mfaPrincipal.authVersion || user.totp_enabled !== 1) {
+        return c.json({ error: "MFA challenge expired" }, 401);
+      }
+      const passkeys = await c.env.DB.prepare(
+        "SELECT id, transports FROM passkey_credentials WHERE user_id = ? ORDER BY created_at"
+      ).bind(mfaPrincipal.userId).all<{ id: string; transports: string | null }>();
+      if (!passkeys.results.length) return c.json({ error: "No passkeys registered for this account" }, 409);
+      allowCredentials = passkeys.results.map(passkey => ({
+        id: passkey.id,
+        transports: passkey.transports ? JSON.parse(passkey.transports) : undefined,
+      }));
+    }
+
     const options = await generateAuthenticationOptions({
       rpID,
       userVerification: "required",
-      // Empty allowCredentials → browser shows all resident passkeys for this origin
+      // Standalone remains discoverable; MFA is restricted to this account.
+      allowCredentials,
     });
 
-    const cookie = await signPasskeyAuthChallenge(c.env.SESSION_SECRET, options.challenge);
+    const cookie = mfaPrincipal
+      ? await signPasskeyMfaChallenge(
+          c.env.SESSION_SECRET,
+          mfaPrincipal.userId,
+          mfaPrincipal.authVersion,
+          options.challenge,
+          await sha256Base64url(mfaChallenge!),
+          mfaPrincipal.expiresAt,
+        )
+      : await signPasskeyAuthChallenge(c.env.SESSION_SECRET, options.challenge);
     setCookie(c, "__Host-passkey-challenge", cookie, { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: 300 });
 
     // Token-mode (native) clients can't persist the HttpOnly cookie, so echo the
@@ -279,27 +378,36 @@ export function authRoutes() {
     const response = await c.req.json<AuthenticationResponseJSON & { passkey_token?: string }>().catch(() => null);
     if (!response?.id) return c.json({ error: "Invalid request" }, 400);
 
-    const cookie = getCookie(c, "__Host-passkey-challenge") || response.passkey_token || null;
+    const cookie = wantsToken(c)
+      ? response.passkey_token ?? null
+      : getCookie(c, "__Host-passkey-challenge") ?? null;
     if (!cookie) return c.json({ error: "No challenge" }, 401);
 
-    const expectedChallenge = await verifyPasskeyAuthChallenge(c.env.SESSION_SECRET, cookie);
+    const boundPrincipal = await verifyPasskeyMfaChallenge(c.env.SESSION_SECRET, cookie);
+    const standaloneChallenge = boundPrincipal ? null : await verifyPasskeyAuthChallenge(c.env.SESSION_SECRET, cookie);
+    const expectedChallenge = boundPrincipal?.challenge ?? standaloneChallenge;
     if (!expectedChallenge) return c.json({ error: "Challenge expired" }, 401);
 
     const cred = await c.env.DB.prepare(
-      "SELECT p.user_id, p.public_key, p.sign_count, p.transports, u.auth_version FROM passkey_credentials p JOIN users u ON u.id = p.user_id WHERE p.id = ?"
-    ).bind(response.id).first<{ user_id: number; public_key: string; sign_count: number; transports: string | null; auth_version: number }>();
+      "SELECT p.user_id, p.public_key, p.sign_count, p.transports, u.auth_version, u.active, u.deleted_at, m.totp_enabled FROM passkey_credentials p JOIN users u ON u.id = p.user_id LEFT JOIN mfa m ON m.user_id = u.id WHERE p.id = ?"
+    ).bind(response.id).first<{ user_id: number; public_key: string; sign_count: number; transports: string | null; auth_version: number; active: number; deleted_at: number | null; totp_enabled: number | null }>();
 
     if (!cred) {
       markFailedAttempt(c);
       return c.json({ error: "Unknown credential" }, 401);
     }
+    if (boundPrincipal && (cred.user_id !== boundPrincipal.userId || cred.auth_version !== boundPrincipal.authVersion || cred.active !== 1 || cred.deleted_at !== null || cred.totp_enabled !== 1)) {
+      markFailedAttempt(c);
+      return c.json({ error: "Challenge expired" }, 401);
+    }
 
     const { verifyAuthenticationResponse } = await import("@simplewebauthn/server");
-    const { fromBase64url, getRpFromOrigin } = await import("../../lib/webauthn");
+    const { fromBase64url, getRpFromOrigin, getRegistrationOrigins } = await import("../../lib/webauthn");
     let rpID: string;
-    let expectedOrigin: string;
+    let expectedOrigin: string | string[];
     try {
       ({ rpID, expectedOrigin } = getRpFromOrigin(c.env.APP_ORIGIN));
+      if (wantsToken(c)) expectedOrigin = getRegistrationOrigins(c.env.APP_ORIGIN, c.env.ANDROID_APP_ORIGINS, true);
     } catch {
       return c.json({ error: "Passkey authentication is not configured" }, 500);
     }
@@ -322,7 +430,17 @@ export function authRoutes() {
       markFailedAttempt(c);
       return c.json({ error: "Verification failed" }, 401);
     }
-    if (!(await consumeAuthArtifact(c.env.DB, cookie, Math.floor(Date.now() / 1000) + 300))) {
+    const expiresAt = passkeyArtifactExpiresAt(cookie);
+    if (!expiresAt || !(await finalizePasskeyAssertion(
+      c.env.DB,
+      cookie,
+      expiresAt,
+      response.id,
+      cred.sign_count,
+      result.authenticationInfo.newCounter,
+      boundPrincipal ? { artifactHash: boundPrincipal.parentArtifactHash, expiresAt: boundPrincipal.expiresAt } : undefined,
+    ))) {
+      markFailedAttempt(c);
       return c.json({ error: "Challenge expired" }, 401);
     }
 
@@ -332,9 +450,8 @@ export function authRoutes() {
       if (!user || user.active === 0) return c.json({ error: "Account is disabled" }, 403);
     }
 
-    await updatePasskeySignCount(c.env.DB, response.id, result.authenticationInfo.newCounter);
-
     deleteCookie(c, "__Host-passkey-challenge", { path: "/", secure: true });
+    if (boundPrincipal) deleteCookie(c, "__Host-mfa-challenge", { path: "/", secure: true });
     const { token, freshAuth } = await setAuthenticatedCookies(c, cred.user_id, cred.auth_version);
 
     return c.json(wantsToken(c) ? { ok: true, userId: cred.user_id, token, fresh_auth: freshAuth } : { ok: true, userId: cred.user_id });
@@ -345,13 +462,19 @@ export function authRoutes() {
     if (!token) return c.json({ error: "Invalid request" }, 400);
 
     const db = c.env.DB;
+    const tokenHash = await recoveryDigest(c.env.SESSION_SECRET, "token", token);
+    const now = Date.now();
     const user = await db.prepare(
-      "SELECT id FROM users WHERE recovery_token = ? AND recovery_expires_at > ? AND active = 1"
-    ).bind(token, Date.now()).first<{ id: number }>();
+      "SELECT id, recovery_code_sent_at, recovery_code_sends FROM users WHERE recovery_token_hash = ? AND recovery_expires_at > ? AND active = 1"
+    ).bind(tokenHash, now).first<{ id: number; recovery_code_sent_at: number | null; recovery_code_sends: number }>();
 
     if (!user) {
       markFailedAttempt(c);
       return c.json({ error: "Invalid or expired recovery token" }, 400);
+    }
+    if ((user.recovery_code_sent_at !== null && user.recovery_code_sent_at > now - 60_000) || user.recovery_code_sends >= 5) {
+      markFailedAttempt(c);
+      return c.json({ error: "Recovery code cannot be sent" }, 429);
     }
 
     const dest = await db.prepare("SELECT email FROM destinations WHERE user_id = ? AND is_default = 1").bind(user.id).first<{ email: string }>();
@@ -363,16 +486,19 @@ export function authRoutes() {
 
     const email = await decryptDestination(dest.email, c.env.DESTINATION_ENCRYPTION_KEY);
     const code = randomSixDigitCode();
-
-    await db.prepare("UPDATE users SET recovery_mfa_code = ? WHERE id = ?").bind(code, user.id).run();
+    const codeHash = await recoveryDigest(c.env.SESSION_SECRET, "code", code);
+    const reserved = await db.prepare("UPDATE users SET recovery_code_hash = ?, recovery_code_expires_at = ?, recovery_code_attempts = 0, recovery_code_sent_at = ?, recovery_code_sends = recovery_code_sends + 1 WHERE id = ? AND recovery_token_hash = ? AND recovery_expires_at > ? AND active = 1 AND recovery_code_sends = ? AND (recovery_code_sent_at IS NULL OR recovery_code_sent_at <= ?)")
+      .bind(codeHash, now + 10 * 60_000, now, user.id, tokenHash, now, user.recovery_code_sends, now - 60_000).run();
+    if (reserved.meta.changes !== 1) return c.json({ error: "Recovery code cannot be sent" }, 429);
 
     const sesAccessKeyId = await getEnvWithOverride(db, c.env, "ses_access_key_id");
     const sesSecretAccessKey = await getEnvWithOverride(db, c.env, "ses_secret_access_key");
     const sesRegion = await getEnvWithOverride(db, c.env, "ses_region");
 
+    const sesSend: typeof sendRaw = (c.env as any).__sesSend ?? sendRaw;
     if (sesAccessKeyId && sesSecretAccessKey && sesRegion) {
       const mainGlobalDomain = await getMainGlobalDomain(db, c.env);
-      await sendRaw({
+      try { await sesSend({
         accessKeyId: sesAccessKeyId,
         secretAccessKey: sesSecretAccessKey,
         region: sesRegion
@@ -380,7 +506,15 @@ export function authRoutes() {
         from: `HideMyEmail <noreply@${mainGlobalDomain}>`,
         to: email,
         rawBase64: buildMfaEmail(email, code, mainGlobalDomain)
-      });
+      }); } catch {
+        await db.prepare("UPDATE users SET recovery_code_hash = NULL, recovery_code_expires_at = NULL WHERE id = ? AND recovery_token_hash = ? AND recovery_code_hash = ?")
+          .bind(user.id, tokenHash, codeHash).run();
+        return c.json({ error: "Recovery code could not be delivered" }, 502);
+      }
+    } else {
+      await db.prepare("UPDATE users SET recovery_code_hash = NULL, recovery_code_expires_at = NULL WHERE id = ? AND recovery_token_hash = ? AND recovery_code_hash = ?")
+        .bind(user.id, tokenHash, codeHash).run();
+      return c.json({ error: "Recovery email is not configured" }, 503);
     }
 
     return c.json({ ok: true });
@@ -391,11 +525,19 @@ export function authRoutes() {
     if (!token || !code) return c.json({ error: "Invalid request" }, 400);
 
     const db = c.env.DB;
+    const tokenHash = await recoveryDigest(c.env.SESSION_SECRET, "token", token);
+    const codeHash = await recoveryDigest(c.env.SESSION_SECRET, "code", code);
+    const now = Date.now();
     const user = await db.prepare(
-      "SELECT id, recovery_expires_at, auth_version FROM users WHERE recovery_token = ? AND recovery_mfa_code = ? AND recovery_expires_at > ? AND active = 1"
-    ).bind(token, code, Date.now()).first<{ id: number; recovery_expires_at: number; auth_version: number }>();
+      "SELECT id, recovery_expires_at, recovery_code_expires_at, recovery_code_attempts, recovery_code_hash, auth_version FROM users WHERE recovery_token_hash = ? AND recovery_expires_at > ? AND active = 1"
+    ).bind(tokenHash, now).first<{ id: number; recovery_expires_at: number; recovery_code_expires_at: number | null; recovery_code_attempts: number; recovery_code_hash: string | null; auth_version: number }>();
 
-    if (!user) {
+    if (!user || user.recovery_code_expires_at === null || user.recovery_code_expires_at <= now || user.recovery_code_attempts >= 5 ||
+        !user.recovery_code_hash || !timingSafeEqual(user.recovery_code_hash, codeHash)) {
+      if (user && user.recovery_code_attempts < 5) {
+        await db.prepare("UPDATE users SET recovery_code_attempts = recovery_code_attempts + 1 WHERE id = ? AND recovery_token_hash = ? AND recovery_code_hash IS ? AND recovery_code_attempts < 5")
+          .bind(user.id, tokenHash, user.recovery_code_hash).run();
+      }
       markFailedAttempt(c);
       return c.json({ error: "Invalid token or code" }, 400);
     }
@@ -407,10 +549,10 @@ export function authRoutes() {
     const nextVersion = user.auth_version + 1;
     const [consumed] = await db.batch([
       db.prepare(
-        "UPDATE users SET passphrase_hash = ?, passphrase_verifier = ?, recovery_token = NULL, recovery_expires_at = NULL, recovery_mfa_code = NULL, auth_version = ? WHERE id = ? AND recovery_token = ? AND recovery_mfa_code = ? AND recovery_expires_at = ? AND recovery_expires_at > ? AND auth_version = ? AND active = 1"
-      ).bind(hash, verifier, nextVersion, user.id, token, code, user.recovery_expires_at, Date.now(), user.auth_version),
+        "UPDATE users SET passphrase_hash = ?, passphrase_verifier = ?, recovery_codes = NULL, recovery_token = NULL, recovery_expires_at = NULL, recovery_mfa_code = NULL, recovery_token_hash = NULL, recovery_code_hash = NULL, recovery_code_expires_at = NULL, recovery_code_attempts = 0, recovery_code_sent_at = NULL, recovery_code_sends = 0, auth_version = ? WHERE id = ? AND recovery_token_hash = ? AND recovery_code_hash = ? AND recovery_expires_at = ? AND recovery_expires_at > ? AND recovery_code_expires_at = ? AND recovery_code_expires_at > ? AND recovery_code_attempts < 5 AND auth_version = ? AND active = 1"
+      ).bind(hash, verifier, nextVersion, user.id, tokenHash, codeHash, user.recovery_expires_at, now, user.recovery_code_expires_at, now, user.auth_version),
       db.prepare(
-        "UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL WHERE user_id = ? AND EXISTS (SELECT 1 FROM users WHERE id = ? AND passphrase_hash = ? AND auth_version = ?)"
+        "UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL, totp_last_used_counter = NULL WHERE user_id = ? AND EXISTS (SELECT 1 FROM users WHERE id = ? AND passphrase_hash = ? AND auth_version = ?)"
       ).bind(user.id, user.id, hash, nextVersion),
       db.prepare("DELETE FROM passkey_credentials WHERE user_id = ? AND EXISTS (SELECT 1 FROM users WHERE id = ? AND passphrase_hash = ? AND auth_version = ?)").bind(user.id, user.id, hash, nextVersion),
       db.prepare("DELETE FROM api_keys WHERE user_id = ? AND EXISTS (SELECT 1 FROM users WHERE id = ? AND passphrase_hash = ? AND auth_version = ?)").bind(user.id, user.id, hash, nextVersion),
@@ -467,9 +609,6 @@ export function authRoutes() {
       return c.json({ error: "Invalid username or recovery code" }, 400);
     }
 
-    // Consume the used code so it can't be replayed.
-    hashed.splice(idx, 1);
-
     const { generatePassphrase } = await import("../../lib/passphrase");
     const newPassphrase = generatePassphrase();
     const newHash = await derivePassphraseHash(newPassphrase, c.env.AUTH_PASSWORD_SALT);
@@ -477,10 +616,10 @@ export function authRoutes() {
     const nextVersion = user.auth_version + 1;
     const [consumed] = await db.batch([
       db.prepare(
-        "UPDATE users SET passphrase_hash = ?, passphrase_verifier = ?, recovery_codes = ?, recovery_token = NULL, recovery_expires_at = NULL, recovery_mfa_code = NULL, auth_version = ? WHERE id = ? AND recovery_codes = ? AND auth_version = ? AND active = 1 AND deleted_at IS NULL"
-      ).bind(newHash, verifier, JSON.stringify(hashed), nextVersion, user.id, user.recovery_codes, user.auth_version),
+        "UPDATE users SET passphrase_hash = ?, passphrase_verifier = ?, recovery_codes = NULL, recovery_token = NULL, recovery_expires_at = NULL, recovery_mfa_code = NULL, recovery_token_hash = NULL, recovery_code_hash = NULL, recovery_code_expires_at = NULL, recovery_code_attempts = 0, recovery_code_sent_at = NULL, recovery_code_sends = 0, auth_version = ? WHERE id = ? AND recovery_codes = ? AND auth_version = ? AND active = 1 AND deleted_at IS NULL"
+      ).bind(newHash, verifier, nextVersion, user.id, user.recovery_codes, user.auth_version),
       db.prepare(
-        "UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL WHERE user_id = ? AND EXISTS (SELECT 1 FROM users WHERE id = ? AND passphrase_hash = ? AND auth_version = ?)"
+        "UPDATE mfa SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL, totp_last_used_counter = NULL WHERE user_id = ? AND EXISTS (SELECT 1 FROM users WHERE id = ? AND passphrase_hash = ? AND auth_version = ?)"
       ).bind(user.id, user.id, newHash, nextVersion),
       db.prepare("DELETE FROM passkey_credentials WHERE user_id = ? AND EXISTS (SELECT 1 FROM users WHERE id = ? AND passphrase_hash = ? AND auth_version = ?)").bind(user.id, user.id, newHash, nextVersion),
       db.prepare("DELETE FROM api_keys WHERE user_id = ? AND EXISTS (SELECT 1 FROM users WHERE id = ? AND passphrase_hash = ? AND auth_version = ?)").bind(user.id, user.id, newHash, nextVersion),
@@ -492,8 +631,8 @@ export function authRoutes() {
 
     const { token, freshAuth } = await setAuthenticatedCookies(c, user.id, nextVersion);
     return c.json(wantsToken(c)
-      ? { ok: true, userId: user.id, passphrase: newPassphrase, codes_remaining: hashed.length, token, fresh_auth: freshAuth }
-      : { ok: true, passphrase: newPassphrase, codes_remaining: hashed.length });
+      ? { ok: true, userId: user.id, passphrase: newPassphrase, codes_remaining: 0, token, fresh_auth: freshAuth }
+      : { ok: true, passphrase: newPassphrase, codes_remaining: 0 });
   });
 
   return r;

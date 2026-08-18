@@ -150,6 +150,7 @@ export async function finishMailBookkeeping(db: D1Database, input: {
   subject?: string; bytes?: number; now: number; deliveryToken?: string;
 }): Promise<boolean> {
   const reservation = "EXISTS(SELECT 1 FROM mail_quota_reservations WHERE id=? AND token=? AND state='accepted')";
+  const countColumn = input.kind === "forward" ? "fwd_count" : "reply_count";
   const statements = [
     db.prepare(
       `INSERT INTO events (alias_id,type,external_sender,subject,bytes,detail,ts) SELECT ?,?,?,?,?,NULL,? WHERE ${reservation}`
@@ -162,7 +163,7 @@ export async function finishMailBookkeeping(db: D1Database, input: {
     ).bind(input.aliasId, input.sender, input.now, input.now, input.id, input.token));
   }
   statements.push(
-    db.prepare(`UPDATE aliases SET ${input.kind === "forward" ? "fwd_count" : "reply_count"}=${input.kind === "forward" ? "fwd_count" : "reply_count"}+1,last_seen_at=? WHERE id=? AND ${reservation}`)
+    db.prepare(`UPDATE aliases SET ${countColumn}=${countColumn}+1,last_seen_at=? WHERE id=? AND ${reservation}`)
       .bind(input.now, input.aliasId, input.id, input.token),
     db.prepare("DELETE FROM mail_quota_reservations WHERE id=? AND token=? AND state='accepted'").bind(input.id, input.token),
   );
