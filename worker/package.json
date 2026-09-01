@@ -19,19 +19,19 @@
     "typegen": "wrangler types"
   },
   "dependencies": {
-    "@simplewebauthn/server": "^13.3.2",
+    "@simplewebauthn/server": "^13.3.3",
     "aws4fetch": "^1.0.20",
-    "hono": "^4.13.3",
+    "hono": "^4.13.5",
     "mimetext": "^3.0.28",
     "postal-mime": "^3.0.0"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",
-    "@cloudflare/workers-types": "^5.20260823.1",
-    "@types/node": "^26.2.0",
+    "@cloudflare/workers-types": "^5.20260829.1",
+    "@types/node": "^26.4.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11",
-    "wrangler": "^4.113.0"
+    "wrangler": "^4.127.1"
   },
   "overrides": {
     "esbuild": "^0.28.1",
