@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Extension autofill preserves a field edited while alias generation is pending,
+  notifies form listeners across shadow-DOM boundaries, and cancels pending fills
+  when keyboard focus leaves the chooser. A canceled fill does not delete an
+  alias that the server has already created; it remains in the alias manager.
+
 ## [1.4.0] — 2026-09-06
 
 HideMyEmail 1.4.0 adds an alias manager and click-to-fill controls to the

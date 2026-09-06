@@ -121,6 +121,11 @@
 
 ## What Has Failed
 
+**2026-09-06 — Extension pending fills**
+- Observation: Generation can finish after a page script changes the target value or keyboard focus leaves the inline chooser; bubbling events alone also stop at page-owned shadow roots.
+- Action: Recheck the target value and chooser lifetime before filling, and dispatch composed fill events so outer form listeners observe the update.
+- Confidence: high
+
 **2026-08-01 — iOS nested security sheets**
 - Observation: Presenting the shared fresh-auth sheet while an MFA sheet is still dismissing can strand the pending continuation or make SwiftUI reject the second presentation.
 - Action: Queue fresh auth without presenting it, dismiss the active MFA sheet, and present from that sheet's `onDismiss`; defer reopening MFA UI until the fresh-auth sheet has dismissed.
