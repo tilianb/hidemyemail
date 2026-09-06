@@ -95,7 +95,7 @@ export function createApp() {
       } catch (e) {}
       return "";
     },
-    allowHeaders: ["Content-Type", "Cookie", "Authorization", "X-Auth-Mode"],
+    allowHeaders: ["Content-Type", "Cookie", "Authorization", "X-Auth-Mode", "X-Expected-User-ID"],
     credentials: true
   });
   app.use("*", (c, next) =>
@@ -201,6 +201,12 @@ export function createApp() {
     if (user && user.auth_version !== principal.authVersion) return c.json({ error: "Unauthorized" }, 401);
     if (!user || user.active === 0) return c.json({ error: "Account is disabled" }, 403);
     if (user.deleted_at != null) return c.json({ error: "Account has been deleted" }, 403);
+    // Optional tab-account binding, not an authentication credential. Check
+    // against this request's verified session, not a separate profile fetch.
+    const expectedUserId = c.req.header("X-Expected-User-ID");
+    if (expectedUserId !== undefined && expectedUserId !== String(principal.userId)) {
+      return c.json({ error: "The signed-in account changed. Please reload this tab." }, 409);
+    }
     c.set("userId", principal.userId);
     c.set("authVersion", principal.authVersion);
     c.set("authSource", authSource);

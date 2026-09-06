@@ -267,13 +267,22 @@ export function Admin() {
   async function recoverUserByEmail(id: number) {
     const result = await freshGuard(() => api.adminRecoverUser(id, true), () => recoverUserByEmail(id));
     if (!result.ok) return;
+    if (result.value.delivery === "manual" && result.value.token) {
+      toast("Email delivery failed. Share the recovery link manually.", "error");
+      showRecoveryLink(result.value.token);
+      return;
+    }
     toast("Recovery email sent to user", "success");
   }
 
   async function recoverUserByLink(id: number) {
     const result = await freshGuard(() => api.adminRecoverUser(id, false), () => recoverUserByLink(id));
     if (!result.ok) return;
-    const url = `${window.location.origin}/recover?token=${result.value.token}`;
+    if (result.value.token) showRecoveryLink(result.value.token);
+  }
+
+  function showRecoveryLink(token: string) {
+    const url = `${window.location.origin}/recover?token=${token}`;
     setPromptState({
       title: "Recovery Link",
       body: "Copy this secure 24-hour recovery link and send it to the user:",

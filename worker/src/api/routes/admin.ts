@@ -8,6 +8,7 @@ import { registerAdminSuppressionRoutes } from "./admin/suppressions";
 import { freshAuthRequired, hasFreshAuth } from "../auth-helpers";
 import { generateRecoveryToken, recoveryDigest } from "../../lib/recovery-auth";
 import { getRpFromOrigin } from "../../lib/webauthn";
+import { buildRecoveryEmail } from "../../lib/emails";
 
 const TEST_EMAIL_TYPES = new Set(["recovery", "mfa", "notification", "demo_forward", "demo_oq"]);
 
@@ -101,7 +102,11 @@ export function adminRoutes() {
 
     const { sendEmail } = await c.req.json<{ sendEmail?: boolean }>().catch(() => ({} as any));
 
-    let delivery: { email: string; origin: string } | null = null;
+    const token = generateRecoveryToken();
+    let delivery: {
+      credentials: { accessKeyId: string; secretAccessKey: string; region: string };
+      message: { from: string; to: string; rawBase64: string };
+    } | null = null;
     if (sendEmail) {
       const dest = await db.prepare("SELECT email FROM destinations WHERE user_id = ? AND is_default = 1").bind(id).first<{ email: string }>();
       if (!dest) return c.json({ error: "User has no default destination email" }, 400);
@@ -118,10 +123,24 @@ export function adminRoutes() {
       } catch {
         return c.json({ error: "Application origin is not configured" }, 500);
       }
-      delivery = { email, origin };
+      const sesAccessKeyId = await getEnvWithOverride(db, c.env, "ses_access_key_id");
+      const sesSecretAccessKey = await getEnvWithOverride(db, c.env, "ses_secret_access_key");
+      const sesRegion = await getEnvWithOverride(db, c.env, "ses_region");
+      const mainGlobalDomain = await getMainGlobalDomain(db, c.env);
+      if (!sesAccessKeyId || !sesSecretAccessKey || !sesRegion || !mainGlobalDomain) {
+        return c.json({ error: "Recovery email delivery is not configured" }, 500);
+      }
+      const url = `${origin}/recover?token=${encodeURIComponent(token)}`;
+      delivery = {
+        credentials: { accessKeyId: sesAccessKeyId, secretAccessKey: sesSecretAccessKey, region: sesRegion },
+        message: {
+          from: `HideMyEmail <noreply@${mainGlobalDomain}>`,
+          to: email,
+          rawBase64: buildRecoveryEmail(email, url, mainGlobalDomain),
+        },
+      };
     }
 
-    const token = generateRecoveryToken();
     const tokenHash = await recoveryDigest(c.env.SESSION_SECRET, "token", token);
     const expiresAt = Date.now() + 24 * 3600 * 1000; // 24 hours
 
@@ -130,30 +149,22 @@ export function adminRoutes() {
     if (issued.meta.changes !== 1) return c.json({ error: "User not found" }, 404);
 
     if (delivery) {
-      const { sendRaw } = await import("../../lib/ses");
-      const { buildRecoveryEmail } = await import("../../lib/emails");
-      const url = `${delivery.origin}/recover?token=${encodeURIComponent(token)}`;
-      // rawBase64 will be built in the sendRaw block with mainGlobalDomain
-
-      const sesAccessKeyId = await getEnvWithOverride(db, c.env, "ses_access_key_id");
-      const sesSecretAccessKey = await getEnvWithOverride(db, c.env, "ses_secret_access_key");
-      const sesRegion = await getEnvWithOverride(db, c.env, "ses_region");
-
-      if (sesAccessKeyId && sesSecretAccessKey && sesRegion) {
-        const mainGlobalDomain = await getMainGlobalDomain(db, c.env);
-        await sendRaw({
-          accessKeyId: sesAccessKeyId,
-          secretAccessKey: sesSecretAccessKey,
-          region: sesRegion
-        }, {
-          from: `HideMyEmail <noreply@${mainGlobalDomain}>`,
-          to: delivery.email,
-          rawBase64: buildRecoveryEmail(delivery.email, url, mainGlobalDomain)
+      const sesSend: typeof sendRaw = (c.env as any).__sesSend ?? sendRaw;
+      try {
+        await sesSend(delivery.credentials, delivery.message);
+      } catch {
+        c.header("Cache-Control", "no-store");
+        return c.json({
+          ok: false,
+          delivery: "manual",
+          token,
+          message: "Recovery email could not be sent; use the recovery link instead",
         });
       }
-      return c.json({ ok: true });
+      return c.json({ ok: true, delivery: "email" });
     }
 
+    c.header("Cache-Control", "no-store");
     return c.json({ token });
   });
 
