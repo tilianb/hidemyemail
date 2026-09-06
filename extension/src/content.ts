@@ -33,18 +33,19 @@ function domainResponse(value: unknown): value is InlineOptions {
 export function fillField(input: HTMLInputElement, alias: string): void {
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
   setter?.call(input, alias);
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-  input.dispatchEvent(new Event("change", { bubbles: true }));
+  input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
 }
 
 export function requestAliasOnClick(button: HTMLButtonElement, input: HTMLInputElement, selectedDomain: string | (() => string), selectedDestinationId: string | (() => string), send: Send, finished?: () => void, failed?: () => void, active: () => boolean = () => true): void {
   button.addEventListener("click", () => {
+    const originalValue = input.value;
     const domain = typeof selectedDomain === "function" ? selectedDomain() : selectedDomain;
     const destinationId = typeof selectedDestinationId === "function" ? selectedDestinationId() : selectedDestinationId;
     button.disabled = true;
     void send({ type: "hme:generate", domain, destinationId }).then((response) => {
       if (!active()) return;
-      if (!aliasResponse(response, domain) || !input.isConnected || !isEmailField(input)) { failed?.(); return; }
+      if (!aliasResponse(response, domain) || !input.isConnected || !isEmailField(input) || input.value !== originalValue) { failed?.(); return; }
       fillField(input, response.alias);
       input.focus();
       finished?.();
@@ -186,7 +187,7 @@ export function mountContent(send: Send, shadowMode: ShadowRootMode = "closed"):
       placementTimers = [100, 300, 1000].map((delay) => window.setTimeout(place, delay));
     }
     else if (event.composedPath().includes(host)) return;
-    else if (!panel) hide();
+    else hide();
   };
   const onPointerDown = (event: PointerEvent) => { if (panel && !event.composedPath().includes(host)) close(true); };
   const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape" && panel) { event.preventDefault(); close(true); } };

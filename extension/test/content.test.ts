@@ -73,6 +73,46 @@ test("generation and filling occur only after an explicit click", async () => {
   expect(events).toEqual(["input", "change"]);
 });
 
+test("pending generation does not overwrite a subsequently edited field", async () => {
+  const pending = deferred<unknown>();
+  const input = visibleEmailInput();
+  const button = document.createElement("button");
+  const failed = vi.fn();
+  requestAliasOnClick(button, input, "one.example", "7", () => pending.promise, undefined, failed);
+  button.click();
+  input.value = "chosen@example.com";
+  pending.resolve({ ok: true, alias: "new@one.example" });
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  expect(input.value).toBe("chosen@example.com");
+  expect(failed).toHaveBeenCalledOnce();
+});
+
+test("fill events reach forms outside a page-owned shadow root", () => {
+  const host = document.createElement("div"); document.body.append(host);
+  const input = host.attachShadow({ mode: "open" }).appendChild(document.createElement("input"));
+  const events: string[] = [];
+  host.addEventListener("input", () => events.push("input"));
+  host.addEventListener("change", () => events.push("change"));
+  fillField(input, "safe@example.com");
+  expect(events).toEqual(["input", "change"]);
+});
+
+test("leaving the chooser by keyboard cancels pending generation without stealing focus", async () => {
+  const pending = deferred<unknown>();
+  const send = vi.fn().mockResolvedValueOnce(inlineOptions()).mockReturnValueOnce(pending.promise);
+  const { input, host, shadow } = await mounted(send);
+  shadow.querySelector<HTMLButtonElement>(".trigger")!.click();
+  await vi.waitFor(() => expect(shadow.querySelector("select")).not.toBeNull());
+  shadow.querySelector<HTMLButtonElement>(".panel button")!.click();
+  const next = document.createElement("button"); document.body.append(next); next.focus();
+  expect(shadow.querySelector(".panel")).toBeNull();
+  expect(host.hidden).toBe(true);
+  pending.resolve({ ok: true, alias: "new@one.example" });
+  await Promise.resolve(); await Promise.resolve();
+  expect(input.value).toBe("");
+  expect(document.activeElement).toBe(next);
+});
+
 test("native setter fill dispatches bubbling input and change events", () => {
   const input = document.createElement("input"); document.body.append(input);
   const bubbled: string[] = []; document.body.addEventListener("input", () => bubbled.push("input")); document.body.addEventListener("change", () => bubbled.push("change"));
