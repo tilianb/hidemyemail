@@ -86,6 +86,13 @@ export function isFreshAuthRequired(error: unknown): error is FreshAuthRequiredE
       && (error as { code?: unknown }).code === "fresh_auth_required");
 }
 
+// Cookies are shared across tabs; this tab's displayed account is not. The
+// server checks this hint against the session on the action request itself.
+let expectedUserId: number | null = null;
+function accountHeaders(): Record<string, string> {
+  return expectedUserId === null ? {} : { "X-Expected-User-ID": String(expectedUserId) };
+}
+
 async function error401(res: Response, path = ""): Promise<Error> {
   try {
     const b = await res.json();
@@ -104,7 +111,7 @@ async function error401(res: Response, path = ""): Promise<Error> {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, { ...init, credentials: "include", headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } });
+  const res = await fetch(path, { ...init, credentials: "include", headers: { "Content-Type": "application/json", ...accountHeaders(), ...(init?.headers ?? {}) } });
   if (res.status === 401) throw await error401(res, path);
   if (!res.ok) {
     let msg = `${res.status}`;
@@ -117,6 +124,11 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
       // Ignore JSON parse errors for non-JSON error responses
     }
     throw new Error(msg);
+  }
+  // Explicit sign-in/out in this tab replaces its account context. Requests
+  // in other tabs keep their own binding and cannot silently switch accounts.
+  if (["/api/login", "/api/mfa/complete", "/api/passkey/verify", "/api/logout", "/api/register"].includes(path)) {
+    expectedUserId = null;
   }
   return res.json() as Promise<T>;
 }
@@ -200,7 +212,7 @@ export const api = {
   adminUsers: () => req<{ users: { id: number; created_at: number; alias_count: number; active: number; forwarding: number; name: string | null }[] }>("/api/admin/users"),
   adminDeleteUser: (id: number) => req<{ ok: true }>(`/api/admin/users/${id}`, { method: "DELETE" }),
   adminUpdateUser: (id: number, data: { active?: number; forwarding?: number; name?: string }) => req<{ ok: true }>(`/api/admin/users/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
-  adminRecoverUser: (id: number, sendEmail: boolean) => req<{ token: string; ok?: boolean }>(`/api/admin/users/${id}/recovery`, { method: "POST", body: JSON.stringify({ sendEmail }) }),
+  adminRecoverUser: (id: number, sendEmail: boolean) => req<{ token?: string; ok?: boolean; delivery?: "email" | "manual"; message?: string }>(`/api/admin/users/${id}/recovery`, { method: "POST", body: JSON.stringify({ sendEmail }) }),
   adminCreateDomain: (domain: string) => req<{ ok: true }>("/api/admin/domains", { method: "POST", body: JSON.stringify({ domain }) }),
   adminUpdateDomain: (id: number, data: { allow_custom_aliases?: number; allow_subdomain_aliases?: number; active?: number }) => req<{ ok: true }>(`/api/admin/domains/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   adminVerifyDomain: (id: number) => req<{ ok: true; verified: boolean; error?: string; results?: { verify_txt: boolean; mx: boolean; spf: boolean; wildcard_mx: boolean } }>(`/api/admin/domains/${id}/verify`, { method: "POST" }),
@@ -258,7 +270,7 @@ export const api = {
 
   // Account data export — returns a JSON Blob for download
   exportAccount: async (): Promise<void> => {
-    const res = await fetch("/api/account/export", { credentials: "include" });
+    const res = await fetch("/api/account/export", { credentials: "include", headers: accountHeaders() });
     if (res.status === 401) throw await error401(res);
     if (!res.ok) {
       let msg = `${res.status}`;
@@ -288,7 +300,14 @@ export const api = {
   recoverWithCode: (username: string, code: string) => req<{ ok: true; passphrase: string; codes_remaining: number }>("/api/recover/code", { method: "POST", body: JSON.stringify({ username, code }) }),
 
   // Account profile (username + recovery-code status)
-  profile: () => req<{ id: number; username: string | null; name: string | null; isAdmin: boolean; recovery_codes_remaining: number }>("/api/account/profile"),
+  profile: async () => {
+    const profile = await req<{ id: number; username: string | null; name: string | null; isAdmin: boolean; recovery_codes_remaining: number }>("/api/account/profile");
+    if (expectedUserId !== null && expectedUserId !== profile.id) {
+      throw new Error("The signed-in account changed. Please reload this tab.");
+    }
+    expectedUserId = profile.id;
+    return profile;
+  },
   setUsername: (username: string | null) => req<{ ok: true; username: string | null }>("/api/account/username", { method: "PATCH", body: JSON.stringify({ username }) }),
   recoveryCodesStatus: () => req<{ remaining: number }>("/api/account/recovery-codes"),
   regenerateRecoveryCodes: () => req<{ codes: string[] }>("/api/account/recovery-codes", { method: "POST" }),

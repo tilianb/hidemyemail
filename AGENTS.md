@@ -58,7 +58,7 @@ built dashboard assets.
 | `ios/` | Native SwiftUI app (XcodeGen `project.yml`) |
 | `android/` | Native Android app — Kotlin + Jetpack Compose (Gradle, package `dev.hidemyemail.app`) |
 | `website/` | Astro Starlight docs site, generated from `docs/` + README/CHANGELOG/ROADMAP by `scripts/sync-docs.mjs`; published to GitHub Pages |
-| `.agents/` | Amp orb lifecycle scripts: `setup` installs toolchains/dependencies and seeds local credentials; `resume` repairs paused environments when needed |
+| `.agents/` | Amp orb lifecycle scripts: `setup` adds ZIP tooling to the project pre-setup environment; `resume` repairs paused environments when needed |
 
 ## Mobile (iOS + Android)
 
@@ -158,6 +158,9 @@ CI: `.github/workflows/docs.yml` builds and deploys to GitHub Pages on push to
   not just a session: the `__Host-fresh-auth` cookie for web clients, or the
   `X-Fresh-Auth` header (issued only in token-mode login responses) for
   native bearer clients.
+- Dashboard `X-Expected-User-ID` is an optional tab-account consistency hint,
+  never authentication. Compare it with the verified session in the session
+  guard so shared-cookie changes cannot retarget a stale tab's operation.
 - WebAuthn derives its RP ID and expected origin only from canonical
   `APP_ORIGIN`, never request headers. Passkey challenges and native app-auth
   codes are one-time artifacts; preserve atomic consumption before admission.

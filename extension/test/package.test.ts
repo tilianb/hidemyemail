@@ -29,14 +29,13 @@ test("manifest installs all-sites page integration with a module service worker"
   expect(manifest.web_accessible_resources).toBeUndefined();
 });
 
-test("v1.3.1 popup uses local app branding assets and product copy", () => {
+test("popup version matches its package and uses local app branding", () => {
   const manifest = JSON.parse(readFileSync(resolve(root, "manifest.json"), "utf8"));
   const packageJson = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
   const popup = readFileSync(resolve(root, "popup.html"), "utf8");
   const styles = readFileSync(resolve(root, "src/popup.css"), "utf8");
 
-  expect(manifest.version).toBe("1.3.1");
-  expect(packageJson.version).toBe("1.3.1");
+  expect(manifest.version).toBe(packageJson.version);
   expect(popup).toContain('src="/icons/icon-48.png"');
   expect(popup).toContain("Stay private.");
   expect(popup).toContain("Generate alias");

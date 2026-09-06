@@ -2,6 +2,11 @@
 
 ## What Has Worked
 
+**2026-09-06 — Stale dashboard account binding**
+- Observation: Fresh-auth continuations checked the account only after a freshness error, allowing a stale tab's first action to run against a different account with fresh shared cookies. A profile preflight alone would still leave a race before the mutation.
+- Action: Bind dashboard requests to the loaded account with `X-Expected-User-ID` and compare it to the actual request's verified session before executing the route; reset the tab binding on explicit sign-in/out.
+- Confidence: high
+
 **2026-08-03 — Fresh-auth action continuations**
 - Observation: Fetching account context before every sensitive action adds a failure point and network round trip even when the existing fresh credential is valid.
 - Action: Attempt the sensitive action first; only after `fresh_auth_required`, reserve one pending continuation, capture the current account while preparing elevation, and verify that account again before a single retry.

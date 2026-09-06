@@ -62,6 +62,7 @@ beforeEach(async () => {
   await db.prepare("DELETE FROM destinations WHERE user_id > 1").run();
   await db.prepare("DELETE FROM users WHERE id > 1").run();
   await db.prepare("UPDATE users SET active = 1 WHERE id = 1").run();
+  await db.prepare("UPDATE settings SET value = '' WHERE key IN ('ses_access_key_id', 'ses_secret_access_key', 'ses_region', 'main_global_domain')").run();
   await db.prepare("DELETE FROM rate_limits").run();
 });
 
@@ -478,7 +479,10 @@ test("administrative recovery issuance requires fresh authentication", async () 
   expect(row?.recovery_token_hash).toBe(await recoveryDigest(testEnv.SESSION_SECRET, "token", token));
 });
 
-test("emailed administrative recovery validates prerequisites before replacing recovery state", async () => {
+test.each([
+  ["https://app.example.com", "Recovery email delivery is not configured"],
+  ["not-an-origin", "Application origin is not configured"],
+])("emailed administrative recovery validates prerequisites for %s before replacing state", async (origin, error) => {
   const app = createApp();
   const userId = await makeUser();
   await (env.DB as D1Database).prepare("UPDATE users SET recovery_token_hash = 'existing' WHERE id = ?").bind(userId).run();
@@ -488,10 +492,56 @@ test("emailed administrative recovery validates prerequisites before replacing r
   const cookie = `__Host-session=${await signSession("sek", 1, 3600)}; __Host-fresh-auth=${await signFreshAuth("sek", 1, 300)}`;
   const response = await app.request(`/api/admin/users/${userId}/recovery`, {
     method: "POST", headers: { cookie, "Content-Type": "application/json" }, body: JSON.stringify({ sendEmail: true }),
-  }, { ...testEnv, APP_ORIGIN: "not-an-origin" });
+  }, { ...testEnv, APP_ORIGIN: origin, MAIN_GLOBAL_DOMAIN: "example.com" });
   expect(response.status).toBe(500);
+  expect(await response.json()).toEqual({ error });
   expect((await (env.DB as D1Database).prepare("SELECT recovery_token_hash FROM users WHERE id = ?")
     .bind(userId).first<{ recovery_token_hash: string }>())?.recovery_token_hash).toBe("existing");
+});
+
+test("SES failure returns a non-cacheable manual recovery fallback matching stored state", async () => {
+  const app = createApp();
+  const userId = await makeUser();
+  await (env.DB as D1Database).prepare(
+    "INSERT INTO destinations (user_id, email, email_hash, token, is_default, created_at) VALUES (?, ?, ?, ?, 1, ?)"
+  ).bind(userId, await encryptDestination("recovery@example.com", testEnv.DESTINATION_ENCRYPTION_KEY), `recovery-${userId}`, `token-${userId}`, Date.now()).run();
+  const cookie = `__Host-session=${await signSession("sek", 1, 3600)}; __Host-fresh-auth=${await signFreshAuth("sek", 1, 300)}`;
+  const response = await app.request(`/api/admin/users/${userId}/recovery`, {
+    method: "POST", headers: { cookie, "Content-Type": "application/json" }, body: JSON.stringify({ sendEmail: true }),
+  }, {
+    ...testEnv, APP_ORIGIN: "https://app.example.com", MAIN_GLOBAL_DOMAIN: "example.com",
+    SES_ACCESS_KEY_ID: "access", SES_SECRET_ACCESS_KEY: "secret", SES_REGION: "us-east-1",
+    __sesSend: async () => { throw new Error("sensitive SES failure"); },
+  });
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  const body = await response.json<{ ok: boolean; delivery: string; token: string; message: string }>();
+  expect(body).toMatchObject({ ok: false, delivery: "manual", message: "Recovery email could not be sent; use the recovery link instead" });
+  expect(JSON.stringify(body)).not.toContain("sensitive SES failure");
+  const row = await (env.DB as D1Database).prepare("SELECT recovery_token_hash FROM users WHERE id = ?")
+    .bind(userId).first<{ recovery_token_hash: string }>();
+  expect(row?.recovery_token_hash).toBe(await recoveryDigest(testEnv.SESSION_SECRET, "token", body.token));
+});
+
+test("emailed administrative recovery reports successful SES delivery without exposing token", async () => {
+  const app = createApp();
+  const userId = await makeUser();
+  await (env.DB as D1Database).prepare(
+    "INSERT INTO destinations (user_id, email, email_hash, token, is_default, created_at) VALUES (?, ?, ?, ?, 1, ?)"
+  ).bind(userId, await encryptDestination("recovery@example.com", testEnv.DESTINATION_ENCRYPTION_KEY), `recovery-${userId}`, `token-${userId}`, Date.now()).run();
+  const sent: any[] = [];
+  const cookie = `__Host-session=${await signSession("sek", 1, 3600)}; __Host-fresh-auth=${await signFreshAuth("sek", 1, 300)}`;
+  const response = await app.request(`/api/admin/users/${userId}/recovery`, {
+    method: "POST", headers: { cookie, "Content-Type": "application/json" }, body: JSON.stringify({ sendEmail: true }),
+  }, {
+    ...testEnv, APP_ORIGIN: "https://app.example.com", MAIN_GLOBAL_DOMAIN: "example.com",
+    SES_ACCESS_KEY_ID: "access", SES_SECRET_ACCESS_KEY: "secret", SES_REGION: "us-east-1",
+    __sesSend: async (_creds: any, message: any) => { sent.push(message); return "message-id"; },
+  });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ ok: true, delivery: "email" });
+  expect(sent).toHaveLength(1);
+  expect(sent[0]).toMatchObject({ to: "recovery@example.com", from: "HideMyEmail <noreply@example.com>" });
 });
 
 test("P4: generated recovery passphrases have at least 100 bits of entropy from current word list", () => {
