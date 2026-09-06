@@ -14,12 +14,52 @@ test.each([
   ["email type", '<input type="email">'],
   ["autocomplete token", '<input type="text" autocomplete="section-login email">'],
   ["name metadata", '<input type="text" name="billing_email_address">'],
-  ["associated label", '<label for="account">E-mail address</label><input id="account" type="search">'],
+  ["associated label", '<label for="account">E-mail address</label><input id="account" type="text">'],
   ["accessible label", '<input type="text" aria-label="Mail address">'],
+  ["referenced labels", '<span id="required">Required</span><span id="address">Email address</span><input aria-labelledby="required missing address">'],
 ])("detects %s without inspecting values", (_name, html) => {
   document.body.innerHTML = html;
   const input = visible(document.querySelector("input")!);
   input.value = "private page value";
+  expect(isEmailField(input)).toBe(true);
+});
+
+// Adapted DDG matching cases; see THIRD_PARTY_NOTICES.md. Extended with
+// local multilingual, token-boundary, and root-scoping regression cases.
+test.each([
+  "courriel", "メールアドレス", "correo electrónico", "posta elettronica",
+  "e-mailadres", "e-postadress", "Confirm email", "emailAddress",
+])("recognizes email label %s", (label) => {
+  document.body.innerHTML = '<label><input type="text"></label>';
+  document.querySelector("label")!.prepend(document.createTextNode(label));
+  expect(isEmailField(visible(document.querySelector("input")!))).toBe(true);
+});
+
+test.each([
+  '<input type="search" placeholder="Email address">',
+  '<input role="searchbox" name="email">',
+  '<input name="email-search">',
+  '<input placeholder="Filter by email">',
+  '<input aria-label="Email subject">',
+  '<input name="emailVerificationCode">',
+  '<input name="email_code" autocomplete="email">',
+  '<input type="email" autocomplete="one-time-code">',
+  '<span id="label">Email OTP</span><input aria-labelledby="label">',
+  '<input name="voicemail">',
+  '<input name="mail">',
+  '<input value="courriel">',
+])("does not offer aliases for non-address control %s", (html) => {
+  document.body.innerHTML = html;
+  expect(isEmailField(visible(document.querySelector("input")!))).toBe(false);
+});
+
+test("resolves referenced labels within the input's shadow root, not the document", () => {
+  document.body.innerHTML = '<span id="address">Email address</span><div></div>';
+  const shadow = document.querySelector("div")!.attachShadow({ mode: "open" });
+  shadow.innerHTML = '<span id="address">Username</span><input aria-labelledby="address">';
+  const input = visible(shadow.querySelector("input")!);
+  expect(isEmailField(input)).toBe(false);
+  shadow.querySelector("span")!.textContent = "courriel";
   expect(isEmailField(input)).toBe(true);
 });
 

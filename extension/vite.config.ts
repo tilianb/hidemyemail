@@ -15,6 +15,7 @@ export default defineConfig({
     name: "extension-static-files",
     closeBundle() {
       copyFileSync("manifest.json", "dist/manifest.json");
+      for (const file of ["THIRD_PARTY_NOTICES.md", "DUCKDUCKGO_LICENSE.md"]) copyFileSync(file, `dist/${file}`);
       mkdirSync("dist/icons", { recursive: true });
       cpSync("icons", "dist/icons", { recursive: true });
     },

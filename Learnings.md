@@ -2,6 +2,11 @@
 
 ## What Has Worked
 
+**2026-09-06 — Open-shadow autofill integration**
+- Observation: Document hit-testing reports a shadow input's host, whose rectangle was incorrectly classified as a competing overlay. Document subtree observers also miss label changes within shadow roots.
+- Action: Exclude the target's shadow-host ancestor chain from overlay collisions and observe that chain's roots while the target is active. Verify with rendered web-component fields, not only mocked focus paths.
+- Confidence: high
+
 **2026-09-06 — Stale dashboard account binding**
 - Observation: Fresh-auth continuations checked the account only after a freshness error, allowing a stale tab's first action to run against a different account with fresh shared cookies. A profile preflight alone would still leave a race before the mutation.
 - Action: Bind dashboard requests to the loaded account with `X-Expected-User-ID` and compare it to the actual request's verified session before executing the route; reset the tab binding on explicit sign-in/out.
@@ -53,6 +58,11 @@
 - Confidence: high
 
 ## Patterns and Preferences
+
+**2026-09-06 — Autofill library evaluation**
+- Observation: DuckDuckGo Autofill offers Apache-2.0 email matching and form fixtures, but its package entry starts DuckDuckGo-specific device adapters rather than exposing a standalone detector. HideMyEmail already implements composed focus paths, native-setter filling, and overlay collision handling.
+- Action: Prefer selective, attributed detection rules and regression fixtures over importing the full DuckDuckGo runtime or migrating extension frameworks solely for autofill; preserve explicit-click generation and avoid GPL Bitwarden code in the MIT extension.
+- Confidence: high
 
 **2026-08-03 — Hybrid Namespace runner allocation**
 - Observation: At this repository's run volume, paid persistent cache storage costs more than the compute time it saves; two concurrent 4x8 Android/Java jobs use only 8 vCPU and 16 GB, while Docker can retain the cacheless default profile's remote builder independently of lightweight workflow jobs.

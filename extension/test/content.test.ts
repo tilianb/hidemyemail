@@ -14,6 +14,8 @@ afterEach(() => {
   Object.defineProperty(window, "innerWidth", { configurable: true, value: originalInnerWidth });
   Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });
   vi.restoreAllMocks();
+  // Timer spies must restore before fake timers, or they reinstall fake globals.
+  vi.useRealTimers();
 });
 
 function rect(left: number, top: number, width: number, height: number): DOMRect {
@@ -35,6 +37,20 @@ async function mounted(send: (message: unknown) => Promise<unknown> = vi.fn(asyn
   await vi.waitFor(() => expect(host.hidden).toBe(false));
   return { input, host, shadow: host.shadowRoot!, send };
 }
+
+test.each(["reference", "text", "role"])("hides controls when accessible email metadata changes via %s", async (change) => {
+  const { input, host } = await mounted();
+  input.type = "text";
+  const label = document.createElement("span"); label.id = "email-label"; label.textContent = "courriel";
+  document.body.append(label); input.setAttribute("aria-labelledby", label.id);
+  // Let the existing child/type mutations and initial placement timers settle.
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  expect(host.hidden).toBe(false);
+  if (change === "reference") input.setAttribute("aria-labelledby", "missing");
+  else if (change === "text") label.firstChild!.textContent = "Username";
+  else input.setAttribute("role", "searchbox");
+  await vi.waitFor(() => expect(host.hidden).toBe(true));
+});
 
 test("stays hidden until an autofocused field has been positioned", () => {
   const input = document.createElement("input"); input.type = "email";
@@ -291,7 +307,6 @@ test("moves dynamically for late closed-shadow autofill UI with mismatched host 
     expect(host.style.left).toBe("293px");
   } finally {
     Reflect.deleteProperty(document, "elementsFromPoint");
-    vi.useRealTimers();
   }
 });
 
@@ -314,7 +329,6 @@ test("caches overlay scans during rapid placement and invalidates them on page m
     expect(elementsFromPoint.mock.calls.length).toBeGreaterThan(initialScans);
   } finally {
     Reflect.deleteProperty(document, "elementsFromPoint");
-    vi.useRealTimers();
   }
 });
 
@@ -342,7 +356,6 @@ test.each(["type", "class", "style", "detached"])("hides mounted controls when t
   else input.remove();
   await vi.runAllTimersAsync();
   expect(host.hidden).toBe(true);
-  vi.useRealTimers();
 });
 
 test("does not schedule mutation timers or animation frames without an active target", async () => {
@@ -355,7 +368,6 @@ test("does not schedule mutation timers or animation frames without an active ta
   expect(timeout).not.toHaveBeenCalled();
   window.dispatchEvent(new Event("resize"));
   expect(frame).not.toHaveBeenCalled();
-  vi.useRealTimers();
 });
 
 test("uses the first eligible input in a page-owned open shadow root focus path", async () => {
@@ -378,6 +390,31 @@ test("uses the first eligible input in a page-owned open shadow root focus path"
   pageHost.dispatchEvent(focus);
 
   await vi.waitFor(() => expect(extensionHost.hidden).toBe(false));
+});
+
+test.each(["collision", "label mutation"])("supports page shadow components during %s", async (scenario) => {
+  const pageHost = document.createElement("div"); document.body.append(pageHost);
+  const root = pageHost.attachShadow({ mode: "open" });
+  root.innerHTML = '<span id="label">courriel</span><input aria-labelledby="label">';
+  const input = root.querySelector<HTMLInputElement>("input")!;
+  vi.spyOn(input, "getBoundingClientRect").mockReturnValue(rect(100, 100, 250, 40));
+  vi.spyOn(pageHost, "getBoundingClientRect").mockReturnValue(rect(0, 0, 500, 200));
+  Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: () => scenario === "collision" ? [pageHost] : [] });
+  try {
+    const host = mountContent(vi.fn(), "open");
+    const focus = new FocusEvent("focusin", { bubbles: true, composed: true });
+    Object.defineProperty(focus, "composedPath", { value: () => [input, root, pageHost, document.body, document, window] });
+    pageHost.dispatchEvent(focus);
+    await vi.waitFor(() => expect(host.hidden).toBe(false));
+    expect(host.style.left).toBe("318px");
+    if (scenario === "label mutation") {
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+      root.querySelector("span")!.firstChild!.textContent = "Username";
+      await vi.waitFor(() => expect(host.hidden).toBe(true));
+    }
+  } finally {
+    Reflect.deleteProperty(document, "elementsFromPoint");
+  }
 });
 
 test("observes attributes only while a target is active and reverts after it closes", async () => {
@@ -431,7 +468,6 @@ test("reattaches a removed host without scheduling work until a target is focuse
   expect(frame).toHaveBeenCalledOnce();
   await vi.runAllTimersAsync();
   expect(host.hidden).toBe(false);
-  vi.useRealTimers();
 });
 
 test("reattaches a removed host and teardown prevents listener and observer leaks", async () => {
