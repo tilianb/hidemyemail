@@ -1,29 +1,23 @@
 # Changelog
 
-## Unreleased
-
-- Hardened administrative account recovery with hashed, generation-bound
-  links and codes, persistent attempt/resend limits, and atomic credential
-  revocation. Upgrading invalidates outstanding recovery links/codes.
-- MFA backup codes now contain 128 bits of entropy. Existing shorter MFA backup
-  code sets are invalidated on upgrade and must be regenerated.
-- Logout now revokes the exact server-side session (including copied cookies or
-  native bearer tokens), and account deletion rotates sessions and revokes MFA,
-  passkeys, API keys, recovery codes, and pending recovery credentials so
-  restore cannot resurrect them.
-- Account data exports are now explicitly marked private and non-cacheable.
-
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-09-06
+
+HideMyEmail 1.4.0 adds an alias manager and click-to-fill controls to the
+Chromium extension, brings in-place security confirmation to all official
+clients, and strengthens account recovery, session revocation, and MFA replay
+protection.
+
 ### Added
 
 - Dashboard, iOS, and Android passphrase sign-in can now use an account-bound
   registered passkey instead of a TOTP or backup code when MFA is enabled.
-- Chromium extension v1.3.1 can search, copy, activate, deactivate, and delete
+- Chromium extension v1.4.0 can search, copy, activate, deactivate, and delete
   aliases from a new manager tab. Alias creation now supports random, UUID,
   and custom local parts plus optional descriptions, and the popup can select
   which verified destination receives each new alias's mail.
@@ -49,7 +43,7 @@ All notable changes to this project are documented here. The format follows
   GitHub Actions, while iOS changes on `main` continue to upload automatically.
   Branch builds use the project marketing version and a globally unique CI
   build number; tagged releases continue to derive their version from the tag.
-- Chromium extension v1.3.1 now matches the native app and dashboard branding
+- Chromium extension v1.4.0 now matches the native app and dashboard branding
   with local product fonts, the app envelope icon, and a clearer connected
   alias generator and setup flow. New connections default to
   `https://app.hidemyemail.dev` while self-hosted deployments remain supported.
@@ -68,6 +62,25 @@ All notable changes to this project are documented here. The format follows
 
 ### Security
 
+- Hardened administrative account recovery with hashed, generation-bound
+  links and codes, persistent attempt/resend limits, and atomic credential
+  revocation. Upgrading invalidates outstanding recovery links/codes.
+- MFA backup codes now contain 128 bits of entropy. Existing shorter MFA backup
+  code sets are invalidated on upgrade and must be regenerated. TOTP time steps
+  are consumed atomically to prevent concurrent login and reauthentication replay.
+- Logout now revokes the exact server-side session (including copied cookies or
+  native bearer tokens), and account deletion rotates sessions and revokes MFA,
+  passkeys, API keys, recovery codes, and pending recovery credentials so
+  restore cannot resurrect them.
+- Account data exports are now explicitly marked private and non-cacheable.
+- Dashboard requests bind to the account loaded in that tab. If another tab
+  changes the signed-in account, the server rejects mismatched requests rather
+  than exporting or changing the new account's security settings.
+- Administrative recovery validates email configuration before replacing an
+  existing link. If delivery fails after issuance, the admin receives a
+  non-cacheable manual recovery link instead of a false delivery confirmation.
+- Updated Docker's HTTP client dependency and the documentation build's YAML
+  and identifier dependencies to address published security advisories.
 - Password-authenticated MFA login challenges are now random, one-use
   artifacts. TOTP, backup-code, and passkey completion compete for the same
   durable claim, preventing a captured challenge from minting multiple sessions
@@ -87,6 +100,22 @@ All notable changes to this project are documented here. The format follows
   pages. Page code receives no API key or alias inventory: a trusted extension
   service worker owns authenticated API calls, while the content script reads
   only candidate field metadata and geometry and fills only after user action.
+
+### Upgrade Notes
+
+- Back up D1 or the Docker `/data` volume before upgrading. Apply migration
+  `0034_auth_hardening.sql` before serving the new Worker; the deployment script
+  and Docker startup apply migrations automatically. Do not run old and new
+  versions against the same database during the upgrade.
+- Migration 0034 invalidates pending administrative recovery links/codes and
+  existing MFA backup-code sets. Issue replacement recovery links as needed,
+  and ask MFA users to regenerate and save their backup codes. Authenticator
+  enrollment, passkeys, and self-service recovery codes are not cleared by this
+  migration.
+- No new environment variables or configuration settings are required. Keep
+  canonical `APP_ORIGIN` and SES sending credentials configured for recovery.
+- The extension now requests HTTP/HTTPS page access for click-to-fill. Review
+  and accept the updated permissions when installing or updating it.
 
 ## [1.3.0] — 2026-07-27
 
@@ -479,7 +508,8 @@ encryption, deployment, and release safety for every installation.
 Pre-v1 baseline: core alias forwarding, reply-from-alias, MFA + passkeys,
 admin settings, Docker self-host, Cloudflare Workers deploy.
 
-[Unreleased]: https://github.com/tilianb/hidemyemail/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/tilianb/hidemyemail/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/tilianb/hidemyemail/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/tilianb/hidemyemail/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/tilianb/hidemyemail/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/tilianb/hidemyemail/compare/v1.1.1...v1.2.0

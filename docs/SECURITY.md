@@ -60,6 +60,11 @@ the AWS signature and certificate before checking the exact `TopicArn`.
   and API keys by advancing `auth_version` in the winning transaction.
 - Native credentials are bound to canonical HTTPS origins. Origin changes,
   sign-out, and stale request failures cannot affect a replacement session.
+- Dashboard requests carry the account ID loaded by that tab as an optional
+  `X-Expected-User-ID` hint. The session guard rejects mismatches on the actual
+  operation, closing the race between a profile check and shared-cookie changes
+  in another tab. This is an additional consistency check, not authentication;
+  a stale tab must be reloaded before acting on the newly signed-in account.
 
 ## MIME handling
 
@@ -143,6 +148,13 @@ as domain-separated keyed digests. Links are generation-bound; codes expire in
 outstanding legacy recovery links/codes and legacy MFA backup-code sets. New MFA
 backup codes contain 128 bits of randomness and should be regenerated after the
 upgrade.
+
+Administrative recovery validates the encrypted destination, application origin,
+and SES configuration before replacing recovery state. If SES fails after
+issuance, the authenticated admin receives the newly issued link for manual
+delivery with `Cache-Control: no-store`. The old state is not restored, since
+rolling it back could resurrect consumed credentials or overwrite a concurrent
+recovery. SES acceptance does not guarantee inbox delivery.
 
 Logout revokes every session token presented by the request server-side,
 including copied browser cookies and native bearer tokens. Reversible account

@@ -94,3 +94,22 @@ Notes:
   user's verified destinations. Without it, global aliases use the user's
   default verified destination as before.
 - Aliases created here record `source = "api"`.
+
+## Dashboard session API (not addy.io)
+
+Session-authenticated `/api` routes accept an optional `X-Expected-User-ID`
+header containing the decimal ID from `/api/account/profile`. A mismatch with
+the verified session returns `409` before the route runs. The dashboard uses
+this to prevent a stale tab from acting on an account signed in by another tab,
+including when that account has valid fresh authentication. The header is only
+an account-consistency check: it never replaces session authentication and does
+not affect `/api/v1` API-key authentication. Clients without it remain supported.
+
+`POST /api/admin/users/:id/recovery` requires an admin session and fresh
+authentication. With `sendEmail: true`, successful SES delivery returns
+`{ "ok": true, "delivery": "email" }`. Missing delivery configuration returns
+an error without replacing existing recovery state. A send failure after
+issuance returns HTTP 200 with `{ "ok": false, "delivery": "manual", "token":
+"…", "message": "…" }`; the admin must share that link manually, not claim the
+email was sent. Without email delivery, the response remains `{ "token": "…" }`.
+Responses containing tokens use `Cache-Control: no-store`.
