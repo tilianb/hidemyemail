@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Other toolchains and dependencies are installed by project pre-setup.
+# Extension package tests invoke the system ZIP tools, not an npm package.
+if ! command -v zip >/dev/null || ! command -v unzip >/dev/null; then
+  sudo -n apt-get update -qq
+  sudo -n apt-get install -y zip unzip
+fi

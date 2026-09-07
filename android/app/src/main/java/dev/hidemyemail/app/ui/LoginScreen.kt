@@ -217,7 +217,7 @@ private fun RecoverWithCodeSheet(app: AppViewModel, onDone: () -> Unit) {
             Text(passphrase, style = Theme.monoStyle(15.sp))
             Spacer(Modifier.height(4.dp))
             Text(
-                "Save this in your password manager now — it won't be shown again.",
+                "Save this in your password manager now — it won't be shown again. Your old recovery codes are no longer valid; generate a new set in Security settings.",
                 style = Theme.bodyStyle(12.sp).copy(color = Theme.textSecondary),
             )
             Spacer(Modifier.height(12.dp))

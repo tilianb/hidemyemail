@@ -163,6 +163,45 @@ final class CredentialSecurityTests: XCTestCase {
     }
 
     @MainActor
+    func testMFARequiredWithoutNativeChallengeFailsClosed() async {
+        URLStub.handler = { request in
+            Self.response(request, #"{"mfa_required":true}"#)
+        }
+        let app = state(token: { _ in nil }, delete: {})
+
+        do {
+            try await app.login(password: "secret")
+            XCTFail("Expected malformed MFA response to fail")
+        } catch {
+            XCTAssertEqual(app.phase, .loggedOut)
+        }
+    }
+
+    @MainActor
+    func testMFAPasskeyChallengeWithoutNativeTokenFailsBeforeAssertion() async throws {
+        URLStub.handler = { request in
+            switch request.url!.path {
+            case "/api/login":
+                return Self.response(request, #"{"mfa_required":true,"mfa_token":"mfa-challenge"}"#)
+            case "/api/passkey/challenge":
+                return Self.response(request, #"{"challenge":"YWJj","rpId":"app.hidemyemail.dev","allowCredentials":[{"id":"Y3JlZGVudGlhbA"}]}"#)
+            default:
+                XCTFail("Unexpected request: \(request.url!.path)")
+                return Self.response(request, "{}")
+            }
+        }
+        let app = state(token: { _ in nil }, delete: {})
+        try await app.login(password: "secret")
+
+        do {
+            try await app.loginWithPasskey()
+            XCTFail("Expected missing passkey token to fail")
+        } catch {
+            XCTAssertEqual(app.phase, .awaitingMFA(token: "mfa-challenge"))
+        }
+    }
+
+    @MainActor
     func testPendingRecoveryCannotAuthenticateReplacementAfterSameOriginSignOutAndRelogin() async throws {
         var storedToken: String?
         var savedTokens: [String] = []

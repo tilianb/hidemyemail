@@ -41,6 +41,32 @@ class ApiClientSecurityTest {
         )
     }
 
+    @Test fun generalPasskeyReauthUsesBoundTokenAndUpdatesOnlyFreshAuth() = runTest {
+        client.freshAuth = "expired"
+        server.enqueue(json("""{"challenge":"abc","rpId":"app.hidemyemail.dev","userVerification":"required","passkey_token":"bound"}"""))
+        server.enqueue(json("""{"fresh_auth":"elevated"}"""))
+
+        val challenge = client.freshAuthPasskeyChallenge()
+        client.reauthenticateWithPasskey(
+            """{"id":"credential","type":"public-key","response":{"clientDataJSON":"x"}}""",
+            challenge.passkeyToken,
+        )
+
+        assertFalse(json.parseToJsonElement(challenge.requestOptionsJson).jsonObject.containsKey("passkey_token"))
+        val requests = List(2) { server.takeRequest() }
+        assertEquals(listOf("/api/settings/reauth/passkey/challenge", "/api/settings/reauth/passkey/complete"), requests.map { it.path })
+        requests.forEach {
+            assertEquals("token", it.getHeader("X-Auth-Mode"))
+            assertEquals("Bearer bearer", it.getHeader("Authorization"))
+            assertEquals(null, it.getHeader("X-Fresh-Auth"))
+        }
+        val body = json.parseToJsonElement(requests[1].body.readUtf8()).jsonObject
+        assertEquals("bound", body["passkey_token"]?.jsonPrimitive?.content)
+        assertEquals("credential", body["response"]?.jsonObject?.get("id")?.jsonPrimitive?.content)
+        assertEquals("bearer", client.token)
+        assertEquals("elevated", client.freshAuth)
+    }
+
     @Test fun mfaLifecycleSendsFreshHeaderAndPayloads() = runTest {
         client.freshAuth = "fresh"
         server.enqueue(json("""{"secret":"ABC","uri":"otpauth://totp/x"}"""))
@@ -76,6 +102,26 @@ class ApiClientSecurityTest {
         assertEquals("challenge-token", body["challengeToken"]?.toString()?.trim('"'))
     }
 
+    @Test fun mfaPasskeyChallengeAndVerifyUseBoundTokenShapes() = runTest {
+        server.enqueue(json("""{"challenge":"abc","rpId":"app.hidemyemail.dev","allowCredentials":[],"passkey_token":"bound"}"""))
+        server.enqueue(json("""{"ok":true,"userId":2,"token":"bearer2","fresh_auth":"fresh2"}"""))
+
+        val challenge = client.passkeyAuthenticationChallenge("mfa-token")
+        assertFalse(json.parseToJsonElement(challenge.requestOptionsJson).jsonObject.containsKey("passkey_token"))
+        assertEquals("app.hidemyemail.dev", challenge.rpId)
+        client.verifyPasskeyAuthentication("""{"id":"credential","response":{"signature":"sig"}}""", challenge.passkeyToken)
+
+        val challengeRequest = server.takeRequest()
+        assertEquals("token", challengeRequest.getHeader("X-Auth-Mode"))
+        assertEquals(
+            json.parseToJsonElement("""{"mfa":true,"mfa_token":"mfa-token"}"""),
+            json.parseToJsonElement(challengeRequest.body.readUtf8()),
+        )
+        val verify = json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+        assertEquals("bound", verify["passkey_token"]?.jsonPrimitive?.content)
+        assertFalse(verify.containsKey("mfa_token"))
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun passkeyRegistrationRejectsInvalidResponseJson() = runTest {
         client.registerPasskey("not json", null, "challenge")
@@ -98,6 +144,33 @@ class ApiClientSecurityTest {
             assertEquals("token", request.getHeader("X-Auth-Mode"))
             assertEquals("Bearer bearer", request.getHeader("Authorization"))
         }
+    }
+
+    @Test fun passkeyMfaRoundTripUsesCurrentAuthAndPreservesCredentials() = runTest {
+        client.freshAuth = "current-fresh"
+        server.enqueue(json("""{"challenge":"abc","rpId":"app.hidemyemail.dev","userVerification":"required","passkey_token":"signed"}"""))
+        server.enqueue(json("""{"ok":true,"backupCodes":["NEW-CODE"]}"""))
+
+        val challenge = client.passkeyMfaChallenge("backup-codes")
+        assertFalse(json.parseToJsonElement(challenge.requestOptionsJson).jsonObject.containsKey("passkey_token"))
+        val result = client.completePasskeyMfa("backup-codes", """{"id":"credential","type":"public-key","response":{"clientDataJSON":"x"}}""", challenge.passkeyToken)
+
+        val requests = List(2) { server.takeRequest() }
+        assertEquals(listOf("/api/settings/mfa/passkey/challenge", "/api/settings/mfa/passkey/complete"), requests.map { it.path })
+        requests.forEach {
+            assertEquals("token", it.getHeader("X-Auth-Mode"))
+            assertEquals("Bearer bearer", it.getHeader("Authorization"))
+            assertEquals("current-fresh", it.getHeader("X-Fresh-Auth"))
+        }
+        val challengeBody = json.parseToJsonElement(requests[0].body.readUtf8()).jsonObject
+        assertEquals("backup-codes", challengeBody["action"]?.jsonPrimitive?.content)
+        val completeBody = json.parseToJsonElement(requests[1].body.readUtf8()).jsonObject
+        assertEquals("backup-codes", completeBody["action"]?.jsonPrimitive?.content)
+        assertEquals("signed", completeBody["passkey_token"]?.jsonPrimitive?.content)
+        assertEquals("credential", completeBody["response"]?.jsonObject?.get("id")?.jsonPrimitive?.content)
+        assertEquals(listOf("NEW-CODE"), result.backupCodes)
+        assertEquals("bearer", client.token)
+        assertEquals("current-fresh", client.freshAuth)
     }
 
     @Test fun malformedPasskeyChallengeJsonBecomesDecodingError() = runTest {
@@ -124,7 +197,7 @@ class ApiClientSecurityTest {
     }
 
     @Test fun authenticatedReauth401PreservesInvalidCredentialsAndTokens() = runTest {
-        assertSemantic401PreservesAuth("Invalid credentials") {
+        assertSemantic401PreservesAuth("Invalid credentials", actionSendsFreshAuth = false) {
             client.reauthenticate("wrong", "123456")
         }
     }
@@ -153,7 +226,11 @@ class ApiClientSecurityTest {
         assertEquals(0, server.requestCount)
     }
 
-    private suspend fun assertSemantic401PreservesAuth(message: String, action: suspend () -> Unit) {
+    private suspend fun assertSemantic401PreservesAuth(
+        message: String,
+        actionSendsFreshAuth: Boolean = true,
+        action: suspend () -> Unit,
+    ) {
         client.freshAuth = "fresh"
         server.enqueue(json("""{"error":"$message"}""").setResponseCode(401))
         server.enqueue(json("""{"enabled":true,"backupCodesRemaining":3}"""))
@@ -166,10 +243,9 @@ class ApiClientSecurityTest {
         client.mfaStatus()
 
         val requests = List(2) { server.takeRequest() }
-        requests.forEach {
-            assertEquals("Bearer bearer", it.getHeader("Authorization"))
-            assertEquals("fresh", it.getHeader("X-Fresh-Auth"))
-        }
+        requests.forEach { assertEquals("Bearer bearer", it.getHeader("Authorization")) }
+        assertEquals(if (actionSendsFreshAuth) "fresh" else null, requests[0].getHeader("X-Fresh-Auth"))
+        assertEquals("fresh", requests[1].getHeader("X-Fresh-Auth"))
     }
 
     private fun json(body: String) = MockResponse()

@@ -153,6 +153,7 @@ struct UsernameSection: View {
 /// save.
 struct RecoveryCodesSection: View {
     @Environment(AppState.self) private var app
+    @Environment(FreshAuthenticationCoordinator.self) private var freshAuthentication
 
     @State private var remaining: Int?
     @State private var generating = false
@@ -224,17 +225,11 @@ struct RecoveryCodesSection: View {
         guard let client = app.api() else { return }
         generating = true
         defer { generating = false }
-        do {
+        await freshAuthentication.perform(app: app, onError: { error = $0 }) {
             let codes = try await client.regenerateRecoveryCodes()
             newCodes = codes
             remaining = codes.count
             error = nil
-        } catch APIError.server(let status, let message) where status == 401 {
-            error = message == "Fresh authentication required"
-                ? "Session is not fresh — sign out and back in, then retry."
-                : message
-        } catch {
-            self.error = error.localizedDescription
         }
     }
 }
@@ -243,6 +238,7 @@ struct RecoveryCodesSection: View {
 /// to the system share sheet as a file.
 struct ExportSection: View {
     @Environment(AppState.self) private var app
+    @Environment(FreshAuthenticationCoordinator.self) private var freshAuthentication
 
     @State private var busy = false
     @State private var exportURL: URL?
@@ -278,15 +274,13 @@ struct ExportSection: View {
         guard let client = app.api() else { return }
         busy = true
         defer { busy = false }
-        do {
+        await freshAuthentication.perform(app: app, onError: { error = $0 }) {
             let data = try await client.exportData()
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("hidemyemail-export.json")
             try data.write(to: url)
             error = nil
             exportURL = url
-        } catch {
-            self.error = error.localizedDescription
         }
     }
 }

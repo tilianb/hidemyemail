@@ -59,8 +59,13 @@ actor APIClient {
     /// Request a WebAuthn assertion challenge for passwordless passkey login.
     /// Token mode (no Origin) makes the Worker echo the signed challenge token in
     /// the body so the cookieless native client can return it on verify.
-    func passkeyChallenge() async throws -> PasskeyChallengeOptions {
-        try await request("/api/passkey/challenge", method: "POST", body: [:], authMode: true, authed: false)
+    func passkeyChallenge(mfaToken: String? = nil) async throws -> PasskeyChallengeOptions {
+        var body: [String: Any] = [:]
+        if let mfaToken {
+            body["mfa"] = true
+            body["mfa_token"] = mfaToken
+        }
+        return try await request("/api/passkey/challenge", method: "POST", body: body, authMode: true, authed: false)
     }
 
     /// Submit the signed assertion (plus the echoed challenge token) to complete
@@ -204,6 +209,22 @@ actor APIClient {
         freshAuth = response.freshAuth
     }
 
+    func reauthenticationPasskeyChallenge() async throws -> PasskeyChallengeOptions {
+        try await request(
+            "/api/settings/reauth/passkey/challenge", method: "POST", body: [:],
+            authMode: true, includeFreshAuth: false
+        )
+    }
+
+    func completeReauthenticationPasskey(response: [String: Any], passkeyToken: String) async throws {
+        let result: FreshAuthResponse = try await request(
+            "/api/settings/reauth/passkey/complete", method: "POST",
+            body: ["response": response, "passkey_token": passkeyToken],
+            authMode: true, includeFreshAuth: false
+        )
+        freshAuth = result.freshAuth
+    }
+
     func setupMFA() async throws -> MFASetupResponse {
         try await request("/api/settings/mfa/setup", method: "POST", body: [:])
     }
@@ -221,6 +242,22 @@ actor APIClient {
 
     func disableMFA(code: String) async throws {
         try await requestVoid("/api/settings/mfa/disable", method: "POST", body: ["code": code])
+    }
+
+    func mfaPasskeyChallenge(action: MFAPasskeyAction) async throws -> PasskeyChallengeOptions {
+        try await request(
+            "/api/settings/mfa/passkey/challenge", method: "POST",
+            body: ["action": action.rawValue]
+        )
+    }
+
+    func completeMFAPasskeyAction(
+        _ action: MFAPasskeyAction, response: [String: Any], passkeyToken: String
+    ) async throws -> MFAPasskeyCompleteResponse {
+        try await request(
+            "/api/settings/mfa/passkey/complete", method: "POST",
+            body: ["action": action.rawValue, "response": response, "passkey_token": passkeyToken]
+        )
     }
 
     // MARK: - Username & self-service recovery codes
@@ -474,16 +511,19 @@ actor APIClient {
             // still valid, only the 10-minute freshness window lapsed. Surface
             // the message so the UI can ask for a re-login on that action
             // instead of signing the whole app out.
-            let message = (try? Self.decoder.decode(APIErrorBody.self, from: data))?.error
-            if message == "Fresh authentication required" {
-                throw APIError.server(status: 401, message: message!)
+            let errorBody = try? Self.decoder.decode(APIErrorBody.self, from: data)
+            let message = errorBody?.error
+            if errorBody?.code == "fresh_auth_required" {
+                throw APIError.freshAuthRequired(message: message ?? "Fresh authentication required")
             }
-            if path == "/api/settings/reauth", let message, message != "Unauthorized" {
+            if path.hasPrefix("/api/settings/reauth"), let message, message != "Unauthorized" {
                 throw APIError.server(status: 401, message: message)
             }
             let semanticUnauthorizedEndpoints = [
                 "/api/settings/mfa/disable",
                 "/api/settings/mfa/backup-codes",
+                "/api/settings/mfa/passkey/challenge",
+                "/api/settings/mfa/passkey/complete",
                 "/api/settings/passkeys/challenge",
                 "/api/settings/passkeys/register",
             ]

@@ -8,6 +8,7 @@ import SwiftUI
 /// exactly once.
 struct ApiKeysSection: View {
     @Environment(AppState.self) private var app
+    @Environment(FreshAuthenticationCoordinator.self) private var freshAuthentication
 
     @State private var keys: [ApiKey] = []
     @State private var newToken: String?
@@ -110,32 +111,20 @@ struct ApiKeysSection: View {
         guard !name.isEmpty, let client = app.api() else { return }
         creating = true
         defer { creating = false }
-        do {
+        await freshAuthentication.perform(app: app, onError: { error = $0 }) {
             let created = try await client.createApiKey(name: name)
             newToken = created.token
             error = nil
             await load()
-        } catch APIError.server(let status, let message) where status == 401 {
-            error = message == "Fresh authentication required"
-                ? "Session is not fresh — sign out and back in, then retry."
-                : message
-        } catch {
-            self.error = error.localizedDescription
         }
     }
 
     private func revoke(_ key: ApiKey) async {
         guard let client = app.api() else { return }
-        do {
+        await freshAuthentication.perform(app: app, onError: { error = $0 }) {
             try await client.deleteApiKey(id: key.id)
             keys.removeAll { $0.id == key.id }
             error = nil
-        } catch APIError.server(let status, let message) where status == 401 {
-            error = message == "Fresh authentication required"
-                ? "Session is not fresh — sign out and back in, then retry."
-                : message
-        } catch {
-            self.error = error.localizedDescription
         }
     }
 }

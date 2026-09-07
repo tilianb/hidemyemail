@@ -1,23 +1,59 @@
 <!doctype html>
 <html lang="en">
-  <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HideMyEmail</title><link rel="stylesheet" href="/src/popup.css"></head>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>HideMyEmail</title>
+    <link rel="stylesheet" href="/src/popup.css">
+  </head>
   <body>
     <main>
-      <header><span class="mark" aria-hidden="true">H</span><div><h1>HideMyEmail</h1><p id="server-label">Private aliases, one click away.</p></div><button id="settings" class="text-button" type="button" hidden>Change</button></header>
+      <header>
+        <img class="mark" src="/icons/icon-48.png" alt="">
+        <div class="identity">
+          <h1>HideMyEmail</h1>
+          <p id="server-label">Private aliases, one click away.</p>
+        </div>
+        <button id="settings" class="text-button" type="button" aria-label="Change connected deployment" hidden>Change</button>
+      </header>
       <section id="setup" aria-labelledby="setup-title">
-        <h2 id="setup-title">Connect your deployment</h2>
+        <div class="intro">
+          <p class="eyebrow">Private by default</p>
+          <h2 id="setup-title">Connect your deployment.</h2>
+          <p>Use your own HideMyEmail server to create aliases from any page.</p>
+        </div>
         <form id="setup-form">
-          <label>Server URL<input id="server" type="url" required placeholder="https://mail.example.com" autocomplete="url" spellcheck="false" disabled></label>
+          <label>Server URL<input id="server" type="url" required value="https://app.hidemyemail.dev" autocomplete="url" spellcheck="false" disabled></label>
           <label>Dedicated API key<input id="key" type="password" required placeholder="hme_…" autocomplete="off" spellcheck="false" disabled></label>
-          <button id="connect" class="primary" type="submit" disabled>Connect securely</button>
+          <button id="connect" class="primary" type="submit" disabled>Connect</button>
         </form>
-        <p class="security">Stored only in Chrome's local extension storage on this device. Create and revoke this key in <strong>Settings → API Keys</strong>.</p>
+        <p class="security"><strong>Your credentials stay local.</strong> Stored only in Chrome's extension storage on this device. Create or revoke the dedicated key in Settings → API Keys.</p>
       </section>
-      <section id="generator" hidden aria-labelledby="generator-title">
-        <h2 id="generator-title">New alias</h2>
-        <label>Domain<select id="domain" disabled></select></label>
-        <button id="generate" class="primary" type="button" disabled>Generate alias</button>
-        <div id="result" class="result" hidden><span id="alias"></span><button id="copy" type="button">Copy</button></div>
+      <section id="app" hidden>
+        <div class="tabs" role="tablist" aria-label="Popup sections">
+          <button id="tab-create" role="tab" aria-controls="panel-create" aria-selected="true" tabindex="0">Create</button>
+          <button id="tab-aliases" role="tab" aria-controls="panel-aliases" aria-selected="false" tabindex="-1">Aliases</button>
+        </div>
+        <section id="panel-create" role="tabpanel" aria-labelledby="tab-create">
+          <div class="intro compact"><p class="eyebrow">One click. Zero exposure.</p><h2>Stay private.</h2></div>
+          <label>Domain<select id="domain" disabled></select></label>
+          <label>Forward to<select id="destination" disabled></select></label>
+          <button id="customize" class="disclosure" type="button" aria-expanded="false" aria-controls="custom-controls">Customize</button>
+          <div id="custom-controls" hidden>
+            <label>Format<select id="format"><option value="random_characters">Random characters</option><option value="uuid">UUID</option><option value="custom">Custom</option></select></label>
+            <label id="local-label" hidden>Local part<input id="local-part" maxlength="64" pattern="[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?" autocomplete="off" spellcheck="false"></label>
+            <label>Description (optional)<input id="description" maxlength="255" autocomplete="off"></label>
+          </div>
+          <button id="generate" class="primary" type="button" disabled>Generate alias</button>
+          <div id="result" class="result" hidden><span id="alias"></span><button id="copy" type="button" aria-label="Copy generated alias">Copy</button></div>
+          <p id="create-status" class="panel-status" role="status" aria-live="polite"></p>
+        </section>
+        <section id="panel-aliases" role="tabpanel" aria-labelledby="tab-aliases" hidden>
+          <form id="search-form" class="search"><label><span class="sr-only">Search aliases</span><input id="search" maxlength="200" placeholder="Search aliases" autocomplete="off"></label><button type="submit">Search</button></form>
+          <p id="list-state" class="panel-status" role="status" aria-live="polite"></p>
+          <ul id="alias-list" class="alias-list"></ul>
+          <button id="retry" class="secondary" type="button" hidden>Retry</button>
+        </section>
       </section>
       <p id="status" role="status" aria-live="polite"></p>
     </main>

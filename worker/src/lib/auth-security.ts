@@ -66,12 +66,106 @@ export function rateLimitFailures(): MiddlewareHandler<AppEnv> {
   };
 }
 
-export async function consumeAuthArtifact(db: D1Database, token: string, expiresAt: number): Promise<boolean> {
-  const hash = await sha256Base64url(token);
-  const now = Math.floor(Date.now() / 1000);
+export async function consumeAuthArtifactHash(db: D1Database, hash: string, expiresAt: number): Promise<boolean> {
   const results = await db.batch([
-    db.prepare("DELETE FROM consumed_auth_artifacts WHERE expires_at <= ?").bind(now),
-    db.prepare("INSERT OR IGNORE INTO consumed_auth_artifacts (artifact_hash, expires_at) VALUES (?, ?)").bind(hash, expiresAt),
+    db.prepare("DELETE FROM consumed_auth_artifacts WHERE expires_at <= unixepoch()"),
+    db.prepare(
+      "INSERT OR IGNORE INTO consumed_auth_artifacts (artifact_hash, expires_at) SELECT ?, ? WHERE ? > unixepoch()"
+    ).bind(hash, expiresAt, expiresAt),
   ]);
   return results[1]?.meta.changes === 1;
+}
+
+export async function consumeAuthArtifact(db: D1Database, token: string, expiresAt: number): Promise<boolean> {
+  return consumeAuthArtifactHash(db, await sha256Base64url(token), expiresAt);
+}
+
+export async function finalizePasskeyAssertion(
+  db: D1Database,
+  token: string,
+  expiresAt: number,
+  credentialId: string,
+  oldCounter: number,
+  newCounter: number,
+  parent?: { artifactHash: string; expiresAt: number },
+): Promise<boolean> {
+  const childHash = await sha256Base64url(token);
+  await db.prepare("DELETE FROM consumed_auth_artifacts WHERE expires_at <= unixepoch()").run();
+  try {
+    const statements = [
+      db.prepare("UPDATE passkey_credentials SET sign_count = ? WHERE id = ? AND sign_count = ?")
+        .bind(newCounter, credentialId, oldCounter),
+      // The NOT NULL constraint turns a lost CAS or expiry into a transaction
+      // rollback; a duplicate artifact does the same through its primary key.
+      db.prepare(
+        "INSERT INTO consumed_auth_artifacts (artifact_hash, expires_at) VALUES (?, CASE WHEN changes() = 1 AND ? > unixepoch() THEN ? ELSE NULL END)"
+      ).bind(childHash, expiresAt, expiresAt),
+    ];
+    if (parent) {
+      statements.push(db.prepare(
+        "INSERT INTO consumed_auth_artifacts (artifact_hash, expires_at) VALUES (?, CASE WHEN ? > unixepoch() THEN ? ELSE NULL END)"
+      ).bind(parent.artifactHash, parent.expiresAt, parent.expiresAt));
+    }
+    await db.batch(statements);
+    return true;
+  } catch (error) {
+    const message = String(error);
+    if (message.includes("UNIQUE constraint failed: consumed_auth_artifacts.artifact_hash") ||
+        message.includes("NOT NULL constraint failed: consumed_auth_artifacts.expires_at")) return false;
+    throw error;
+  }
+}
+
+export async function finalizeMfaBackupCode(
+  db: D1Database,
+  challenge: string,
+  expiresAt: number,
+  userId: number,
+  oldCodes: string,
+  newCodes: string,
+): Promise<boolean> {
+  const artifactHash = await sha256Base64url(challenge);
+  await db.prepare("DELETE FROM consumed_auth_artifacts WHERE expires_at <= unixepoch()").run();
+  try {
+    await db.batch([
+      db.prepare("UPDATE mfa SET totp_backup_codes = ? WHERE user_id = ? AND totp_backup_codes = ?")
+        .bind(newCodes, userId, oldCodes),
+      db.prepare(
+        "INSERT INTO consumed_auth_artifacts (artifact_hash, expires_at) VALUES (?, CASE WHEN changes() = 1 AND ? > unixepoch() THEN ? ELSE NULL END)"
+      ).bind(artifactHash, expiresAt, expiresAt),
+    ]);
+    return true;
+  } catch (error) {
+    const message = String(error);
+    if (message.includes("UNIQUE constraint failed: consumed_auth_artifacts.artifact_hash") ||
+        message.includes("NOT NULL constraint failed: consumed_auth_artifacts.expires_at")) return false;
+    throw error;
+  }
+}
+
+export async function finalizeMfaTotp(
+  db: D1Database,
+  challenge: string,
+  expiresAt: number,
+  userId: number,
+  counter: number,
+): Promise<boolean> {
+  const artifactHash = await sha256Base64url(challenge);
+  await db.prepare("DELETE FROM consumed_auth_artifacts WHERE expires_at <= unixepoch()").run();
+  try {
+    await db.batch([
+      db.prepare(
+        "UPDATE mfa SET totp_last_used_counter = ? WHERE user_id = ? AND (totp_last_used_counter IS NULL OR totp_last_used_counter < ?)"
+      ).bind(counter, userId, counter),
+      db.prepare(
+        "INSERT INTO consumed_auth_artifacts (artifact_hash, expires_at) VALUES (?, CASE WHEN changes() = 1 AND ? > unixepoch() THEN ? ELSE NULL END)"
+      ).bind(artifactHash, expiresAt, expiresAt),
+    ]);
+    return true;
+  } catch (error) {
+    const message = String(error);
+    if (message.includes("UNIQUE constraint failed: consumed_auth_artifacts.artifact_hash") ||
+        message.includes("NOT NULL constraint failed: consumed_auth_artifacts.expires_at")) return false;
+    throw error;
+  }
 }

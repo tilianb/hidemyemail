@@ -10,8 +10,11 @@ jobs:
   sync-dev:
     permissions:
       contents: write
-    # Only run if the PR was actually merged (not just closed) AND the source branch was dev
-    if: github.event.pull_request.merged == true && github.event.pull_request.head.ref == 'dev'
+    # Only sync a merged release PR from this repository's dev branch.
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.ref == 'dev' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository

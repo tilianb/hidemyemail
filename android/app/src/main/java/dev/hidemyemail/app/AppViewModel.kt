@@ -4,12 +4,17 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.credentials.CredentialManager
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.GetPublicKeyCredentialOption
+import androidx.credentials.PublicKeyCredential
 import dev.hidemyemail.app.auth.TokenStore
 import dev.hidemyemail.app.auth.AuthTokenStore
 import dev.hidemyemail.app.auth.WebSessionAuth
 import dev.hidemyemail.app.auth.ServerOrigin
 import dev.hidemyemail.app.net.ApiClient
 import dev.hidemyemail.app.net.ApiException
+import dev.hidemyemail.app.net.isValidNativePasskeyChallenge
 import dev.hidemyemail.app.push.PushManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,7 +22,7 @@ import kotlinx.coroutines.launch
 
 sealed interface AuthPhase {
     data object LoggedOut : AuthPhase
-    data class AwaitingMfa(val mfaToken: String?) : AuthPhase
+    data class AwaitingMfa(val mfaToken: String) : AuthPhase
     data object LoggedIn : AuthPhase
 }
 
@@ -57,6 +62,14 @@ class AppViewModel(
 
     private var client: ApiClient? = null
     private var generation = 0L
+    private val _clientGeneration = MutableStateFlow(0L)
+    val clientGeneration: StateFlow<Long> = _clientGeneration
+
+    private fun replaceClient(replacement: ApiClient?) {
+        if (client === replacement) return
+        client = replacement
+        _clientGeneration.value++
+    }
 
     // Held between launching the web sign-in Custom Tab and the deep-link
     // callback delivering the handoff code.
@@ -80,7 +93,7 @@ class AppViewModel(
             pendingRecovery = null
             tokenStore.delete()
             client?.invalidate()
-            client = null
+            replaceClient(null)
             _phase.value = AuthPhase.LoggedOut
             _userName.value = ""
             _isAdmin.value = false
@@ -103,7 +116,7 @@ class AppViewModel(
         val operationGeneration = generation
         val token = tokenStore.load(origin)
         val operationClient = ApiClient(origin, token)
-        client = operationClient
+        replaceClient(operationClient)
         if (token == null) {
             _phase.value = AuthPhase.LoggedOut
             return
@@ -131,7 +144,9 @@ class AppViewModel(
         val res = client.login(password)
         requireCurrent(binding.first, binding.second)
         if (res.mfaRequired == true) {
-            _phase.value = AuthPhase.AwaitingMfa(res.mfaToken)
+            val mfaToken = res.mfaToken?.takeIf { it.isNotBlank() }
+                ?: throw ApiException.Decoding()
+            _phase.value = AuthPhase.AwaitingMfa(mfaToken)
             return
         }
         finishLogin(res.token, res.freshAuth, binding, client)
@@ -141,8 +156,33 @@ class AppViewModel(
         val binding = currentBinding()
         val client = client ?: throw ApiException.NotConfigured()
         val mfaToken = (_phase.value as? AuthPhase.AwaitingMfa)?.mfaToken
+            ?: throw ApiException.Unauthorized()
         val res = client.completeMfa(code, mfaToken)
         finishLogin(res.token, res.freshAuth, binding, client)
+    }
+
+    /** Native standalone or account-bound MFA passkey authentication. */
+    suspend fun loginWithPasskey(context: Context) {
+        val binding = currentBinding()
+        val operationClient = ensureClient()
+        val mfaToken = when (val current = _phase.value) {
+            is AuthPhase.AwaitingMfa -> current.mfaToken
+            AuthPhase.LoggedOut -> null
+            AuthPhase.LoggedIn -> throw ApiException.Unauthorized()
+        }
+        val challenge = operationClient.passkeyAuthenticationChallenge(mfaToken)
+        requireCurrent(binding.first, binding.second)
+        check(isValidNativePasskeyChallenge(binding.first, challenge.rpId)) {
+            "Server returned an invalid passkey RP ID"
+        }
+        val result = CredentialManager.create(context).getCredential(
+            context,
+            GetCredentialRequest(listOf(GetPublicKeyCredentialOption(challenge.requestOptionsJson))),
+        ).credential as? PublicKeyCredential
+            ?: error("Credential provider returned an unexpected response")
+        requireCurrent(binding.first, binding.second)
+        val response = operationClient.verifyPasskeyAuthentication(result.authenticationResponseJson, challenge.passkeyToken)
+        finishLogin(response.token, response.freshAuth, binding, operationClient)
     }
 
     /** Step 1 of web sign-in: open the server's dashboard login in a Custom Tab. */
@@ -172,7 +212,7 @@ class AppViewModel(
         if (!hasServer) throw ApiException.NotConfigured()
         val existing = client
         if (existing != null) return existing
-        return ApiClient(serverUrl.value, null).also { client = it }
+        return ApiClient(serverUrl.value, null).also(::replaceClient)
     }
 
     private suspend fun finishLogin(
@@ -262,7 +302,7 @@ class AppViewModel(
         generation++
         pendingWebAuth = null
         pendingRecovery = null
-        if (client === boundClient) client = null
+        if (client === boundClient) replaceClient(null)
         boundClient?.invalidate()
         tokenStore.delete()
         _userName.value = ""

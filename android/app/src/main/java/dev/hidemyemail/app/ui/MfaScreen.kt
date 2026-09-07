@@ -20,7 +20,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,12 +35,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import dev.hidemyemail.app.AppViewModel
+import dev.hidemyemail.app.net.usesNativePasskeys
 import kotlinx.coroutines.launch
 
 @Composable
 fun MfaScreen(app: AppViewModel) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val serverUrl by app.serverUrl.collectAsState()
     var code by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -71,7 +77,7 @@ fun MfaScreen(app: AppViewModel) {
             Text("Two-Factor Authentication", style = Theme.displayStyle(24.sp, FontWeight.Bold))
             Spacer(Modifier.height(8.dp))
             Text(
-                "Enter the 6-digit code from your authenticator app, or an 8-character backup code.",
+                "Enter the 6-digit code from your authenticator app, or a 128-bit grouped backup code.",
                 style = Theme.bodyStyle(13.sp).copy(color = Theme.textSecondary),
                 textAlign = TextAlign.Center,
             )
@@ -109,6 +115,27 @@ fun MfaScreen(app: AppViewModel) {
                     CircularProgressIndicator(modifier = Modifier.size(22.dp), color = Color.Black, strokeWidth = 2.dp)
                 } else {
                     Text("Verify", style = Theme.bodyStyle(16.sp, FontWeight.SemiBold).copy(color = Color.Black))
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            if (usesNativePasskeys(serverUrl)) {
+                OutlinedButton(
+                    onClick = {
+                        error = null; busy = true
+                        scope.launch {
+                            try { app.loginWithPasskey(context) }
+                            catch (e: androidx.credentials.exceptions.GetCredentialCancellationException) { /* keep pending MFA */ }
+                            catch (e: Exception) { error = e.message }
+                            finally { busy = false }
+                        }
+                    },
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    shape = RoundedCornerShape(10.dp),
+                ) { Text("Use Passkey") }
+            } else {
+                TextButton(enabled = !busy, onClick = { app.beginWebLogin(context) }) {
+                    Text("Open standalone web sign-in (replaces this pending MFA login)", textAlign = TextAlign.Center)
                 }
             }
         }

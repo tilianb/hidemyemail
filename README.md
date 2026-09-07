@@ -59,7 +59,8 @@ Recipients see the alias.
 - Bounce/complaint feedback loop with automatic destination suppression.
 - Per-subdomain policies and scoped block/allow sender rules.
 - Dashboard for aliases, domains, destinations, rules, users, MFA,
-  passkeys, and admin settings. It includes data export and account deletion.
+  passkeys, and admin settings. It includes data export and account deletion,
+  with inline passphrase/MFA or passkey confirmation for sensitive actions.
 - Native [iOS](ios/README.md) and [Android](android/README.md) apps:
   passphrase + TOTP or passkey sign-in, alias/domain/destination/rule
   management, stats, and push notifications (APNs / FCM).

@@ -5,6 +5,10 @@ import { sendRaw } from "../../lib/ses";
 import { normalizeDomain, normalizeEmail } from "./admin/helpers";
 import { registerAdminSettingsRoutes } from "./admin/settings";
 import { registerAdminSuppressionRoutes } from "./admin/suppressions";
+import { freshAuthRequired, hasFreshAuth } from "../auth-helpers";
+import { generateRecoveryToken, recoveryDigest } from "../../lib/recovery-auth";
+import { getRpFromOrigin } from "../../lib/webauthn";
+import { buildRecoveryEmail } from "../../lib/emails";
 
 const TEST_EMAIL_TYPES = new Set(["recovery", "mfa", "notification", "demo_forward", "demo_oq"]);
 
@@ -91,53 +95,82 @@ export function adminRoutes() {
 
   // Generate Recovery Token
   r.post("/users/:id/recovery", async (c) => {
+    if (!(await hasFreshAuth(c))) return freshAuthRequired(c);
     const db = c.env.DB;
     const id = parseInt(c.req.param("id"));
     if (isNaN(id) || id === 1) return c.json({ error: "Invalid id" }, 400);
 
     const { sendEmail } = await c.req.json<{ sendEmail?: boolean }>().catch(() => ({} as any));
 
-    const token = crypto.randomUUID();
-    const expiresAt = Date.now() + 24 * 3600 * 1000; // 24 hours
-
-    await db.prepare("UPDATE users SET recovery_token = ?, recovery_expires_at = ? WHERE id = ?").bind(token, expiresAt, id).run();
-
+    const token = generateRecoveryToken();
+    let delivery: {
+      credentials: { accessKeyId: string; secretAccessKey: string; region: string };
+      message: { from: string; to: string; rawBase64: string };
+    } | null = null;
     if (sendEmail) {
-      const { decryptDestination } = await import("../../lib/crypto");
-      const { sendRaw } = await import("../../lib/ses");
-      const { buildRecoveryEmail } = await import("../../lib/emails");
-      
       const dest = await db.prepare("SELECT email FROM destinations WHERE user_id = ? AND is_default = 1").bind(id).first<{ email: string }>();
       if (!dest) return c.json({ error: "User has no default destination email" }, 400);
-
-      const email = await decryptDestination(dest.email, c.env.DESTINATION_ENCRYPTION_KEY);
-      const url = `${new URL(c.req.url).origin}/recover?token=${token}`;
-      // rawBase64 will be built in the sendRaw block with mainGlobalDomain
-
+      const { decryptDestination } = await import("../../lib/crypto");
+      let email: string;
+      try {
+        email = await decryptDestination(dest.email, c.env.DESTINATION_ENCRYPTION_KEY);
+      } catch {
+        return c.json({ error: "Recovery email is not configured" }, 500);
+      }
+      let origin: string;
+      try {
+        origin = getRpFromOrigin(c.env.APP_ORIGIN).expectedOrigin;
+      } catch {
+        return c.json({ error: "Application origin is not configured" }, 500);
+      }
       const sesAccessKeyId = await getEnvWithOverride(db, c.env, "ses_access_key_id");
       const sesSecretAccessKey = await getEnvWithOverride(db, c.env, "ses_secret_access_key");
       const sesRegion = await getEnvWithOverride(db, c.env, "ses_region");
-
-      if (sesAccessKeyId && sesSecretAccessKey && sesRegion) {
-        const mainGlobalDomain = await getMainGlobalDomain(db, c.env);
-        await sendRaw({
-          accessKeyId: sesAccessKeyId,
-          secretAccessKey: sesSecretAccessKey,
-          region: sesRegion
-        }, {
+      const mainGlobalDomain = await getMainGlobalDomain(db, c.env);
+      if (!sesAccessKeyId || !sesSecretAccessKey || !sesRegion || !mainGlobalDomain) {
+        return c.json({ error: "Recovery email delivery is not configured" }, 500);
+      }
+      const url = `${origin}/recover?token=${encodeURIComponent(token)}`;
+      delivery = {
+        credentials: { accessKeyId: sesAccessKeyId, secretAccessKey: sesSecretAccessKey, region: sesRegion },
+        message: {
           from: `HideMyEmail <noreply@${mainGlobalDomain}>`,
           to: email,
-          rawBase64: buildRecoveryEmail(email, url, mainGlobalDomain)
-        });
-      }
-      return c.json({ ok: true });
+          rawBase64: buildRecoveryEmail(email, url, mainGlobalDomain),
+        },
+      };
     }
 
+    const tokenHash = await recoveryDigest(c.env.SESSION_SECRET, "token", token);
+    const expiresAt = Date.now() + 24 * 3600 * 1000; // 24 hours
+
+    const issued = await db.prepare("UPDATE users SET recovery_token = NULL, recovery_mfa_code = NULL, recovery_token_hash = ?, recovery_expires_at = ?, recovery_code_hash = NULL, recovery_code_expires_at = NULL, recovery_code_attempts = 0, recovery_code_sent_at = NULL, recovery_code_sends = 0 WHERE id = ? AND active = 1 AND deleted_at IS NULL AND EXISTS (SELECT 1 FROM users AS issuer WHERE issuer.id = 1 AND issuer.active = 1 AND issuer.deleted_at IS NULL AND issuer.auth_version = ?)")
+      .bind(tokenHash, expiresAt, id, c.get("authVersion")).run();
+    if (issued.meta.changes !== 1) return c.json({ error: "User not found" }, 404);
+
+    if (delivery) {
+      const sesSend: typeof sendRaw = (c.env as any).__sesSend ?? sendRaw;
+      try {
+        await sesSend(delivery.credentials, delivery.message);
+      } catch {
+        c.header("Cache-Control", "no-store");
+        return c.json({
+          ok: false,
+          delivery: "manual",
+          token,
+          message: "Recovery email could not be sent; use the recovery link instead",
+        });
+      }
+      return c.json({ ok: true, delivery: "email" });
+    }
+
+    c.header("Cache-Control", "no-store");
     return c.json({ token });
   });
 
   // Delete user (full manual cascade via shared helper)
   r.delete("/users/:id", async (c) => {
+    if (!(await hasFreshAuth(c))) return freshAuthRequired(c);
     const db = c.env.DB;
     const id = parseInt(c.req.param("id"));
     if (isNaN(id) || id === 1) return c.json({ error: "Invalid id" }, 400);

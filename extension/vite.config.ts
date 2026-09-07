@@ -3,11 +3,19 @@ import { resolve } from "node:path";
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  build: { outDir: "dist", emptyOutDir: true, rollupOptions: { input: resolve(import.meta.dirname, "popup.html") } },
+  build: {
+    outDir: "dist",
+    emptyOutDir: true,
+    rollupOptions: {
+      input: { popup: resolve(import.meta.dirname, "popup.html"), background: resolve(import.meta.dirname, "src/background.ts"), content: resolve(import.meta.dirname, "src/content.ts") },
+      output: { entryFileNames: (chunk) => chunk.name === "popup" ? "assets/[name]-[hash].js" : "[name].js" },
+    },
+  },
   plugins: [{
     name: "extension-static-files",
     closeBundle() {
       copyFileSync("manifest.json", "dist/manifest.json");
+      for (const file of ["THIRD_PARTY_NOTICES.md", "DUCKDUCKGO_LICENSE.md"]) copyFileSync(file, `dist/${file}`);
       mkdirSync("dist/icons", { recursive: true });
       cpSync("icons", "dist/icons", { recursive: true });
     },
