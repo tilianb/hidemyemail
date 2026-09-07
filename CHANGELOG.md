@@ -6,22 +6,7 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Fixed
-
-- Extension autofill recognizes French, Japanese, Spanish, Italian, Dutch,
-  and Swedish email labels and multi-ID `aria-labelledby` labels, including
-  labels in open shadow roots. Selected matching rules and regression cases
-  are adapted from DuckDuckGo Autofill with Apache-2.0 notices in the ZIP.
-- Search, filter, subject, and verification-code controls no longer receive
-  alias suggestions merely because their metadata mentions email. Focused
-  fields are rechecked when accessible labels or roles change. Web-component
-  hosts no longer incorrectly hide the autofill button as an overlay collision.
-- Extension autofill preserves a field edited while alias generation is pending,
-  notifies form listeners across shadow-DOM boundaries, and cancels pending fills
-  when keyboard focus leaves the chooser. A canceled fill does not delete an
-  alias that the server has already created; it remains in the alias manager.
-
-## [1.4.0] — 2026-09-06
+## [1.4.0] — 2026-09-07
 
 HideMyEmail 1.4.0 adds an alias manager and click-to-fill controls to the
 Chromium extension, brings in-place security confirmation to all official
@@ -68,6 +53,18 @@ protection.
 
 ### Fixed
 
+- Extension autofill recognizes French, Japanese, Spanish, Italian, Dutch,
+  and Swedish email labels and multi-ID `aria-labelledby` labels, including
+  labels in open shadow roots. Selected matching rules and regression cases
+  are adapted from DuckDuckGo Autofill with Apache-2.0 notices in the ZIP.
+- Search, filter, subject, and verification-code controls no longer receive
+  alias suggestions merely because their metadata mentions email. Focused
+  fields are rechecked when accessible labels or roles change. Web-component
+  hosts no longer incorrectly hide the autofill button as an overlay collision.
+- Extension autofill preserves a field edited while alias generation is pending,
+  notifies form listeners across shadow-DOM boundaries, and cancels pending fills
+  when keyboard focus leaves the chooser. A canceled fill does not delete an
+  alias that the server has already created; it remains in the alias manager.
 - The iOS MFA setup screen now renders its QR code correctly in dark mode
   instead of showing an oversized blank area.
 - Inline alias controls now dynamically move away from Bitwarden and 1Password,
@@ -131,6 +128,11 @@ protection.
   canonical `APP_ORIGIN` and SES sending credentials configured for recovery.
 - The extension now requests HTTP/HTTPS page access for click-to-fill. Review
   and accept the updated permissions when installing or updating it.
+- Repository branch and historical tag commit IDs were rewritten to remove
+  commit-message metadata; historical source trees and published assets are
+  unchanged. Contributors should re-clone or carefully resync rather than merge
+  old history back. Existing container and application installations are not
+  affected by this repository-only change.
 
 ## [1.3.0] — 2026-07-27
 
