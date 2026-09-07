@@ -58,6 +58,8 @@ function overlaps(left: number, top: number, width: number, rect: DOMRect): bool
 }
 
 function foreignOverlayRects(input: HTMLInputElement, host: HTMLDivElement, left: number, top: number, width: number): DOMRect[] {
+  const fieldRoots: Element[] = [input];
+  for (let root = input.getRootNode(); root instanceof ShadowRoot; root = root.host.getRootNode()) fieldRoots.push(root.host);
   const candidates = new Set<Element>(document.querySelectorAll("com-1password-button, [popover='manual']"));
   const pointHits = new Map<Element, number>();
   if (typeof document.elementsFromPoint === "function") {
@@ -70,7 +72,7 @@ function foreignOverlayRects(input: HTMLInputElement, host: HTMLDivElement, left
   }
   const rects: DOMRect[] = [];
   for (const element of candidates) {
-    if (!(element instanceof HTMLElement) || element === host || host.contains(element) || element === input || element.contains(input)) continue;
+    if (!(element instanceof HTMLElement) || element === host || host.contains(element) || fieldRoots.some((fieldRoot) => element === fieldRoot || element.contains(fieldRoot))) continue;
     const style = getComputedStyle(element);
     if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") continue;
     const rect = element.getBoundingClientRect();
@@ -147,11 +149,15 @@ export function mountContent(send: Send, shadowMode: ShadowRootMode = "closed"):
     if (restore && target?.isConnected) target.focus();
   };
   const inactiveObservation = { childList: true } as const;
-  const activeObservation: MutationObserverInit = { attributes: true, childList: true, subtree: true, attributeFilter: ["type", "disabled", "readonly", "autocomplete", "name", "id", "aria-label", "placeholder", "class", "style", "hidden", "inert", "aria-hidden"] };
+  const activeObservation: MutationObserverInit = { attributes: true, childList: true, characterData: true, subtree: true, attributeFilter: ["type", "disabled", "readonly", "autocomplete", "name", "id", "aria-label", "aria-labelledby", "role", "placeholder", "class", "style", "hidden", "inert", "aria-hidden"] };
   let recoveryObserver: MutationObserver; let attributeObserver: MutationObserver;
   const observe = (active: boolean) => {
-    if (active) attributeObserver.observe(document.documentElement, activeObservation);
-    else { attributeObserver.disconnect(); recoveryObserver.observe(document.documentElement, inactiveObservation); }
+    attributeObserver.disconnect();
+    if (active) {
+      attributeObserver.observe(document.documentElement, activeObservation);
+      for (let root = target?.getRootNode(); root instanceof ShadowRoot; root = root.host.getRootNode()) attributeObserver.observe(root, activeObservation);
+    }
+    else recoveryObserver.observe(document.documentElement, inactiveObservation);
   };
   const hide = () => { close(false); target = null; invalidateOverlayCache(); setHostVisible(false); placementTimers.forEach(clearTimeout); placementTimers = []; observe(false); };
   const open = async () => {

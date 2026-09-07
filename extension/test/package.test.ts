@@ -58,7 +58,10 @@ test("ZIP is deterministic and contains only built extension files", () => {
 
   const entries = execFileSync("unzip", ["-Z1", archive], { encoding: "utf8" }).trim().split("\n").sort();
   const assets = readdirSync(resolve(root, "dist/assets")).map((name) => `assets/${name}`);
-  expect(entries).toEqual(["manifest.json", "popup.html", "background.js", "content.js", ...assets, "icons/icon-16.png", "icons/icon-32.png", "icons/icon-48.png", "icons/icon-128.png"].sort());
+  expect(entries).toEqual(["manifest.json", "popup.html", "background.js", "content.js", "THIRD_PARTY_NOTICES.md", "DUCKDUCKGO_LICENSE.md", ...assets, "icons/icon-16.png", "icons/icon-32.png", "icons/icon-48.png", "icons/icon-128.png"].sort());
+  for (const file of ["THIRD_PARTY_NOTICES.md", "DUCKDUCKGO_LICENSE.md"]) {
+    expect(execFileSync("unzip", ["-p", archive, file], { encoding: "utf8" })).toBe(readFileSync(resolve(root, file), "utf8"));
+  }
   expect(entries.join("\n")).not.toMatch(/(?:src|test|node_modules|\.map)/);
   const packagedManifest = JSON.parse(execFileSync("unzip", ["-p", archive, "manifest.json"], { encoding: "utf8" }));
   expect(packagedManifest).toEqual(JSON.parse(readFileSync(resolve(root, "manifest.json"), "utf8")));

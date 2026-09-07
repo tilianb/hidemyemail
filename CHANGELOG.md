@@ -8,6 +8,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Extension autofill recognizes French, Japanese, Spanish, Italian, Dutch,
+  and Swedish email labels and multi-ID `aria-labelledby` labels, including
+  labels in open shadow roots. Selected matching rules and regression cases
+  are adapted from DuckDuckGo Autofill with Apache-2.0 notices in the ZIP.
+- Search, filter, subject, and verification-code controls no longer receive
+  alias suggestions merely because their metadata mentions email. Focused
+  fields are rechecked when accessible labels or roles change. Web-component
+  hosts no longer incorrectly hide the autofill button as an overlay collision.
 - Extension autofill preserves a field edited while alias generation is pending,
   notifies form listeners across shadow-DOM boundaries, and cancels pending fills
   when keyboard focus leaves the chooser. A canceled fill does not delete an
