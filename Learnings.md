@@ -59,6 +59,11 @@
 
 ## Patterns and Preferences
 
+**2026-09-08 — Amp orb lifecycle hooks**
+- Observation: Amp's orb image provides the system `zip` and `unzip` commands required by the extension build, and this repository has no backing services to repair after resume.
+- Action: Rely on Amp's built-in tooling and resume behavior rather than maintaining repository hooks that only install those commands or print a no-op message.
+- Confidence: high
+
 **2026-09-06 — Autofill library evaluation**
 - Observation: DuckDuckGo Autofill offers Apache-2.0 email matching and form fixtures, but its package entry starts DuckDuckGo-specific device adapters rather than exposing a standalone detector. HideMyEmail already implements composed focus paths, native-setter filling, and overlay collision handling.
 - Action: Prefer selective, attributed detection rules and regression fixtures over importing the full DuckDuckGo runtime or migrating extension frameworks solely for autofill; preserve explicit-click generation and avoid GPL Bitwarden code in the MIT extension.

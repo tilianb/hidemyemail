@@ -58,7 +58,6 @@ built dashboard assets.
 | `ios/` | Native SwiftUI app (XcodeGen `project.yml`) |
 | `android/` | Native Android app — Kotlin + Jetpack Compose (Gradle, package `dev.hidemyemail.app`) |
 | `website/` | Astro Starlight docs site, generated from `docs/` + README/CHANGELOG/ROADMAP by `scripts/sync-docs.mjs`; published to GitHub Pages |
-| `.agents/` | Amp orb lifecycle scripts: `setup` adds ZIP tooling to the project pre-setup environment; `resume` repairs paused environments when needed |
 
 ## Mobile (iOS + Android)
 
