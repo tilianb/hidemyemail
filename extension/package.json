@@ -11,9 +11,9 @@
   "devDependencies": {
     "@types/chrome": "^0.2.8",
     "@types/node": "^26.4.1",
-    "happy-dom": "^20.13.2",
+    "happy-dom": "^20.14.0",
     "typescript": "^7.0.2",
     "vite": "^8.2.2",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.0"
   }
 }
