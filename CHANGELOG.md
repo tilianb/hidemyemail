@@ -6,6 +6,28 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.4.1] — 2026-09-15
+
+HideMyEmail 1.4.1 is a maintenance release that moves the supported Node.js
+and container runtime to Node.js 24 LTS and refreshes application and
+documentation dependencies.
+
+### Changed
+
+- Docker images now build and run on Node.js 24. Development, CI, release,
+  and documentation builds use the same Node.js 24 baseline.
+- Updated Worker, dashboard, Chromium extension, and documentation dependencies,
+  including Hono, React, Astro, Vite, Vitest, Wrangler, and SVGO.
+- Added the official TestFlight beta link to the project and iOS documentation.
+- Updated the GitHub Pages artifact uploader to its Node.js 24-based release.
+
+### Upgrade Notes
+
+- No database migrations or configuration changes are required.
+- Source-based and Docker development environments now require Node.js 24 or
+  newer. Docker operators should pull or rebuild the v1.4.1 image before
+  restarting the service.
+
 ## [1.4.0] — 2026-09-07
 
 HideMyEmail 1.4.0 adds an alias manager and click-to-fill controls to the
@@ -525,7 +547,8 @@ encryption, deployment, and release safety for every installation.
 Pre-v1 baseline: core alias forwarding, reply-from-alias, MFA + passkeys,
 admin settings, Docker self-host, Cloudflare Workers deploy.
 
-[Unreleased]: https://github.com/tilianb/hidemyemail/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/tilianb/hidemyemail/compare/v1.4.1...HEAD
+[1.4.1]: https://github.com/tilianb/hidemyemail/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/tilianb/hidemyemail/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/tilianb/hidemyemail/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/tilianb/hidemyemail/compare/v1.2.0...v1.2.1
