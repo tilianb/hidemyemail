@@ -10,7 +10,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # Stage 1: build dashboard SPA + bundle worker
 # ──────────────────────────────────────────────────────────────────────────────
-FROM node:22-bookworm-slim AS builder
+FROM node:24-bookworm-slim AS builder
 
 WORKDIR /src
 
@@ -33,7 +33,7 @@ RUN cd dashboard && npm run build && \
 # ──────────────────────────────────────────────────────────────────────────────
 # Stage 2: runtime dependencies — install on glibc Linux, then copy only output
 # ──────────────────────────────────────────────────────────────────────────────
-FROM node:22-bookworm-slim AS runtime-deps
+FROM node:24-bookworm-slim AS runtime-deps
 
 WORKDIR /app
 
@@ -47,7 +47,7 @@ RUN --mount=type=cache,target=/root/.npm \
 # ──────────────────────────────────────────────────────────────────────────────
 # Stage 3: runtime — distroless Miniflare host
 # ──────────────────────────────────────────────────────────────────────────────
-FROM gcr.io/distroless/nodejs22-debian12:nonroot AS runtime
+FROM gcr.io/distroless/nodejs24-debian12:nonroot AS runtime
 
 WORKDIR /app
 
