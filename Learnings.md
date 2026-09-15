@@ -59,6 +59,11 @@
 
 ## Patterns and Preferences
 
+**2026-09-15 — Grouped dependency updates**
+- Observation: `@cloudflare/vitest-pool-workers` 0.22.0 requires Vitest 4.1, so a grouped Dependabot upgrade of the Worker to Vitest 5 makes `npm ci` fail before tests start even though standalone packages can use Vitest 5.
+- Action: Keep the Worker on Vitest 4.1 until the Cloudflare pool declares Vitest 5 compatibility; validate grouped updates with `npm ci` in every affected package.
+- Confidence: high
+
 **2026-09-06 — Autofill library evaluation**
 - Observation: DuckDuckGo Autofill offers Apache-2.0 email matching and form fixtures, but its package entry starts DuckDuckGo-specific device adapters rather than exposing a standalone detector. HideMyEmail already implements composed focus paths, native-setter filling, and overlay collision handling.
 - Action: Prefer selective, attributed detection rules and regression fixtures over importing the full DuckDuckGo runtime or migrating extension frameworks solely for autofill; preserve explicit-click generation and avoid GPL Bitwarden code in the MIT extension.
