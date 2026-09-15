@@ -59,6 +59,11 @@
 
 ## Patterns and Preferences
 
+**2026-09-15 — Node runtime baseline**
+- Observation: Astro 7.3 pulls `undici` 8, which requires Node 22.19 or newer, while Node 24 is the current LTS and has matching official slim and distroless images.
+- Action: Keep CI setup-node pins and all Docker build/runtime stages on Node 24; do not move production to Node 26 until it reaches LTS.
+- Confidence: high
+
 **2026-09-15 — Grouped dependency updates**
 - Observation: `@cloudflare/vitest-pool-workers` 0.22.0 requires Vitest 4.1, so a grouped Dependabot upgrade of the Worker to Vitest 5 makes `npm ci` fail before tests start even though standalone packages can use Vitest 5.
 - Action: Keep the Worker on Vitest 4.1 until the Cloudflare pool declares Vitest 5 compatibility; validate grouped updates with `npm ci` in every affected package.
