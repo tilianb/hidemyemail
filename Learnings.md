@@ -59,9 +59,9 @@
 
 ## Patterns and Preferences
 
-**2026-09-15 — GitHub Pages artifact runtime**
-- Observation: `actions/upload-pages-artifact` v3 embeds `actions/upload-artifact` v4, which triggers GitHub's deprecated Node 20 action-runtime warning even when the workflow configures Node 24 for project commands.
-- Action: Keep `actions/upload-pages-artifact` on v5 or newer so the composite action's embedded artifact upload also runs on Node 24.
+**2026-09-15 — GitHub Actions runtime baseline**
+- Observation: A workflow's `setup-node` version does not control JavaScript action runtimes; older Pages upload/deploy and Apple certificate actions still triggered Node 20 warnings after project commands moved to Node 24.
+- Action: Keep `upload-pages-artifact` and `deploy-pages` on v5 or newer and `import-codesign-certs` on v7 or newer so every JavaScript action uses Node 24.
 - Confidence: high
 
 **2026-09-15 — Node runtime baseline**

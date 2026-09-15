@@ -19,7 +19,8 @@ documentation dependencies.
 - Updated Worker, dashboard, Chromium extension, and documentation dependencies,
   including Hono, React, Astro, Vite, Vitest, Wrangler, and SVGO.
 - Added the official TestFlight beta link to the project and iOS documentation.
-- Updated the GitHub Pages artifact uploader to its Node.js 24-based release.
+- Updated GitHub Pages and TestFlight workflow actions to Node.js 24-based
+  releases.
 
 ### Upgrade Notes
 
