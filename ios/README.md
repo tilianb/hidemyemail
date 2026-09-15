@@ -33,14 +33,16 @@ your development team (or edit `DEVELOPMENT_TEAM` in `project.yml`).
 
 ## TestFlight from `dev`
 
+Users can [join the public TestFlight beta](https://testflight.apple.com/join/9576b67z).
+
 To ship the current development build, open **Actions → TestFlight → Run
-workflow**, select the `dev` branch, and run it. Manual uploads are restricted to
-`dev`; selecting another branch skips the job. Pull requests continue to run the
-simulator build and tests independently. Pushes to `main` that change the iOS
-app or this workflow upload automatically. Branch builds use `MARKETING_VERSION`
-from `project.yml`, while release-tag builds use the tag version. All uploads
-use `${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}` as the App Store build number, so
-their uploads and reruns cannot collide.
+workflow**, select the `dev` branch, and run it. Manual uploads are restricted
+to `dev`; selecting another branch skips the job. Pull requests continue to run
+the simulator build and tests independently. Pushes to `main` that change the
+iOS app or this workflow upload automatically. Branch builds use
+`MARKETING_VERSION` from `project.yml`, while release-tag builds use the tag
+version. All uploads use `${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}` as the App
+Store build number, so their uploads and reruns cannot collide.
 
 Configure these GitHub Actions secrets before the first upload:
 

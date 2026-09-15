@@ -5,6 +5,8 @@
 <p align="center">
   <a href="https://app.hidemyemail.dev">App</a>
   ·
+  <a href="https://testflight.apple.com/join/9576b67z">TestFlight</a>
+  ·
   <a href="https://tilianb.github.io/hidemyemail/">Documentation</a>
 </p>
 
