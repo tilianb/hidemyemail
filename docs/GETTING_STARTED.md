@@ -29,7 +29,7 @@ See [Docker self-hosting](../docker/README.md).
 - Cloudflare account with Workers and D1.
 - AWS account with SES receiving in your chosen region.
 - Domain DNS access.
-- Node.js 22+.
+- Node.js 24+.
 - AWS SES production access if sending to unverified external recipients.
 
 ## 1. Fork or clone
