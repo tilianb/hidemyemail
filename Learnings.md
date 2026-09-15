@@ -59,6 +59,11 @@
 
 ## Patterns and Preferences
 
+**2026-09-15 — Grouped dependency updates**
+- Observation: `@cloudflare/vitest-pool-workers` 0.22.0 requires Vitest 4.1, so a grouped Dependabot upgrade of the Worker to Vitest 5 makes `npm ci` fail before tests start even though standalone packages can use Vitest 5.
+- Action: Keep the Worker on Vitest 4.1 until the Cloudflare pool declares Vitest 5 compatibility; validate grouped updates with `npm ci` in every affected package.
+- Confidence: high
+
 **2026-09-08 — Amp orb lifecycle hooks**
 - Observation: Amp's orb image provides the system `zip` and `unzip` commands required by the extension build, and this repository has no backing services to repair after resume.
 - Action: Rely on Amp's built-in tooling and resume behavior rather than maintaining repository hooks that only install those commands or print a no-op message.
