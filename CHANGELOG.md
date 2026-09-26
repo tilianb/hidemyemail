@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Updated Worker, dashboard, Chromium extension, and documentation dependencies,
+  including Hono, SimpleWebAuthn, PostalMime, Wrangler, Lucide, Vite, Vitest,
+  Astro, and Starlight.
+
+### Security
+
+- Updated Sharp to 0.35.4 in the Worker and Docker dependency trees to address
+  published high-severity libheif vulnerabilities.
+
+### Upgrade Notes
+
+- No database migrations or configuration changes are required.
+
 ## [1.4.1] — 2026-09-15
 
 HideMyEmail 1.4.1 is a maintenance release that moves the supported Node.js

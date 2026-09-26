@@ -59,6 +59,11 @@
 
 ## Patterns and Preferences
 
+**2026-09-26 — Dependency security updates**
+- Observation: Sharp is pinned through overrides in both the Worker and Docker host, so updating only one lockfile leaves the other dependency tree vulnerable; Miniflare's npm `latest` tag currently points to a v5 alpha while v4 remains the stable Docker-host line.
+- Action: Update and audit both Sharp overrides together, and keep the production Docker host on the newest stable Miniflare v4 rather than following its prerelease `latest` tag.
+- Confidence: high
+
 **2026-09-15 — GitHub Actions runtime baseline**
 - Observation: A workflow's `setup-node` version does not control JavaScript action runtimes; older Pages upload/deploy and Apple certificate actions still triggered Node 20 warnings after project commands moved to Node 24.
 - Action: Keep `upload-pages-artifact` and `deploy-pages` on v5 or newer and `import-codesign-certs` on v7 or newer so every JavaScript action uses Node 24.
