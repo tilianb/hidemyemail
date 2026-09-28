@@ -8,7 +8,7 @@ updates:
       - "/extension"
     schedule:
       interval: "weekly"
-    target-branch: "dev"
+    target-branch: "main"
     open-pull-requests-limit: 1
     groups:
       npm-dependencies:

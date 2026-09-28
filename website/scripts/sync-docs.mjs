@@ -14,8 +14,8 @@ const WEBSITE_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPO_ROOT = dirname(WEBSITE_DIR);
 const OUT_DIR = join(WEBSITE_DIR, "src", "content", "docs");
 const BASE = "/hidemyemail"; // must match astro.config.mjs `base`
-const BLOB = "https://github.com/tilianb/hidemyemail/blob/dev";
-const RAW = "https://raw.githubusercontent.com/tilianb/hidemyemail/dev";
+const BLOB = "https://github.com/tilianb/hidemyemail/blob/main";
+const RAW = "https://raw.githubusercontent.com/tilianb/hidemyemail/main";
 
 // repo-relative source -> { slug, title }. `index` is the site home.
 const PAGES = [
@@ -87,8 +87,8 @@ async function main() {
     const rewritten = rewriteLinks(page.src, body).trimStart();
     const title = page.title || heading || page.slug;
     // "Edit page" must point at the real source in the repo, not the generated
-    // (git-ignored) file under src/content/docs/. Edits flow through `dev`.
-    const editUrl = `https://github.com/tilianb/hidemyemail/edit/dev/${page.src}`;
+    // (git-ignored) file under src/content/docs/.
+    const editUrl = `https://github.com/tilianb/hidemyemail/edit/main/${page.src}`;
     const frontmatter = `---\ntitle: ${yamlString(title)}\neditUrl: ${yamlString(editUrl)}\n---\n\n`;
     await writeFile(join(OUT_DIR, `${page.slug}.md`), frontmatter + rewritten + "\n");
     console.log(`synced ${page.src} -> ${page.slug}.md`);

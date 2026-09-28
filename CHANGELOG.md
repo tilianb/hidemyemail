@@ -17,6 +17,8 @@ vulnerabilities.
 - Updated Worker, dashboard, Chromium extension, and documentation dependencies,
   including Hono, SimpleWebAuthn, PostalMime, Wrangler, Lucide, Vite, Vitest,
   Astro, and Starlight.
+- Simplified contribution and release automation around short-lived branches
+  that target `main` directly, removing the duplicate `dev` promotion step.
 
 ### Security
 
