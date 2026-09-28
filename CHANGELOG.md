@@ -6,11 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.4.2] — 2026-09-28
+
+HideMyEmail 1.4.2 is a maintenance release that refreshes application and
+documentation dependencies and updates Sharp to address published libheif
+vulnerabilities.
+
 ### Changed
 
 - Updated Worker, dashboard, Chromium extension, and documentation dependencies,
   including Hono, SimpleWebAuthn, PostalMime, Wrangler, Lucide, Vite, Vitest,
   Astro, and Starlight.
+- Simplified contribution and release automation around short-lived branches
+  that target `main` directly, removing the duplicate `dev` promotion step.
 
 ### Security
 
@@ -563,7 +571,8 @@ encryption, deployment, and release safety for every installation.
 Pre-v1 baseline: core alias forwarding, reply-from-alias, MFA + passkeys,
 admin settings, Docker self-host, Cloudflare Workers deploy.
 
-[Unreleased]: https://github.com/tilianb/hidemyemail/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/tilianb/hidemyemail/compare/v1.4.2...HEAD
+[1.4.2]: https://github.com/tilianb/hidemyemail/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/tilianb/hidemyemail/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/tilianb/hidemyemail/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/tilianb/hidemyemail/compare/v1.2.1...v1.3.0

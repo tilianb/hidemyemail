@@ -59,6 +59,11 @@
 
 ## Patterns and Preferences
 
+**2026-09-28 — Maintenance release preparation**
+- Observation: The release validator requires synchronized versions across Worker, dashboard, extension, Android, and iOS, plus an Android version code greater than the previous stable tag.
+- Action: Update every validator-owned version surface together, open the short-lived branch directly against `main`, and run `validate-release.mjs` before creating the release tag. Keep CI, Dependabot, docs links, and publication workflows aligned to `main`; do not maintain a `dev` synchronization job.
+- Confidence: high
+
 **2026-09-26 — Dependency security updates**
 - Observation: Sharp is pinned through overrides in both the Worker and Docker host, so updating only one lockfile leaves the other dependency tree vulnerable; Miniflare's npm `latest` tag currently points to a v5 alpha while v4 remains the stable Docker-host line.
 - Action: Update and audit both Sharp overrides together, and keep the production Docker host on the newest stable Miniflare v4 rather than following its prerelease `latest` tag.
