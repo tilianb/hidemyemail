@@ -1,6 +1,11 @@
 import { SETTING_DEFAULTS } from "../config";
 import { decryptDestination } from "./crypto";
 
+const ENCRYPTED_SETTINGS = new Set([
+  "ses_secret_access_key", "smtp_outbound_username", "smtp_outbound_password",
+  "smtp_inbound_username", "smtp_inbound_password",
+]);
+
 /**
  * Read a single setting from the D1 settings table with fallback to defaults.
  * Designed to be lightweight — no caching (D1 is fast enough for per-request reads).
@@ -9,7 +14,7 @@ export async function getSetting(db: D1Database, key: string, env?: any): Promis
   const row = await db.prepare("SELECT value FROM settings WHERE key = ?").bind(key).first<{ value: string }>();
   const val = row?.value ?? SETTING_DEFAULTS[key] ?? "";
 
-  if (val && env?.DESTINATION_ENCRYPTION_KEY && key === "ses_secret_access_key") {
+  if (val && env?.DESTINATION_ENCRYPTION_KEY && ENCRYPTED_SETTINGS.has(key)) {
     return await decryptDestination(val, env.DESTINATION_ENCRYPTION_KEY);
   }
   return val;
@@ -33,11 +38,18 @@ export async function getBoolSetting(db: D1Database, key: string): Promise<boole
  * Used for AWS settings that might be dynamically updated from the UI.
  */
 export async function getEnvWithOverride(db: D1Database, env: any, key: string): Promise<string> {
-  // Try DB first
-  const dbVal = await getSetting(db, key.toLowerCase(), env);
-  if (dbVal) return dbVal;
-  // Fall back to environment variable
-  return (env[key.toUpperCase()] as string) || "";
+  const normalized = key.toLowerCase();
+  const row = await db.prepare("SELECT value, updated_at FROM settings WHERE key = ?")
+    .bind(normalized).first<{ value: string; updated_at: number }>();
+  // Seed rows use updated_at=0 and are defaults, not explicit overrides. An
+  // explicit empty value is meaningful: it disables an inherited credential.
+  if (row && row.updated_at > 0) {
+    if (row.value && env?.DESTINATION_ENCRYPTION_KEY && ENCRYPTED_SETTINGS.has(normalized)) {
+      return decryptDestination(row.value, env.DESTINATION_ENCRYPTION_KEY);
+    }
+    return row.value;
+  }
+  return (env[key.toUpperCase()] as string) || SETTING_DEFAULTS[normalized] || "";
 }
 
 /** Read all settings as a key-value map. */
@@ -53,9 +65,6 @@ export async function getAllSettings(db: D1Database, env?: any): Promise<Record<
     const rows = await db.prepare("SELECT key, value, updated_at FROM settings").all<{ key: string; value: string; updated_at: number }>();
     for (const row of rows.results ?? []) {
       let val = row.value;
-      if (val && env?.DESTINATION_ENCRYPTION_KEY && row.key === "ses_secret_access_key") {
-        val = await decryptDestination(val, env.DESTINATION_ENCRYPTION_KEY);
-      }
       result[row.key] = { value: val, updated_at: row.updated_at };
     }
   } catch {

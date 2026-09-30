@@ -59,6 +59,11 @@
 
 ## Patterns and Preferences
 
+**2026-09-30 — Docker mail transport boundaries**
+- Observation: Miniflare service bindings can target a Node fetch handler, allowing raw-MIME SMTP submission without a public arbitrary-send endpoint; inbound SMTP still needs a trusted public MTA because Workers cannot listen for TCP.
+- Action: Keep inbound and outbound configuration independent, resolve explicit D1 overrides before environment defaults, and preserve uncertain-acceptance send fences across retries.
+- Confidence: high
+
 **2026-09-26 — Dependency security updates**
 - Observation: Sharp is pinned through overrides in both the Worker and Docker host, so updating only one lockfile leaves the other dependency tree vulnerable; Miniflare's npm `latest` tag currently points to a v5 alpha while v4 remains the stable Docker-host line.
 - Action: Update and audit both Sharp overrides together, and keep the production Docker host on the newest stable Miniflare v4 rather than following its prerelease `latest` tag.

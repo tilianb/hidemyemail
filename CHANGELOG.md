@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Added independent SES/custom-SMTP outbound selection and protected
+  receive-only SMTP ingress for Docker deployments, configurable through both
+  environment variables and encrypted admin settings.
+- Added documented SMTP recipes for Resend, Mailchimp Transactional, SendGrid,
+  Mailgun, and arbitrary standards-compliant relays.
+
 ### Changed
 
 - Updated Worker, dashboard, Chromium extension, and documentation dependencies,
@@ -16,10 +24,13 @@ All notable changes to this project are documented here. The format follows
 
 - Updated Sharp to 0.35.4 in the Worker and Docker dependency trees to address
   published high-severity libheif vulnerabilities.
+- Strip supplier control headers from forwarded MIME and require authenticated,
+  TLS-protected gateway metadata for Docker SMTP receipt.
 
 ### Upgrade Notes
 
-- No database migrations or configuration changes are required.
+- Existing SES deployments need no configuration changes. Docker operators may
+  opt into custom SMTP; inbound listener changes require a restart.
 
 ## [1.4.1] — 2026-09-15
 

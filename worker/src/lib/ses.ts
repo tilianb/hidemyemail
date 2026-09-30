@@ -2,6 +2,8 @@ import { AwsClient } from "aws4fetch";
 
 export class SesTransientError extends Error {}
 export class SesPermanentError extends Error {}
+export class SesUncertainError extends SesTransientError {}
+export class SesRetryableError extends SesTransientError {}
 
 export interface SesCreds { accessKeyId: string; secretAccessKey: string; region: string; }
 export interface SesRawMessage { from: string; to: string; rawBase64: string; feedbackForwarding?: string; }
@@ -37,13 +39,13 @@ export async function sendRaw(
       signal: AbortSignal.timeout(options.timeoutMs ?? SES_REQUEST_TIMEOUT_MS),
     });
   } catch (error) {
-    throw new SesTransientError(`SES request failed: ${String(error)}`);
+    throw new SesUncertainError(`SES request failed: ${String(error)}`);
   }
   if (res.ok) {
     const json = await res.json<{ MessageId: string }>();
     return json.MessageId;
   }
   const text = await res.text();
-  if (res.status === 429 || res.status >= 500) throw new SesTransientError(`SES ${res.status}: ${text}`);
+  if (res.status === 429 || res.status >= 500) throw new SesRetryableError(`SES ${res.status}: ${text}`);
   throw new SesPermanentError(`SES ${res.status}: ${text}`);
 }

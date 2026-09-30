@@ -8,6 +8,7 @@ import { consumeAuthArtifact, finalizeMfaBackupCode, finalizeMfaTotp, finalizePa
 import { clearAuthenticatedCookies, randomSixDigitCode, setAuthenticatedCookies, wantsToken } from "../auth-route-helpers";
 import { recoveryDigest } from "../../lib/recovery-auth";
 import { getRpFromOrigin } from "../../lib/webauthn";
+import { resolveMailProviderConfig, sendMail } from "../../lib/mail-provider";
 
 const SESSION_TTL = 60 * 60 * 24 * 7; // 7 days
 const FRESH_AUTH_TTL = 60 * 10; // 10 minutes
@@ -481,40 +482,26 @@ export function authRoutes() {
     if (!dest) return c.json({ error: "User has no default destination email" }, 400);
 
     const { decryptDestination } = await import("../../lib/crypto");
-    const { sendRaw } = await import("../../lib/ses");
     const { buildMfaEmail } = await import("../../lib/emails");
 
     const email = await decryptDestination(dest.email, c.env.DESTINATION_ENCRYPTION_KEY);
+    const mailConfig = await resolveMailProviderConfig(db, c.env);
+    if (!mailConfig) return c.json({ error: "Recovery email is not configured" }, 503);
     const code = randomSixDigitCode();
     const codeHash = await recoveryDigest(c.env.SESSION_SECRET, "code", code);
     const reserved = await db.prepare("UPDATE users SET recovery_code_hash = ?, recovery_code_expires_at = ?, recovery_code_attempts = 0, recovery_code_sent_at = ?, recovery_code_sends = recovery_code_sends + 1 WHERE id = ? AND recovery_token_hash = ? AND recovery_expires_at > ? AND active = 1 AND recovery_code_sends = ? AND (recovery_code_sent_at IS NULL OR recovery_code_sent_at <= ?)")
       .bind(codeHash, now + 10 * 60_000, now, user.id, tokenHash, now, user.recovery_code_sends, now - 60_000).run();
     if (reserved.meta.changes !== 1) return c.json({ error: "Recovery code cannot be sent" }, 429);
 
-    const sesAccessKeyId = await getEnvWithOverride(db, c.env, "ses_access_key_id");
-    const sesSecretAccessKey = await getEnvWithOverride(db, c.env, "ses_secret_access_key");
-    const sesRegion = await getEnvWithOverride(db, c.env, "ses_region");
-
-    const sesSend: typeof sendRaw = (c.env as any).__sesSend ?? sendRaw;
-    if (sesAccessKeyId && sesSecretAccessKey && sesRegion) {
-      const mainGlobalDomain = await getMainGlobalDomain(db, c.env);
-      try { await sesSend({
-        accessKeyId: sesAccessKeyId,
-        secretAccessKey: sesSecretAccessKey,
-        region: sesRegion
-      }, {
+    const mainGlobalDomain = await getMainGlobalDomain(db, c.env);
+    try { await sendMail(db, c.env, {
         from: `HideMyEmail <noreply@${mainGlobalDomain}>`,
         to: email,
         rawBase64: buildMfaEmail(email, code, mainGlobalDomain)
-      }); } catch {
+      }, mailConfig); } catch {
         await db.prepare("UPDATE users SET recovery_code_hash = NULL, recovery_code_expires_at = NULL WHERE id = ? AND recovery_token_hash = ? AND recovery_code_hash = ?")
           .bind(user.id, tokenHash, codeHash).run();
         return c.json({ error: "Recovery code could not be delivered" }, 502);
-      }
-    } else {
-      await db.prepare("UPDATE users SET recovery_code_hash = NULL, recovery_code_expires_at = NULL WHERE id = ? AND recovery_token_hash = ? AND recovery_code_hash = ?")
-        .bind(user.id, tokenHash, codeHash).run();
-      return c.json({ error: "Recovery email is not configured" }, 503);
     }
 
     return c.json({ ok: true });

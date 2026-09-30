@@ -4,20 +4,17 @@ import PostalMime from "postal-mime";
 import { createMimeMessage, Mailbox } from "mimetext";
 import { evaluateSenderRules } from "../lib/blocks";
 import { streamToBytes, toBase64 } from "../lib/bytes";
-import { parseMime, setHeader, removeHeaders, getHeader, serializeMime } from "../lib/mime";
+import { parseMime, setHeader, removeHeaders, removeProviderControlHeaders, getHeader, serializeMime } from "../lib/mime";
 import { reverseAddress } from "../lib/reverse";
-import { sendRaw, SesTransientError } from "../lib/ses";
-import { getNumericSetting, getBoolSetting, getEnvWithOverride, getSetting, getMainGlobalDomain } from "../lib/settings";
+import { MailRetryableError, MailUncertainError, sendMail } from "../lib/mail-provider";
+import { getNumericSetting, getBoolSetting, getSetting, getMainGlobalDomain } from "../lib/settings";
 import { decryptDestination, hashDestination } from "../lib/crypto";
 import { extractDisplayName, sanitizeDisplay as sanitize, buildForwardedFromDisplay } from "../lib/from-format";
 import { pushBlocked, pushForward } from "../lib/push";
 import type { DeliveryContext } from "./router";
 
-type SesSend = typeof sendRaw;
-
 export async function handleInbound(message: ForwardableEmailMessage, env: Env, auth?: ReplyAuth, delivery?: DeliveryContext): Promise<void> {
   const db = env.DB;
-  const ses: SesSend = (env as any).__sesSend ?? sendRaw;
   const now = Date.now();
   const [localPart, domainName] = splitAddress(message.to);
 
@@ -197,7 +194,7 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env, 
 
   const rawBytes = await streamToBytes(message.raw, maxInboundBytes);
   if (alias.source !== "auto_over_quota" && !inlineActionsEnabled) {
-    let mime = parseMime(rawBytes);
+    let mime = removeProviderControlHeaders(parseMime(rawBytes));
     const origFrom = getHeader(mime, "From") ?? message.from;
     const senderName = extractDisplayName(origFrom);
     const format = await getSetting(db, "forwarded_from_format");
@@ -244,23 +241,21 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env, 
     const rawBase64 = toBase64(serializeMime(mime));
     let sesAccepted = reservation === "accepted";
     try {
-      const sesAccessKeyId = await getEnvWithOverride(db, env, "ses_access_key_id");
-      const sesSecretAccessKey = await getEnvWithOverride(db, env, "ses_secret_access_key");
-      const sesRegion = await getEnvWithOverride(db, env, "ses_region");
       if (reservation !== "accepted") {
         if (delivery && !(await q.renewDelivery(db, delivery.id, delivery.token, Date.now()))) throw new Error("Delivery lease lost");
         if (!(await q.startMailSend(db, reservationId, reservationToken, Date.now()))) throw new Error("Reservation ownership lost");
-        await ses(
-          { accessKeyId: sesAccessKeyId, secretAccessKey: sesSecretAccessKey, region: sesRegion },
-          { from: fromHeader, to: dest, rawBase64 }
-        );
+        await sendMail(db, env, { from: fromHeader, to: dest, rawBase64 });
         sesAccepted = true;
         if (!(await q.markMailQuotaAccepted(db, reservationId, reservationToken))) throw new Error("Reservation ownership lost");
       }
     } catch (err) {
       await q.insertEvent(db, { alias_id: alias.id, type: "error", external_sender: message.from, detail: String(err), ts: now });
       if (err instanceof Error && (err.message === "Delivery lease lost" || err.message === "Reservation ownership lost")) throw err;
-      if (err instanceof SesTransientError) throw err;
+      if (err instanceof MailUncertainError) throw err;
+      if (err instanceof MailRetryableError) {
+        if (!sesAccepted) await q.releaseMailQuota(db, reservationId, reservationToken);
+        throw err;
+      }
       if (!sesAccepted) await q.releaseMailQuota(db, reservationId, reservationToken);
       return;
     }
@@ -281,7 +276,7 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env, 
   // See parallel block in the no-toolbar path for rationale.
   const addOwnUnsubscribe = await shouldAddUnsubscribe(db, origListUnsubscribe, origPrecedence);
   const skipHeaders = [
-    "return-path", "dkim-signature", "arc-seal", "arc-message-signature",
+    "return-path", "dkim-signature", "arc-seal", "arc-message-signature", "resend-idempotency-key", "x-smtpapi",
     "arc-authentication-results", "authentication-results", "sender", "content-type",
     "content-transfer-encoding", "mime-version", "from", "reply-to", "subject",
     "to", "cc", "bcc", "message-id", "date",
@@ -292,6 +287,7 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env, 
   }
   for (const h of parsedEmail.headers) {
     const key = h.key.toLowerCase();
+    if (key.startsWith("x-mc-") || key.startsWith("x-mailgun-")) continue;
     if (key === "authentication-results") {
       // Same rationale as the no-toolbar path: keep for debugging, never
       // re-emit a foreign Authentication-Results under its trusted name.
@@ -426,23 +422,21 @@ export async function handleInbound(message: ForwardableEmailMessage, env: Env, 
 
   let sesAccepted = reservation === "accepted";
   try {
-    const sesAccessKeyId = await getEnvWithOverride(db, env, "ses_access_key_id");
-    const sesSecretAccessKey = await getEnvWithOverride(db, env, "ses_secret_access_key");
-    const sesRegion = await getEnvWithOverride(db, env, "ses_region");
     if (reservation !== "accepted") {
       if (delivery && !(await q.renewDelivery(db, delivery.id, delivery.token, Date.now()))) throw new Error("Delivery lease lost");
       if (!(await q.startMailSend(db, reservationId, reservationToken, Date.now()))) throw new Error("Reservation ownership lost");
-      await ses(
-        { accessKeyId: sesAccessKeyId, secretAccessKey: sesSecretAccessKey, region: sesRegion },
-        { from: fromHeader, to: dest, rawBase64 }
-      );
+      await sendMail(db, env, { from: fromHeader, to: dest, rawBase64 });
       sesAccepted = true;
       if (!(await q.markMailQuotaAccepted(db, reservationId, reservationToken))) throw new Error("Reservation ownership lost");
     }
   } catch (err) {
     await q.insertEvent(db, { alias_id: alias.id, type: "error", external_sender: message.from, detail: String(err), ts: now });
     if (err instanceof Error && (err.message === "Delivery lease lost" || err.message === "Reservation ownership lost")) throw err;
-    if (err instanceof SesTransientError) throw err; // tempfail → sender retries
+    if (err instanceof MailUncertainError) throw err;
+    if (err instanceof MailRetryableError) {
+      if (!sesAccepted) await q.releaseMailQuota(db, reservationId, reservationToken);
+      throw err;
+    }
     if (!sesAccepted) await q.releaseMailQuota(db, reservationId, reservationToken);
     return;
   }
@@ -468,15 +462,8 @@ async function sendSystemNotification(db: D1Database, env: Env, to: string, subj
   const { buildNotificationEmail } = await import("../lib/emails");
   const mainGlobalDomain = await getMainGlobalDomain(db, env) || "example.com";
   const rawBase64 = buildNotificationEmail(to, subject, heading, bodyText, mainGlobalDomain);
-  const sesAccessKeyId = await getEnvWithOverride(db, env, "ses_access_key_id");
-  const sesSecretAccessKey = await getEnvWithOverride(db, env, "ses_secret_access_key");
-  const sesRegion = await getEnvWithOverride(db, env, "ses_region");
-  const ses: SesSend = (env as any).__sesSend ?? sendRaw;
   try {
-    await ses(
-      { accessKeyId: sesAccessKeyId, secretAccessKey: sesSecretAccessKey, region: sesRegion },
-      { from: `HideMyEmail <noreply@${mainGlobalDomain}>`, to, rawBase64 }
-    );
+    await sendMail(db, env, { from: `HideMyEmail <noreply@${mainGlobalDomain}>`, to, rawBase64 });
   } catch (err) {
     console.error("Failed to send system notification", err);
   }

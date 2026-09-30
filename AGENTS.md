@@ -206,3 +206,7 @@ CI: `.github/workflows/docs.yml` builds and deploys to GitHub Pages on push to
 - Docker self-host runs the same Worker under Miniflare
   (`docker/server.mjs`) — Worker features used must exist there too (e.g.
   the cron `scheduled()` handler is invoked by a `setInterval` shim).
+- Docker custom SMTP uses a private Miniflare service binding for outbound and
+  a receive-only authenticated listener for a trusted queueing/scanning MTA.
+  The listener is never published by default and never treats SMTP AUTH as an
+  SPF/DMARC verdict.
