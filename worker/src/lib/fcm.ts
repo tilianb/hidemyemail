@@ -1,5 +1,5 @@
 import type { Env } from "../types";
-import { fromBase64, toBase64, utf8 } from "./bytes";
+import { importPKCS8, SignJWT } from "jose";
 import type { ApnsAlert } from "./apns";
 
 // FCM HTTP v1 sender for Android push. Unlike APNs (a per-request ES256 JWT),
@@ -51,32 +51,18 @@ export function fcmConfig(env: Env): FcmConfig | null {
   };
 }
 
-function base64url(bytes: Uint8Array): string {
-  return toBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-// Import the RSA private key from the service-account PEM (PKCS#8 DER, base64).
-async function importSigningKey(privateKey: string): Promise<CryptoKey> {
-  const der = fromBase64(privateKey.replace(/-----[^-]+-----/g, "").replace(/\s+/g, ""));
-  return crypto.subtle.importKey(
-    "pkcs8", der, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"],
-  );
-}
-
 // Mint the service-account assertion JWT used to request an access token.
 async function buildAssertion(cfg: FcmConfig, nowSeconds: number): Promise<string> {
-  const header = base64url(utf8(JSON.stringify({ alg: "RS256", typ: "JWT" })));
-  const claims = base64url(utf8(JSON.stringify({
-    iss: cfg.clientEmail,
+  const key = await importPKCS8(cfg.privateKey, "RS256");
+  return new SignJWT({
     scope: "https://www.googleapis.com/auth/firebase.messaging",
-    aud: cfg.tokenUri,
-    iat: nowSeconds,
-    exp: nowSeconds + 3600,
-  })));
-  const signingInput = `${header}.${claims}`;
-  const key = await importSigningKey(cfg.privateKey);
-  const sig = await crypto.subtle.sign({ name: "RSASSA-PKCS1-v1_5" }, key, utf8(signingInput));
-  return `${signingInput}.${base64url(new Uint8Array(sig))}`;
+  })
+    .setProtectedHeader({ alg: "RS256", typ: "JWT" })
+    .setIssuer(cfg.clientEmail)
+    .setAudience(cfg.tokenUri)
+    .setIssuedAt(nowSeconds)
+    .setExpirationTime(nowSeconds + 3600)
+    .sign(key);
 }
 
 // Access-token cache. Google tokens last ~1h; we reuse for 50 minutes. Module

@@ -88,6 +88,7 @@ test("Docker startup accepts no APP_ORIGIN and migrates before listening", async
 test("Docker routes all dynamic security and association requests through the Worker", () => {
   assert.deepEqual(WORKER_FIRST_ROUTES, [
     "/api/*",
+    "/internal/*",
     "/.well-known/apple-app-site-association",
     "/.well-known/assetlinks.json",
     "/security-handoff",

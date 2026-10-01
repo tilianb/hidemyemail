@@ -2,6 +2,11 @@
 
 ## What Has Worked
 
+**2026-10-01 — SMTP-only host startup**
+- Observation: The Docker host passed undefined SES bindings to Miniflare in SMTP-only mode, and its static-assets routing intercepted internal SMTP configuration requests before the Worker ran.
+- Action: Exercise actual host startup without SES credentials; keep internal dispatch paths Worker-first while blocking them at the public HTTP listener.
+- Confidence: high
+
 **2026-09-06 — Open-shadow autofill integration**
 - Observation: Document hit-testing reports a shadow input's host, whose rectangle was incorrectly classified as a competing overlay. Document subtree observers also miss label changes within shadow roots.
 - Action: Exclude the target's shadow-host ancestor chain from overlay collisions and observe that chain's roots while the target is active. Verify with rendered web-component fields, not only mocked focus paths.
@@ -58,6 +63,11 @@
 - Confidence: high
 
 ## Patterns and Preferences
+
+**2026-10-01 — Dashboard settings editor ownership**
+- Observation: Rebuilding admin setting drafts whenever the parent reloads all control-room data can erase unsaved edits and couples unrelated domain/user refreshes to the editor lifecycle.
+- Action: Keep the system-settings draft and reload flow inside its mounted feature section; notify the parent only after a successful save so domain/DNS-derived views receive committed values.
+- Confidence: high
 
 **2026-09-30 — Docker mail transport boundaries**
 - Observation: Miniflare service bindings can target a Node fetch handler, allowing raw-MIME SMTP submission without a public arbitrary-send endpoint; inbound SMTP still needs a trusted public MTA because Workers cannot listen for TCP.
