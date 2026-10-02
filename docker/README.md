@@ -40,11 +40,15 @@ You need:
 
 1. **Docker** with the `compose` plugin (Docker Desktop, Colima, OrbStack, or
    server-side Docker Engine).
-2. **AWS account** with SES enabled in a region near you. The container
-   replaces the Workers runtime; mail flows through SES.
+2. **A mail transport:** AWS SES, or custom outbound SMTP plus either SES
+   inbound or a trusted public MTA such as Stalwart feeding the private Docker
+   SMTP listener.
 3. **A domain** you control, with DNS access.
 
-If you prefer to drop AWS entirely and run your own SMTP, this image is not the right path. That requires a larger project with Haraka or Postfix, IP reputation, and DNS.
+Custom SMTP settings are available in `.env` and the fresh-auth-protected Admin
+Settings panel. Explicit database overrides win over environment values;
+resetting an override restores `.env`. Inbound and outbound credentials are
+independent. See [Configuration](../docs/CONFIGURATION.md#custom-smtp-recipes).
 
 ---
 

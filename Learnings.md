@@ -69,6 +69,11 @@
 - Action: Use GitHub-hosted Linux, ARM64, and macOS runners for every workflow; keep the Docker platform matrix native by pairing `ubuntu-latest` with `ubuntu-24.04-arm`.
 - Confidence: high
 
+**2026-09-30 — Docker mail transport boundaries**
+- Observation: Miniflare service bindings can target a Node fetch handler, allowing raw-MIME SMTP submission without a public arbitrary-send endpoint; inbound SMTP still needs a trusted public MTA because Workers cannot listen for TCP.
+- Action: Keep inbound and outbound configuration independent, resolve explicit D1 overrides before environment defaults, and preserve uncertain-acceptance send fences across retries.
+- Confidence: high
+
 **2026-09-28 — Maintenance release preparation**
 - Observation: The release validator requires synchronized versions across Worker, dashboard, extension, Android, and iOS, plus an Android version code greater than the previous stable tag.
 - Action: Update every validator-owned version surface together, open the short-lived branch directly against `main`, and run `validate-release.mjs` before creating the release tag. Keep CI, Dependabot, docs links, and publication workflows aligned to `main`; do not maintain a `dev` synchronization job.

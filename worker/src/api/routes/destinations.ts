@@ -1,10 +1,10 @@
 import { Hono } from "hono";
 import { createMimeMessage, Mailbox } from "mimetext";
 import type { AppEnv } from "../app";
-import { sendRaw } from "../../lib/ses";
+import { resolveMailProviderConfig, sendMail } from "../../lib/mail-provider";
 import { toBase64, toBase64Mime } from "../../lib/bytes";
 import { hashDestination, encryptDestination, decryptDestination } from "../../lib/crypto";
-import { getEnvWithOverride, getMainGlobalDomain } from "../../lib/settings";
+import { getMainGlobalDomain } from "../../lib/settings";
 
 function escapeHtml(s: string): string {
   return s
@@ -62,28 +62,19 @@ export function destinationRoutes() {
         "INSERT INTO destinations (user_id, email, email_hash, token, created_at, is_default) VALUES (?, ?, ?, ?, ?, ?)"
       ).bind(userId, encryptedEmail, emailHash, token, Date.now(), isDefault).run();
 
-      const sesAccessKeyId = await getEnvWithOverride(c.env.DB, c.env, "ses_access_key_id");
-      const sesSecretAccessKey = await getEnvWithOverride(c.env.DB, c.env, "ses_secret_access_key");
-      const sesRegion = await getEnvWithOverride(c.env.DB, c.env, "ses_region");
-
-      if (sesAccessKeyId && sesSecretAccessKey && sesRegion) {
-        const verifyUrl = new URL(`/api/verify?token=${token}`, c.req.url).toString();
-        const mainGlobalDomain = await getMainGlobalDomain(c.env.DB, c.env);
-        const rawBase64 = buildVerificationEmail(email, verifyUrl, mainGlobalDomain);
-        const sesSend: typeof sendRaw = (c.env as any).__sesSend ?? sendRaw;
-
-        const startedAt = Date.now();
-        const sendTask = sesSend({
-            accessKeyId: sesAccessKeyId,
-            secretAccessKey: sesSecretAccessKey,
-            region: sesRegion
-          }, {
+      const mailConfig = await resolveMailProviderConfig(c.env.DB, c.env);
+      if (!mailConfig) return c.json({ ok: true });
+      const verifyUrl = new URL(`/api/verify?token=${token}`, c.req.url).toString();
+      const mainGlobalDomain = await getMainGlobalDomain(c.env.DB, c.env);
+      const rawBase64 = buildVerificationEmail(email, verifyUrl, mainGlobalDomain);
+      const startedAt = Date.now();
+      const sendTask = sendMail(c.env.DB, c.env, {
             from: `HideMyEmail <noreply@${mainGlobalDomain}>`,
             to: email,
             rawBase64
-          })
-          .then((messageId) => {
-            console.log("Verification email sent", { messageId, ms: Date.now() - startedAt });
+          }, mailConfig)
+          .then(({ providerId }) => {
+            console.log("Verification email sent", { providerId, ms: Date.now() - startedAt });
           })
           .catch(async (err) => {
             console.error("Verification email send failed", err);
@@ -92,11 +83,10 @@ export function destinationRoutes() {
               .run();
           });
 
-        try {
-          c.executionCtx.waitUntil(sendTask);
-        } catch {
-          void sendTask;
-        }
+      try {
+        c.executionCtx.waitUntil(sendTask);
+      } catch {
+        void sendTask;
       }
 
       return c.json({ ok: true });
@@ -119,13 +109,8 @@ export function destinationRoutes() {
     if (!dest) return c.json({ error: "Destination not found" }, 404);
     if (dest.verified_at !== null) return c.json({ error: "Destination is already verified" }, 409);
 
-    const sesAccessKeyId = await getEnvWithOverride(c.env.DB, c.env, "ses_access_key_id");
-    const sesSecretAccessKey = await getEnvWithOverride(c.env.DB, c.env, "ses_secret_access_key");
-    const sesRegion = await getEnvWithOverride(c.env.DB, c.env, "ses_region");
-
-    if (!sesAccessKeyId || !sesSecretAccessKey || !sesRegion) {
-      return c.json({ error: "Email sending is not configured" }, 503);
-    }
+    const mailConfig = await resolveMailProviderConfig(c.env.DB, c.env);
+    if (!mailConfig) return c.json({ error: "Email sending is not configured" }, 503);
 
     const email = await decryptDestination(dest.email, c.env.DESTINATION_ENCRYPTION_KEY);
     const verifyUrl = new URL(`/api/verify?token=${dest.token}`, c.req.url).toString();
@@ -143,18 +128,13 @@ export function destinationRoutes() {
       return c.json({ error: "Please wait before resending verification email" }, 429);
     }
 
-    const sesSend: typeof sendRaw = (c.env as any).__sesSend ?? sendRaw;
     const startedAt = Date.now();
-    const sendTask = sesSend({
-        accessKeyId: sesAccessKeyId,
-        secretAccessKey: sesSecretAccessKey,
-        region: sesRegion
-      }, {
+    const sendTask = sendMail(c.env.DB, c.env, {
         from: `HideMyEmail <noreply@${mainGlobalDomain}>`,
         to: email,
         rawBase64
-      }).then((messageId) => {
-        console.log("Verification email resent", { messageId, ms: Date.now() - startedAt });
+      }, mailConfig).then(({ providerId }) => {
+        console.log("Verification email resent", { providerId, ms: Date.now() - startedAt });
       }).catch((err) => {
         console.error("Verification email resend failed", err);
       });

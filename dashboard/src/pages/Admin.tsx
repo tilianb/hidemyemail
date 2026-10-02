@@ -103,7 +103,7 @@ export function Admin() {
   const [suppressionHealth, setSuppressionHealth] = useState<"healthy" | "attention">("healthy");
   const [showSuppressions, setShowSuppressions] = useState(false);
   const [envData, setEnvData] = useState<{ vars: Record<string, { value: string; secret: false }>; secrets: Record<string, { configured: boolean; preview?: string }> } | null>(null);
-  const [settingsData, setSettingsData] = useState<Record<string, { value: string; updated_at: number }> | null>(null);
+  const [settingsData, setSettingsData] = useState<Record<string, { value: string; updated_at: number; source?: "override" | "environment" | "default" }> | null>(null);
   const [editedSettings, setEditedSettings] = useState<Record<string, string>>({});
   const [savingSettings, setSavingSettings] = useState(false);
   const [showEnvVars, setShowEnvVars] = useState(false);
@@ -333,8 +333,13 @@ export function Admin() {
         }
       }
       if (Object.keys(changed).length > 0) {
-        await api.adminUpdateSettings(changed);
+        const mailChanged = Object.keys(changed).some(key => key.startsWith("smtp_") || key === "mail_outbound_provider");
+        const result = mailChanged
+          ? await freshGuard(() => api.adminUpdateSettings(changed), () => saveSettings())
+          : { ok: true as const, value: await api.adminUpdateSettings(changed) };
+        if (!result.ok) return;
         toast("Settings saved", "success");
+        if (result.value.restart_required) toast("Restart Docker to activate SMTP listener changes", "success");
         await load();
       } else {
         toast("No changes to save", "success");
@@ -344,6 +349,14 @@ export function Admin() {
     } finally {
       setSavingSettings(false);
     }
+  }
+
+  async function resetMailSettings(keys: string[]) {
+    const reset = Object.fromEntries(keys.map(key => [key, null]));
+    const result = await freshGuard(() => api.adminUpdateSettings(reset), () => resetMailSettings(keys));
+    if (!result.ok) return;
+    toast("Environment/default mail settings restored. Restart Docker to activate them.", "success");
+    await load();
   }
 
   async function clearSuppression(id: number) {
@@ -455,7 +468,7 @@ export function Admin() {
                 id="global-dom"
                 className="input input-mono"
                 type="text"
-                placeholder="example.com or aliases.example.net"
+                placeholder="aliases.example.net"
                 value={domainForm}
                 onChange={e => setDomainForm(e.target.value.toLowerCase())}
                 required
@@ -926,6 +939,56 @@ export function Admin() {
             </p>
             
             <div className="settings-grid" style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+              <div className="setting-row" style={{ alignItems: "flex-start" }}>
+                <div className="setting-info">
+                  <label htmlFor="setting-mail-provider" className="setting-label">Outbound mail transport</label>
+                  <div className="setting-desc">SES remains the default. Custom SMTP runs only in Docker through a private service binding.</div>
+                </div>
+                <div className="setting-control" style={{ display: "grid", gap: 8, minWidth: 360 }}>
+                  <select id="setting-mail-provider" className="input" value={editedSettings.mail_outbound_provider || "ses"} onChange={e => setEditedSettings({...editedSettings, mail_outbound_provider: e.target.value})}>
+                    <option value="ses">AWS SES</option><option value="smtp">Custom SMTP</option>
+                  </select>
+                  <div className="setting-desc">Source: {settingsData.mail_outbound_provider?.source ?? "default"}. Saved SMTP changes become active after Docker restarts.</div>
+                  {editedSettings.mail_outbound_provider === "smtp" && <>
+                    <input className="input input-mono" aria-label="SMTP outbound host" placeholder="smtp.example.com" value={editedSettings.smtp_outbound_host || ""} onChange={e => setEditedSettings({...editedSettings, smtp_outbound_host: e.target.value})} />
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input className="input" aria-label="SMTP outbound port" inputMode="numeric" placeholder="587" value={editedSettings.smtp_outbound_port || ""} onChange={e => setEditedSettings({...editedSettings, smtp_outbound_port: e.target.value.replace(/\D/g, "")})} />
+                      <select className="input" aria-label="SMTP outbound TLS mode" value={editedSettings.smtp_outbound_tls || "starttls"} onChange={e => setEditedSettings({...editedSettings, smtp_outbound_tls: e.target.value})}>
+                        <option value="starttls">Required STARTTLS</option><option value="implicit">Implicit TLS</option><option value="trusted-cleartext">Trusted port-25 relay</option>
+                      </select>
+                    </div>
+                    <input className="input input-mono" aria-label="SMTP outbound username" autoComplete="off" placeholder="Username (write-only)" value={editedSettings.smtp_outbound_username || ""} onChange={e => setEditedSettings({...editedSettings, smtp_outbound_username: e.target.value})} />
+                    <input className="input" aria-label="SMTP outbound password" type="password" autoComplete="new-password" placeholder="Password (leave unchanged to preserve)" value={editedSettings.smtp_outbound_password || ""} onChange={e => setEditedSettings({...editedSettings, smtp_outbound_password: e.target.value})} />
+                    <div style={{ display: "flex", gap: 8 }}><button type="button" className="btn btn-outline btn-sm" onClick={() => setEditedSettings({...editedSettings, smtp_outbound_username: "", smtp_outbound_password: ""})}>Remove credentials</button><button type="button" className="btn btn-outline btn-sm" onClick={() => resetMailSettings(["mail_outbound_provider", "smtp_outbound_host", "smtp_outbound_port", "smtp_outbound_tls", "smtp_outbound_username", "smtp_outbound_password"])}>Use environment</button></div>
+                    <div className="setting-desc">Verified certificates stay mandatory. Disable provider click/open tracking in the supplier dashboard for privacy.</div>
+                  </>}
+                </div>
+              </div>
+
+              <div className="setting-row" style={{ alignItems: "flex-start" }}>
+                <div className="setting-info">
+                  <div className="setting-label">SMTP receiving</div>
+                  <div className="setting-desc">Receive-only Docker listener for a trusted scanning MTA. This does not poll an IMAP/POP mailbox. Changes activate after restart.</div>
+                </div>
+                <div className="setting-control" style={{ display: "grid", gap: 8, minWidth: 360 }}>
+                  <label className="domain-toggle"><span>Enabled after restart</span><div className="switch"><input type="checkbox" checked={editedSettings.smtp_inbound_enabled === "true"} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_enabled: e.target.checked ? "true" : "false"})} /><span className="switch-track"></span></div></label>
+                  <div className="setting-desc">Source: {settingsData.smtp_inbound_enabled?.source ?? "default"}. Configured state may differ from the active listener until restart.</div>
+                  {editedSettings.smtp_inbound_enabled === "true" && <>
+                    <input className="input input-mono" aria-label="SMTP inbound bind address" placeholder="127.0.0.1" value={editedSettings.smtp_inbound_host || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_host: e.target.value})} />
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input className="input" aria-label="SMTP inbound port" inputMode="numeric" placeholder="2525" value={editedSettings.smtp_inbound_port || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_port: e.target.value.replace(/\D/g, "")})} />
+                      <select className="input" aria-label="SMTP inbound TLS mode" value={editedSettings.smtp_inbound_tls || "starttls"} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_tls: e.target.value})}><option value="starttls">Required STARTTLS</option><option value="implicit">Implicit TLS</option></select>
+                    </div>
+                    <input className="input input-mono" aria-label="SMTP inbound gateway ID" placeholder="Gateway ID, e.g. stalwart-1" value={editedSettings.smtp_inbound_gateway_id || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_gateway_id: e.target.value})} />
+                    <input className="input input-mono" aria-label="SMTP inbound trusted peers" placeholder="Exact peer IPs, comma-separated" value={editedSettings.smtp_inbound_trusted_peers || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_trusted_peers: e.target.value})} />
+                    <input className="input input-mono" aria-label="SMTP inbound username" autoComplete="off" placeholder="Listener username (write-only)" value={editedSettings.smtp_inbound_username || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_username: e.target.value})} />
+                    <input className="input" aria-label="SMTP inbound password" type="password" autoComplete="new-password" placeholder="Listener password (leave unchanged to preserve)" value={editedSettings.smtp_inbound_password || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_password: e.target.value})} />
+                    <div style={{ display: "flex", gap: 8 }}><button type="button" className="btn btn-outline btn-sm" onClick={() => setEditedSettings({...editedSettings, smtp_inbound_username: "", smtp_inbound_password: ""})}>Remove credentials</button><button type="button" className="btn btn-outline btn-sm" onClick={() => resetMailSettings(["smtp_inbound_enabled", "smtp_inbound_host", "smtp_inbound_port", "smtp_inbound_tls", "smtp_inbound_username", "smtp_inbound_password", "smtp_inbound_gateway_id", "smtp_inbound_trusted_peers", "smtp_inbound_max_bytes"])}>Use environment</button></div>
+                    <div className="setting-desc">Certificate and key paths remain deployment-managed environment values. Non-loopback listeners refuse startup without them.</div>
+                  </>}
+                </div>
+              </div>
+
               <div className="setting-row">
                 <div className="setting-info">
                   <label htmlFor="setting-rate-global" className="setting-label">Global Rate Limit (emails/hr)</label>
@@ -1298,7 +1361,7 @@ export function Admin() {
               <div className="setting-row">
                 <div className="setting-info">
                   <label htmlFor="test-email-to" className="setting-label">Send Test Email</label>
-                  <div className="setting-desc">Send a sample system email through current SES settings to verify deliverability.</div>
+                  <div className="setting-desc">Send a sample system email through the selected outbound transport to verify delivery acceptance.</div>
                 </div>
                 <form className="setting-control test-email-control" onSubmit={sendTestEmail}>
                   <select

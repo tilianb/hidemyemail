@@ -4,9 +4,28 @@ export interface Env {
   ENVIRONMENT: string;
   BLOCKED_SUBDOMAINS?: string;
   DB: D1Database;
-  SES_REGION: string;
-  SES_ACCESS_KEY_ID: string;
-  SES_SECRET_ACCESS_KEY: string;
+  MAIL_OUTBOUND_PROVIDER?: string;
+  SMTP_TRANSPORT?: Fetcher;
+  SMTP_INGRESS_SECRET?: string;
+  SMTP_OUTBOUND_HOST?: string;
+  SMTP_OUTBOUND_PORT?: string;
+  SMTP_OUTBOUND_TLS?: string;
+  SMTP_OUTBOUND_USERNAME?: string;
+  SMTP_OUTBOUND_PASSWORD?: string;
+  SMTP_INBOUND_ENABLED?: string;
+  SMTP_INBOUND_HOST?: string;
+  SMTP_INBOUND_PORT?: string;
+  SMTP_INBOUND_TLS?: string;
+  SMTP_INBOUND_USERNAME?: string;
+  SMTP_INBOUND_PASSWORD?: string;
+  SMTP_INBOUND_GATEWAY_ID?: string;
+  SMTP_INBOUND_TRUSTED_PEERS?: string;
+  SMTP_INBOUND_MAX_BYTES?: string;
+  SMTP_INBOUND_TLS_CERT?: string;
+  SMTP_INBOUND_TLS_KEY?: string;
+  SES_REGION?: string;
+  SES_ACCESS_KEY_ID?: string;
+  SES_SECRET_ACCESS_KEY?: string;
   SESSION_SECRET: string;
   AUTH_PASSWORD_HASH: string;   // hex PBKDF2 output
   AUTH_PASSWORD_SALT: string;   // hex salt

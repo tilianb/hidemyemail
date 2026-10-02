@@ -51,6 +51,22 @@ export function removeHeaders(m: Mime, names: string[]): Mime {
   return { headers: m.headers.filter((h) => !drop.has(h.name.toLowerCase())), body: m.body };
 }
 
+// Raw SMTP suppliers interpret these headers as control data. Inbound senders
+// must not be able to add recipients, routing, tracking, tags, or dedup keys to
+// a forwarded message. Keep ordinary MIME headers and the body byte-for-byte.
+export function removeProviderControlHeaders(m: Mime): Mime {
+  return {
+    headers: m.headers.filter((header) => {
+      const name = header.name.toLowerCase();
+      return name !== "resend-idempotency-key"
+        && name !== "x-smtpapi"
+        && !name.startsWith("x-mc-")
+        && !name.startsWith("x-mailgun-");
+    }),
+    body: m.body,
+  };
+}
+
 export function serializeMime(m: Mime): Uint8Array {
   const headerText = m.headers.map((h) => `${h.name}: ${h.value}`).join("\r\n") + "\r\n\r\n";
   return concat(utf8(headerText), m.body);
