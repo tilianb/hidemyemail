@@ -195,7 +195,10 @@ test("automation targets main directly", async () => {
       readFile(new URL(`../.github/${name === "dependabot" ? "" : "workflows/"}${name}.yml`, import.meta.url), "utf8")),
   );
   await assert.rejects(readFile(new URL("../.github/workflows/sync-dev.yml", import.meta.url), "utf8"));
-  for (const workflow of [ci, codeql, docker]) {
+  // Explicit dev integration PRs receive CI, but must not restore dev pushes
+  // or the removed promotion/publication workflow.
+  assert.match(ci, /pull_request:\n\s+branches:\n\s+- main\n\s+- dev/);
+  for (const workflow of [ci.split("  pull_request:")[0], codeql, docker]) {
     assert.doesNotMatch(workflow, /branches:[^\n]*dev|^\s+- dev$/m);
   }
   assert.match(dependabot, /target-branch: "main"/);
