@@ -468,7 +468,7 @@ export function Admin() {
                 id="global-dom"
                 className="input input-mono"
                 type="text"
-                placeholder="example.com or aliases.example.net"
+                placeholder="aliases.example.net"
                 value={domainForm}
                 onChange={e => setDomainForm(e.target.value.toLowerCase())}
                 required
