@@ -29,10 +29,13 @@ export async function makeSignedSnsBody(input: {
   subject?: string;
   subscribeUrl?: string;
   token?: string;
+  signatureVersion?: "1" | "2";
 }): Promise<{ body: Record<string, string>; certPem: string }> {
   const region = input.region ?? "ap-southeast-2";
+  const signatureVersion = input.signatureVersion ?? "2";
+  const hash = signatureVersion === "2" ? "SHA-256" : "SHA-1";
   const keyPair = await crypto.subtle.generateKey(
-    { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+    { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash },
     true,
     ["sign", "verify"],
   ) as CryptoKeyPair;
@@ -46,7 +49,7 @@ export async function makeSignedSnsBody(input: {
     TopicArn: input.topicArn,
     Message: input.message ?? "{}",
     Timestamp: "2026-05-27T00:00:00.000Z",
-    SignatureVersion: "2",
+    SignatureVersion: signatureVersion,
     SigningCertURL: `https://sns.${region}.amazonaws.com/SimpleNotificationService-test.pem`,
   };
   if (input.subject) body.Subject = input.subject;

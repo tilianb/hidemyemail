@@ -1,5 +1,5 @@
 import type { Env } from "../types";
-import { fromBase64, toBase64, utf8 } from "./bytes";
+import { importPKCS8, SignJWT } from "jose";
 
 // Token-based APNs (HTTP/2) sender. We sign a short-lived ES256 provider JWT
 // with the .p8 key and POST the alert. Cloudflare's fetch negotiates HTTP/2 to
@@ -53,16 +53,10 @@ export function apnsConfig(env: Env): ApnsConfig | null {
   return { keyId, teamId, authKey, bundleId, host: env.APNS_HOST || "api.push.apple.com" };
 }
 
-function base64url(bytes: Uint8Array): string {
-  return toBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-// Import the EC P-256 private key from the .p8 PEM body (PKCS#8 DER, base64).
-async function importSigningKey(authKey: string): Promise<CryptoKey> {
-  const der = fromBase64(authKey.replace(/-----[^-]+-----/g, "").replace(/\s+/g, ""));
-  return crypto.subtle.importKey(
-    "pkcs8", der, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"],
-  );
+function asPkcs8Pem(authKey: string): string {
+  if (authKey.includes("-----BEGIN PRIVATE KEY-----")) return authKey;
+  const body = authKey.replace(/\s+/g, "");
+  return `-----BEGIN PRIVATE KEY-----\n${body.match(/.{1,64}/g)?.join("\n")}\n-----END PRIVATE KEY-----`;
 }
 
 // Mint a provider JWT. APNs accepts these for up to an hour but rejects clients
@@ -70,13 +64,12 @@ async function importSigningKey(authKey: string): Promise<CryptoKey> {
 // TooManyProviderTokenUpdates — so callers should go through `getProviderToken`,
 // which caches; this is the raw minter.
 export async function buildProviderToken(cfg: ApnsConfig, nowSeconds: number): Promise<string> {
-  const header = base64url(utf8(JSON.stringify({ alg: "ES256", kid: cfg.keyId })));
-  const claims = base64url(utf8(JSON.stringify({ iss: cfg.teamId, iat: nowSeconds })));
-  const signingInput = `${header}.${claims}`;
-  const key = await importSigningKey(cfg.authKey);
-  // WebCrypto ECDSA returns the raw r||s concatenation — already JOSE format.
-  const sig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, utf8(signingInput));
-  return `${signingInput}.${base64url(new Uint8Array(sig))}`;
+  const key = await importPKCS8(asPkcs8Pem(cfg.authKey), "ES256");
+  return new SignJWT({})
+    .setProtectedHeader({ alg: "ES256", kid: cfg.keyId })
+    .setIssuer(cfg.teamId)
+    .setIssuedAt(nowSeconds)
+    .sign(key);
 }
 
 // Provider-token cache. APNs allows a token to live up to an hour and forbids

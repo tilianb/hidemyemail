@@ -1087,6 +1087,7 @@ table.dossier tbody td {
 }
 .setting-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-6);
@@ -1096,7 +1097,7 @@ table.dossier tbody td {
 .setting-row:last-child { border-bottom: none; }
 .setting-info {
   flex: 1;
-  min-width: 0;
+  min-width: min(240px, 100%);
 }
 .setting-label {
   font-family: var(--font-display);

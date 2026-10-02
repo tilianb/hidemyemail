@@ -19,11 +19,14 @@
     "typegen": "wrangler types"
   },
   "dependencies": {
+    "@hono/zod-validator": "^0.7.6",
     "@simplewebauthn/server": "^14.0.3",
     "aws4fetch": "^1.0.20",
     "hono": "^4.13.9",
+    "jose": "^6.2.12",
     "mimetext": "^3.0.28",
-    "postal-mime": "^3.0.1"
+    "postal-mime": "^3.0.1",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",

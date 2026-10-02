@@ -1,10 +1,5 @@
-import { SETTING_DEFAULTS } from "../config";
+import { ENCRYPTED_SETTING_KEYS, SETTING_DEFAULTS, SETTING_DEFINITIONS, type SettingDefinition, type SettingKey } from "../config";
 import { decryptDestination } from "./crypto";
-
-const ENCRYPTED_SETTINGS = new Set([
-  "ses_secret_access_key", "smtp_outbound_username", "smtp_outbound_password",
-  "smtp_inbound_username", "smtp_inbound_password",
-]);
 
 /**
  * Read a single setting from the D1 settings table with fallback to defaults.
@@ -14,7 +9,7 @@ export async function getSetting(db: D1Database, key: string, env?: any): Promis
   const row = await db.prepare("SELECT value FROM settings WHERE key = ?").bind(key).first<{ value: string }>();
   const val = row?.value ?? SETTING_DEFAULTS[key] ?? "";
 
-  if (val && env?.DESTINATION_ENCRYPTION_KEY && ENCRYPTED_SETTINGS.has(key)) {
+  if (val && env?.DESTINATION_ENCRYPTION_KEY && ENCRYPTED_SETTING_KEYS.has(key as SettingKey)) {
     return await decryptDestination(val, env.DESTINATION_ENCRYPTION_KEY);
   }
   return val;
@@ -44,16 +39,18 @@ export async function getEnvWithOverride(db: D1Database, env: any, key: string):
   // Seed rows use updated_at=0 and are defaults, not explicit overrides. An
   // explicit empty value is meaningful: it disables an inherited credential.
   if (row && row.updated_at > 0) {
-    if (row.value && env?.DESTINATION_ENCRYPTION_KEY && ENCRYPTED_SETTINGS.has(normalized)) {
+    if (row.value && env?.DESTINATION_ENCRYPTION_KEY && ENCRYPTED_SETTING_KEYS.has(normalized as SettingKey)) {
       return decryptDestination(row.value, env.DESTINATION_ENCRYPTION_KEY);
     }
     return row.value;
   }
-  return (env[key.toUpperCase()] as string) || SETTING_DEFAULTS[normalized] || "";
+  const definition = SETTING_DEFINITIONS[normalized as SettingKey] as SettingDefinition | undefined;
+  const envName = definition?.env ?? key.toUpperCase();
+  return (env[envName] as string) || SETTING_DEFAULTS[normalized as SettingKey] || "";
 }
 
 /** Read all settings as a key-value map. */
-export async function getAllSettings(db: D1Database, env?: any): Promise<Record<string, { value: string; updated_at: number }>> {
+export async function getAllSettings(db: D1Database, _env?: any): Promise<Record<string, { value: string; updated_at: number }>> {
   const result: Record<string, { value: string; updated_at: number }> = {};
 
   // Start with defaults
@@ -61,14 +58,9 @@ export async function getAllSettings(db: D1Database, env?: any): Promise<Record<
     result[key] = { value, updated_at: 0 };
   }
 
-  try {
-    const rows = await db.prepare("SELECT key, value, updated_at FROM settings").all<{ key: string; value: string; updated_at: number }>();
-    for (const row of rows.results ?? []) {
-      let val = row.value;
-      result[row.key] = { value: val, updated_at: row.updated_at };
-    }
-  } catch {
-    // Pre-migration: just return defaults
+  const rows = await db.prepare("SELECT key, value, updated_at FROM settings").all<{ key: string; value: string; updated_at: number }>();
+  for (const row of rows.results ?? []) {
+    result[row.key] = { value: row.value, updated_at: row.updated_at };
   }
 
   return result;

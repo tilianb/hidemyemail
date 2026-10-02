@@ -2,6 +2,18 @@
 
 This page lists the runtime settings used by HideMyEmail.
 
+The system-settings editor saves only changed values. Mail configuration
+changes request fresh authentication when needed. An empty credential override
+disables inheritance; **Use environment** removes the override instead. The UI
+never returns stored SMTP credentials. Settings JSON must be an object whose
+values are strings or `null` (reset); malformed values return HTTP 400.
+
+For maintainers, `SETTING_DEFINITIONS` in `worker/src/config.ts` owns defaults,
+field validation, environment names, and secret/fresh-auth classifications.
+The settings route retains checks that require database state or multiple
+fields. This refactor does not change existing setting defaults or introduce
+new environment overrides for legacy policy settings.
+
 ## Cloudflare config
 
 `worker/wrangler.jsonc` contains deploy structure:

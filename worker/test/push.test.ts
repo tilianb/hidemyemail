@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { beforeEach, expect, test } from "vitest";
 import * as q from "../src/db/queries";
 import { pushToUser, sendTestPush } from "../src/lib/push";
-import { getProviderToken, __clearProviderTokenCache, type ApnsConfig } from "../src/lib/apns";
+import { buildProviderToken, getProviderToken, __clearProviderTokenCache, type ApnsConfig } from "../src/lib/apns";
 import { resetDb } from "./helpers";
 
 const DB = () => env.DB as D1Database;
@@ -10,21 +10,22 @@ beforeEach(async () => { await resetDb(DB()); });
 
 // Generate a real P-256 signing key so the provider-JWT path is exercised end
 // to end (import + ECDSA sign), returned as the base64 a .p8 would decode to.
-async function makeAuthKey(): Promise<string> {
-  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign"]) as CryptoKeyPair;
+async function makeAuthKey(): Promise<{ authKey: string; publicKey: CryptoKey }> {
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]) as CryptoKeyPair;
   const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey) as ArrayBuffer);
   let bin = "";
   for (const b of pkcs8) bin += String.fromCharCode(b);
-  return btoa(bin);
+  return { authKey: btoa(bin), publicKey: pair.publicKey };
 }
 
 async function pushEnv(extra: Record<string, unknown>) {
+  const { authKey } = await makeAuthKey();
   return {
     ...env,
     APNS_KEY_ID: "ABC1234567",
     APNS_TEAM_ID: "TEAM123456",
     APNS_BUNDLE_ID: "dev.hidemyemail.app",
-    APNS_AUTH_KEY: await makeAuthKey(),
+    APNS_AUTH_KEY: authKey,
     ...extra,
   } as any;
 }
@@ -147,15 +148,34 @@ test("pushToUser keeps tokens on config-mismatch errors (only 410 prunes)", asyn
 
 test("provider token is reused within the refresh window and re-minted after", async () => {
   __clearProviderTokenCache();
+  const { authKey } = await makeAuthKey();
   const cfg: ApnsConfig = {
     keyId: "ABC1234567", teamId: "TEAM123456",
-    authKey: await makeAuthKey(), bundleId: "dev.hidemyemail.app", host: "api.push.apple.com",
+    authKey, bundleId: "dev.hidemyemail.app", host: "api.push.apple.com",
   };
   const t1 = await getProviderToken(cfg, 1_000);
   const t2 = await getProviderToken(cfg, 1_000 + 10 * 60); // 10 min later → cached
   expect(t2).toBe(t1);
   const t3 = await getProviderToken(cfg, 1_000 + 31 * 60); // past 30 min → re-minted
   expect(t3).not.toBe(t1);
+});
+
+test("provider token has the expected claims and a valid ES256 signature", async () => {
+  const { authKey, publicKey } = await makeAuthKey();
+  const jwt = await buildProviderToken({
+    keyId: "ABC1234567", teamId: "TEAM123456", authKey,
+    bundleId: "dev.hidemyemail.app", host: "api.push.apple.com",
+  }, 1_234_567);
+  const [encodedHeader, encodedClaims, encodedSignature] = jwt.split(".");
+  const fromBase64url = (value: string) => Uint8Array.from(atob(value.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+  const decode = (value: string) => JSON.parse(new TextDecoder().decode(fromBase64url(value)));
+  expect(decode(encodedHeader!)).toEqual({ alg: "ES256", kid: "ABC1234567" });
+  expect(decode(encodedClaims!)).toEqual({ iss: "TEAM123456", iat: 1_234_567 });
+  expect(await crypto.subtle.verify(
+    { name: "ECDSA", hash: "SHA-256" }, publicKey,
+    fromBase64url(encodedSignature!),
+    new TextEncoder().encode(`${encodedHeader}.${encodedClaims}`),
+  )).toBe(true);
 });
 
 test("pushToUser skips categories the device opted out of", async () => {

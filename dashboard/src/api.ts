@@ -1,3 +1,5 @@
+import type { AliasDto, DestinationDto, CreateAliasInput, PatchAliasInput } from "../../worker/src/contracts/api";
+
 export interface Domain {
   id: number;
   user_id: number;
@@ -14,22 +16,8 @@ export interface Domain {
   inline_actions_pref: "on" | "off" | null;
 }
 
-export interface Alias {
-  id: number;
-  domain_id: number;
-  local_part: string;
-  full_address: string;
-  destination: string | null;
-  label: string | null;
-  active: 0 | 1;
-  source: string;
-  fwd_count: number;
-  blocked_count: number;
-  reply_count: number;
-  created_at: number;
-  last_seen_at: number | null;
-  muted_until: number | null;
-}
+export type Alias = AliasDto;
+export type Destination = DestinationDto;
 
 export interface Block {
   id: number;
@@ -133,17 +121,6 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export interface Destination {
-  id: number;
-  email: string;
-  is_default: number;
-  verified_at: number | null;
-  created_at: number;
-  suppressed_at: number | null;
-  suppression_reason: string | null;
-  suppression_class: string | null;
-}
-
 export interface SuppressionEntry {
   id: number;
   user_id: number;
@@ -198,8 +175,8 @@ export const api = {
   deleteDomain: (id: number) => req<{ ok: true }>(`/api/domains/${id}`, { method: "DELETE" }),
 
   aliases: (q = "") => req<Alias[]>(`/api/aliases${q ? `?q=${encodeURIComponent(q)}` : ""}`),
-  createAlias: (b: { domain_id: number; local_part: string; destination?: string; label?: string }) => req<Alias>("/api/aliases", { method: "POST", body: JSON.stringify(b) }),
-  patchAlias: (id: number, b: Record<string, unknown>) => req<{ ok: true }>(`/api/aliases/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
+  createAlias: (b: CreateAliasInput) => req<Alias>("/api/aliases", { method: "POST", body: JSON.stringify(b) }),
+  patchAlias: (id: number, b: PatchAliasInput) => req<{ ok: true }>(`/api/aliases/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
   deleteAlias: (id: number) => req<{ ok: true }>(`/api/aliases/${id}`, { method: "DELETE" }),
   events: (id: number) => req<EmailEvent[]>(`/api/aliases/${id}/events`),
 
