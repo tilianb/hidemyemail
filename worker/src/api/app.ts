@@ -12,6 +12,7 @@ import { blockRoutes } from "./routes/blocks";
 import { statsRoutes } from "./routes/stats";
 import { sesWebhookRoutes } from "./routes/ses-webhook";
 import { sesInboundRoutes } from "./routes/ses-inbound";
+import { smtpInboundRoutes } from "./routes/smtp-inbound";
 import { unsubscribeRoutes } from "./routes/unsubscribe";
 import { destinationRoutes, verificationRoute } from "./routes/destinations";
 import { adminRoutes } from "./routes/admin";
@@ -108,6 +109,7 @@ export function createApp() {
   app.route("/api", verificationRoute());
   app.route("/api", sesWebhookRoutes());
   app.route("/api", sesInboundRoutes());
+  app.route("/internal", smtpInboundRoutes());
   app.route("/api", unsubscribeRoutes());
   // addy.io-compatible API — authenticated by its own Bearer API-key
   // middleware (routes/v1.ts), never by session cookies.

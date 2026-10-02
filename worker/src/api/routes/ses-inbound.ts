@@ -6,7 +6,7 @@ import { getEnvWithOverride } from "../../lib/settings";
 import { getNumericSetting } from "../../lib/settings";
 import { readSnsJson, verifySnsMessage } from "../../lib/sns";
 import { BodyTooLargeError } from "../../lib/bytes";
-import { SesTransientError } from "../../lib/ses";
+import { MailUncertainError } from "../../lib/mail-provider";
 import * as q from "../../db/queries";
 
 export function sesInboundRoutes() {
@@ -142,7 +142,7 @@ export function sesInboundRoutes() {
       // A timeout/network failure may have reached SES. Keep both the delivery
       // claim and sending fence until their deadline prevents an immediate,
       // potentially duplicate send on SNS retry.
-      if (!(err instanceof SesTransientError)) await q.releaseDelivery(c.env.DB, deliveryId, claim.token);
+      if (!(err instanceof MailUncertainError)) await q.releaseDelivery(c.env.DB, deliveryId, claim.token);
       console.error("routeEmail failed for", messageId, String(err));
       return c.json({ error: "Processing failed" }, 500); // 5xx → SNS retries
     }

@@ -86,8 +86,10 @@ docker compose up -d
 
 Open <http://localhost:8787>. Compose publishes to loopback only; put a TLS
 reverse proxy in front for public access and preserve its trusted client-IP
-header contract. AWS SES is still required for mail. See
-[Docker self-hosting](docker/README.md).
+header contract. Docker can use SES or a manually configured SMTP relay for
+sending, and can accept receive-only SMTP from a trusted queueing/scanning MTA.
+Sending and receiving are independent; no inbox is stored. See
+[Docker self-hosting](docker/README.md) and [mail provider configuration](docs/CONFIGURATION.md#custom-smtp-recipes).
 
 ### Cloudflare Worker
 

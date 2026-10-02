@@ -1,13 +1,11 @@
 import type { Env, ParsedReverse, ReplyAuth } from "../types";
 import * as q from "../db/queries";
 import { streamToBytes, toBase64 } from "../lib/bytes";
-import { parseMime, setHeader, removeHeaders, getHeader, serializeMime } from "../lib/mime";
-import { sendRaw, SesTransientError } from "../lib/ses";
-import { getEnvWithOverride, getNumericSetting } from "../lib/settings";
+import { parseMime, setHeader, removeHeaders, removeProviderControlHeaders, getHeader, serializeMime } from "../lib/mime";
+import { MailRetryableError, MailUncertainError, sendMail } from "../lib/mail-provider";
+import { getNumericSetting } from "../lib/settings";
 import { pushReply } from "../lib/push";
 import type { DeliveryContext } from "./router";
-
-type SesSend = typeof sendRaw;
 
 // Pull the bare "user@host" out of an RFC 5322 From header. Handles "Name <a@b>",
 // '"Quoted Name" <a@b>', and bare "a@b". Returns "" if no '@' is present.
@@ -35,7 +33,6 @@ export async function handleReply(
   message: ForwardableEmailMessage, env: Env, parsed: ParsedReverse, auth?: ReplyAuth, delivery?: DeliveryContext,
 ): Promise<void> {
   const db = env.DB;
-  const ses: SesSend = (env as any).__sesSend ?? sendRaw;
   const now = Date.now();
   const domainName = message.to.slice(message.to.lastIndexOf("@") + 1).toLowerCase();
   const aliasFull = `${parsed.aliasLocal}@${domainName}`.toLowerCase();
@@ -64,7 +61,7 @@ export async function handleReply(
   // signal against the principal it actually authenticates. Fail closed.
   const maxInboundBytes = await getNumericSetting(db, "max_inbound_bytes");
   const rawBytes = await streamToBytes(message.raw, maxInboundBytes);
-  let mime = parseMime(rawBytes);
+  let mime = removeProviderControlHeaders(parseMime(rawBytes));
   const subject = getHeader(mime, "Subject") ?? "";
   const rawFromHeader = getHeader(mime, "From") ?? "";
   const headerFrom = extractEmailAddress(rawFromHeader).toLowerCase();
@@ -141,23 +138,21 @@ export async function handleReply(
   const rawBase64 = toBase64(serializeMime(mime));
   let sesAccepted = reservation === "accepted";
   try {
-    const sesAccessKeyId = await getEnvWithOverride(db, env, "ses_access_key_id");
-    const sesSecretAccessKey = await getEnvWithOverride(db, env, "ses_secret_access_key");
-    const sesRegion = await getEnvWithOverride(db, env, "ses_region");
     if (reservation !== "accepted") {
       if (delivery && !(await q.renewDelivery(db, delivery.id, delivery.token, Date.now()))) throw new Error("Delivery lease lost");
       if (!(await q.startMailSend(db, reservationId, reservationToken, Date.now()))) throw new Error("Reservation ownership lost");
-      await ses(
-        { accessKeyId: sesAccessKeyId, secretAccessKey: sesSecretAccessKey, region: sesRegion },
-        { from: alias.full_address, to: parsed.externalSender, rawBase64 }
-      );
+      await sendMail(db, env, { from: alias.full_address, to: parsed.externalSender, rawBase64 });
       sesAccepted = true;
       if (!(await q.markMailQuotaAccepted(db, reservationId, reservationToken))) throw new Error("Reservation ownership lost");
     }
   } catch (err) {
     await q.insertEvent(db, { alias_id: alias.id, type: "error", detail: String(err), ts: now });
     if (err instanceof Error && (err.message === "Delivery lease lost" || err.message === "Reservation ownership lost")) throw err;
-    if (err instanceof SesTransientError) throw err;
+    if (err instanceof MailUncertainError) throw err;
+    if (err instanceof MailRetryableError) {
+      if (!sesAccepted) await q.releaseMailQuota(db, reservationId, reservationToken);
+      throw err;
+    }
     if (!sesAccepted) await q.releaseMailQuota(db, reservationId, reservationToken);
     return;
   }

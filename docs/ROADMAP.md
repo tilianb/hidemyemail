@@ -52,27 +52,21 @@ can pick a backend that fits their stack and budget, then ship alternatives.
 SES stays the default throughout — nothing existing breaks. Listed in priority
 order (the abstraction is the enabler; later items get cheaper once it lands):
 
-- [ ] **(P1) Provider abstraction layer.** Define `MailInbound` / `MailOutbound`
-  interfaces and move the SES/S3/SNS specifics behind them, selected by a
-  `MAIL_PROVIDER` setting. Foundational — unblocks every option below and is the
-  single biggest lever for cutting the AWS-only setup barrier.
+- [x] **(P1) Independent mail transport boundaries.** SES remains the default;
+  Docker ships generic custom SMTP outbound plus protected receive-only SMTP
+  ingress for a trusted queueing/scanning MTA. Outbound and inbound selections
+  are independent and support env defaults plus encrypted admin overrides.
 - [ ] **(P1–P2) Inbound via Cloudflare Email Routing (Email Workers)** — the
   **recommended first alternative to document**. Receive mail directly in the
   Worker — no SES receipt rules, no S3, no SNS. The biggest setup reduction for
   Cloudflare-hosted domains and squarely on the "no mail stack" thesis. Note the
   constraints (message-size cap; the domain must be on Cloudflare; reply-from
   path still needs an outbound sender).
-- [ ] **(P2) Outbound via Resend** — recommended HTTP send provider: simple API,
-  generous free tier, strong DX. A drop-in `MailOutbound` implementation behind
-  the abstraction. Support other HTTP providers the same way — **Postmark**
-  (deliverability-focused transactional), **Mailgun** / **SendGrid**
-  (established) — with SES remaining the default.
-- [ ] **(P2–P3) Inbound-only hosting + outbound via user-defined SMTP.** Keep the
-  serverless inbound path (SES or Cloudflare Email Routing) but relay outbound
-  through the operator's own SMTP server/mailbox. Feasible from the Worker via
-  the `cloudflare:sockets` `connect()` API (STARTTLS), and from the Docker
-  deployment via a Node SMTP client (e.g. nodemailer). Config: SMTP
-  host/port/credentials + from-address.
+- [ ] **(P2) Worker-native and HTTP outbound adapters.** Docker SMTP already
+  supports Resend, Mailchimp Transactional, SendGrid, Mailgun, and any standard
+  relay without provider-specific code. Cloudflare-native HTTP adapters remain
+  future work because Workers cannot use outbound port 25 and this branch does
+  not claim supplier webhook parity.
 - [ ] **(P3) Inbound via other providers' webhooks** (Resend inbound, Mailgun
   routes, Postmark inbound) for operators already standardised on them.
 - [ ] **(P3, advanced) Full self-hosted mail server.** A "no third party at all"

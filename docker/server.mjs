@@ -7,12 +7,15 @@
 
 import { readFile, mkdir } from "node:fs/promises";
 import { createServer } from "node:http";
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 import process from "node:process";
 import { Miniflare } from "miniflare";
 import { WORKER_FIRST_ROUTES } from "./assets-routing.mjs";
 import { trustedProxySet, workerHeaders } from "./client-ip.mjs";
 import { applyMigrations } from "./migrations.mjs";
+import { createSmtpTransportHandler } from "./smtp-transport.mjs";
+import { createSmtpIngress } from "./smtp-ingress.mjs";
 
 const env = process.env;
 
@@ -22,9 +25,12 @@ const REQUIRED_CONFIG = [
   "AUTH_PASSWORD_HASH",
   "AUTH_PASSWORD_SALT",
   "DESTINATION_ENCRYPTION_KEY",
-  "SES_ACCESS_KEY_ID",
-  "SES_SECRET_ACCESS_KEY",
 ];
+const ENV_MAIL_OUTBOUND_PROVIDER = (env.MAIL_OUTBOUND_PROVIDER ?? "ses").toLowerCase();
+if (!['ses', 'smtp'].includes(ENV_MAIL_OUTBOUND_PROVIDER)) {
+  console.error("[hidemyemail] MAIL_OUTBOUND_PROVIDER must be ses or smtp");
+  process.exit(1);
+}
 const missing = REQUIRED_CONFIG.filter((k) => !env[k]);
 if (missing.length) {
   console.error(`[hidemyemail] Missing required env vars: ${missing.join(", ")}`);
@@ -50,6 +56,8 @@ const MIGRATIONS_DIR = env.MIGRATIONS_DIR ?? "/app/migrations";
 const PORT = Number(env.PORT ?? 8787);
 const HOST = env.HOST ?? "0.0.0.0";
 const TRUSTED_PROXIES = trustedProxySet(env.TRUSTED_PROXY_IPS);
+const SMTP_INGRESS_SECRET = randomBytes(32).toString("hex");
+let smtpTransportHandler = async () => new Response("SMTP transport is not active", { status: 503 });
 
 const D1_PERSIST_DIR = path.join(DATA_DIR, "d1");
 await mkdir(D1_PERSIST_DIR, { recursive: true });
@@ -82,6 +90,7 @@ const mf = new Miniflare({
   // D1 — file-backed SQLite under DATA_DIR/d1
   d1Databases: { DB: "hidemyemail-db" },
   d1Persist: D1_PERSIST_DIR,
+  serviceBindings: { SMTP_TRANSPORT: (request) => smtpTransportHandler(request) },
 
   // Static SPA (dashboard/dist) — Workers Assets routing parity.
   // run_worker_first from wrangler.jsonc becomes:
@@ -102,6 +111,19 @@ const mf = new Miniflare({
   // Plain vars (non-secret, mirror wrangler.jsonc top-level vars block)
   bindings: {
     ENVIRONMENT: env.ENVIRONMENT ?? "self-hosted",
+    MAIL_OUTBOUND_PROVIDER: ENV_MAIL_OUTBOUND_PROVIDER,
+    SMTP_OUTBOUND_HOST: env.SMTP_OUTBOUND_HOST ?? "",
+    SMTP_OUTBOUND_PORT: env.SMTP_OUTBOUND_PORT ?? "",
+    SMTP_OUTBOUND_TLS: env.SMTP_OUTBOUND_TLS ?? "",
+    SMTP_OUTBOUND_USERNAME: env.SMTP_OUTBOUND_USERNAME ?? "",
+    SMTP_INBOUND_ENABLED: env.SMTP_INBOUND_ENABLED ?? "",
+    SMTP_INBOUND_HOST: env.SMTP_INBOUND_HOST ?? "",
+    SMTP_INBOUND_PORT: env.SMTP_INBOUND_PORT ?? "",
+    SMTP_INBOUND_TLS: env.SMTP_INBOUND_TLS ?? "",
+    SMTP_INBOUND_USERNAME: env.SMTP_INBOUND_USERNAME ?? "",
+    SMTP_INBOUND_GATEWAY_ID: env.SMTP_INBOUND_GATEWAY_ID ?? "",
+    SMTP_INBOUND_TRUSTED_PEERS: env.SMTP_INBOUND_TRUSTED_PEERS ?? "",
+    SMTP_INBOUND_MAX_BYTES: env.SMTP_INBOUND_MAX_BYTES ?? "",
     BLOCKED_SUBDOMAINS: env.BLOCKED_SUBDOMAINS ?? "",
     APP_ORIGIN: env.APP_ORIGIN ?? "",
     ANDROID_APP_ORIGINS: env.ANDROID_APP_ORIGINS ?? "",
@@ -109,6 +131,7 @@ const mf = new Miniflare({
     S3_INBOUND_BUCKET: env.S3_INBOUND_BUCKET ?? "hidemyemail-inbound-raw",
     SNS_INBOUND_TOPIC_ARN: env.SNS_INBOUND_TOPIC_ARN ?? "",
     SNS_ALLOWED_TOPIC_ARN: env.SNS_ALLOWED_TOPIC_ARN ?? "",
+    SMTP_INGRESS_SECRET,
     // iOS push (optional) — APNs token auth. Empty values leave push disabled
     // (apnsConfig() returns null), so registration still works but nothing is
     // sent. APPLE_APP_ID supplies team/bundle when the dedicated vars are unset.
@@ -126,6 +149,8 @@ const mf = new Miniflare({
     // sees the full surface.
     SES_ACCESS_KEY_ID: env.SES_ACCESS_KEY_ID,
     SES_SECRET_ACCESS_KEY: env.SES_SECRET_ACCESS_KEY,
+    SMTP_OUTBOUND_PASSWORD: env.SMTP_OUTBOUND_PASSWORD ?? "",
+    SMTP_INBOUND_PASSWORD: env.SMTP_INBOUND_PASSWORD ?? "",
     SESSION_SECRET: env.SESSION_SECRET,
     AUTH_PASSWORD_HASH: env.AUTH_PASSWORD_HASH,
     AUTH_PASSWORD_SALT: env.AUTH_PASSWORD_SALT,
@@ -143,10 +168,35 @@ await mf.ready;
 const db = await mf.getD1Database("DB");
 await applyMigrations(db, MIGRATIONS_DIR);
 
+const dispatchInternal = (operation, body) => mf.dispatchFetch(`http://internal/internal/${operation}`, {
+  method: "POST",
+  headers: { "content-type": "application/json", "x-hidemyemail-internal-secret": SMTP_INGRESS_SECRET },
+  body: JSON.stringify(body),
+});
+const smtpConfigResponse = await dispatchInternal("smtp-config", {});
+if (!smtpConfigResponse.ok) throw new Error("Unable to resolve SMTP configuration");
+const effectiveSmtpEnv = { ...env, ...await smtpConfigResponse.json() };
+if ((effectiveSmtpEnv.MAIL_OUTBOUND_PROVIDER || "ses") === "smtp") {
+  smtpTransportHandler = createSmtpTransportHandler(effectiveSmtpEnv);
+} else if (!effectiveSmtpEnv.SES_ACCESS_KEY_ID || !effectiveSmtpEnv.SES_SECRET_ACCESS_KEY) {
+  throw new Error("SES outbound selected but SES credentials are not configured");
+}
+const smtpIngress = await createSmtpIngress(effectiveSmtpEnv, dispatchInternal);
+if (smtpIngress) {
+  await new Promise((resolve, reject) => {
+    smtpIngress.server.once("error", reject);
+    smtpIngress.server.listen(smtpIngress.port, smtpIngress.host, resolve);
+  });
+}
+
 // Terminate HTTP outside workerd so the socket peer is authoritative. Caller
 // forwarding headers are stripped before every request enters the Worker.
 const server = createServer(async (request, response) => {
   try {
+    if ((request.url ?? "").startsWith("/internal/")) {
+      response.writeHead(404).end("Not found");
+      return;
+    }
     const headers = workerHeaders(
       new Headers(request.headers),
       request.socket.remoteAddress,
@@ -198,12 +248,14 @@ setInterval(runScheduled, PURGE_INTERVAL_MS);
 console.log(`[hidemyemail] Listening on http://${HOST}:${PORT}`);
 console.log(`[hidemyemail] D1 persisted to ${D1_PERSIST_DIR}`);
 console.log(`[hidemyemail] Static assets from ${ASSETS_DIR}`);
+if (smtpIngress) console.log(`[hidemyemail] SMTP ingress listening on ${smtpIngress.host}:${smtpIngress.port}`);
 
 // ─── Shutdown ───────────────────────────────────────────────────────────────
 const shutdown = async (signal) => {
   console.log(`[hidemyemail] Received ${signal}, shutting down…`);
   try {
     await new Promise((resolve) => server.close(resolve));
+    if (smtpIngress) await new Promise((resolve) => smtpIngress.server.close(resolve));
     await mf.dispose();
   } finally {
     process.exit(0);

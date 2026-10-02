@@ -314,8 +314,8 @@ export const api = {
 
   // Admin environment & settings
   adminEnv: () => req<{ vars: Record<string, { value: string; secret: false }>; secrets: Record<string, { configured: boolean; preview?: string }> }>("/api/admin/env"),
-  adminSettings: () => req<{ settings: Record<string, { value: string; updated_at: number }> }>("/api/admin/settings"),
-  adminUpdateSettings: (data: Record<string, string>) => req<{ ok: true; updated: number }>("/api/admin/settings", { method: "PATCH", body: JSON.stringify(data) }),
+  adminSettings: () => req<{ settings: Record<string, { value: string; updated_at: number; source?: "override" | "environment" | "default" }> }>("/api/admin/settings"),
+  adminUpdateSettings: (data: Record<string, string | null>) => req<{ ok: true; updated: number; reset: number; restart_required: boolean }>("/api/admin/settings", { method: "PATCH", body: JSON.stringify(data) }),
   adminSendTestEmail: (data: { type: string; to: string }) => req<{ ok: true; type: string; to: string }>("/api/admin/test-email", { method: "POST", body: JSON.stringify(data) }),
   adminSuppressions: () => req<{ suppressions: SuppressionEntry[]; totals: SuppressionSummary; health: "healthy" | "attention" }>("/api/admin/suppressions"),
   adminClearSuppression: (id: number) => req<{ ok: true }>(`/api/admin/suppressions/${id}/clear`, { method: "POST" }),

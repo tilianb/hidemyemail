@@ -4,7 +4,7 @@ import { getEnvWithOverride, getNumericSetting } from "../../lib/settings";
 import { readSnsJson, verifySnsMessage } from "../../lib/sns";
 import { decryptDestination, hashDestination } from "../../lib/crypto";
 import { buildNotificationEmail } from "../../lib/emails";
-import { sendRaw } from "../../lib/ses";
+import { sendMail } from "../../lib/mail-provider";
 import { pushSuppression } from "../../lib/push";
 import * as q from "../../db/queries";
 
@@ -202,11 +202,7 @@ async function notifySuppression(
 ): Promise<void> {
   try {
     const db = env.DB;
-    const sesAccessKeyId = await getEnvWithOverride(db, env, "ses_access_key_id");
-    const sesSecretAccessKey = await getEnvWithOverride(db, env, "ses_secret_access_key");
-    const sesRegion = await getEnvWithOverride(db, env, "ses_region");
     const mainGlobalDomain = await getEnvWithOverride(db, env, "main_global_domain") || "example.com";
-    if (!sesAccessKeyId || !sesSecretAccessKey || !sesRegion) return;
 
     const recipientRows = new Map<number, string>();
     if (suppressionClass === "soft") {
@@ -230,14 +226,9 @@ async function notifySuppression(
         ? "A destination was paused after a spam complaint. Hard suppressions protect shared sender reputation and must be cleared by an admin."
         : "A destination was paused after a permanent delivery failure. Hard suppressions protect shared sender reputation and must be cleared by an admin.";
 
-    const sesSend: typeof sendRaw = (env as any).__sesSend ?? sendRaw;
     for (const encryptedEmail of recipientRows.values()) {
       const to = await decryptDestination(encryptedEmail, env.DESTINATION_ENCRYPTION_KEY);
-      await sesSend({
-        accessKeyId: sesAccessKeyId,
-        secretAccessKey: sesSecretAccessKey,
-        region: sesRegion,
-      }, {
+      await sendMail(db, env, {
         from: `HideMyEmail <noreply@${mainGlobalDomain}>`,
         to,
         rawBase64: buildNotificationEmail(to, subject, heading, bodyText, mainGlobalDomain),

@@ -1036,7 +1036,9 @@ export function Settings() {
                       onSubmit={e => { e.preventDefault(); renamePasskey(pk.id, editingPasskeyName); }}
                       className="passkey-edit-form"
                     >
+                      <label className="field-label" htmlFor={`passkey-name-${pk.id}`}>Passkey name</label>
                       <input
+                        id={`passkey-name-${pk.id}`}
                         className="input flex-input btn-compact"
                         value={editingPasskeyName}
                         onChange={e => setEditingPasskeyName(e.target.value)}
@@ -1086,11 +1088,13 @@ export function Settings() {
                   Give this passkey a name so you can recognise it later (optional).
                 </div>
                 <div className="security-inline-form">
+                  <label className="field-label" htmlFor="new-passkey-name">Passkey name (optional)</label>
                   <input
+                    id="new-passkey-name"
                     className="input flex-input"
                     value={newPasskeyName}
                     onChange={e => setNewPasskeyName(e.target.value)}
-                    placeholder="e.g. MacBook Touch ID, iPhone Face ID"
+                    placeholder="e.g. MacBook Touch ID"
                     maxLength={64}
                     disabled={addingPasskey}
                     autoFocus
@@ -1220,7 +1224,9 @@ export function Settings() {
                 Name the key after where you'll use it, so you can revoke it precisely later.
               </div>
               <div className="security-inline-form">
+                <label className="field-label" htmlFor="new-api-key-name">API key name</label>
                 <input
+                  id="new-api-key-name"
                   className="input flex-input"
                   value={newApiKeyName}
                   onChange={e => setNewApiKeyName(e.target.value)}

@@ -146,7 +146,7 @@ export function Blocks() {
                 id="block-pattern"
                 className="input input-mono"
                 type="text"
-                placeholder="*@spam.com or evil@badactor.org"
+                placeholder="*@spam.com"
                 value={pattern}
                 onChange={e => setPattern(e.target.value)}
                 required

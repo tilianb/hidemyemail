@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import { getEnvWithOverride, getMainGlobalDomain } from "../../lib/settings";
-import { sendRaw } from "../../lib/ses";
+import { resolveMailProviderConfig, sendMail } from "../../lib/mail-provider";
 import { normalizeDomain, normalizeEmail } from "./admin/helpers";
 import { registerAdminSettingsRoutes } from "./admin/settings";
 import { registerAdminSuppressionRoutes } from "./admin/suppressions";
@@ -104,7 +104,7 @@ export function adminRoutes() {
 
     const token = generateRecoveryToken();
     let delivery: {
-      credentials: { accessKeyId: string; secretAccessKey: string; region: string };
+      config: NonNullable<Awaited<ReturnType<typeof resolveMailProviderConfig>>>;
       message: { from: string; to: string; rawBase64: string };
     } | null = null;
     if (sendEmail) {
@@ -123,16 +123,14 @@ export function adminRoutes() {
       } catch {
         return c.json({ error: "Application origin is not configured" }, 500);
       }
-      const sesAccessKeyId = await getEnvWithOverride(db, c.env, "ses_access_key_id");
-      const sesSecretAccessKey = await getEnvWithOverride(db, c.env, "ses_secret_access_key");
-      const sesRegion = await getEnvWithOverride(db, c.env, "ses_region");
       const mainGlobalDomain = await getMainGlobalDomain(db, c.env);
-      if (!sesAccessKeyId || !sesSecretAccessKey || !sesRegion || !mainGlobalDomain) {
+      const mailConfig = await resolveMailProviderConfig(db, c.env);
+      if (!mainGlobalDomain || !mailConfig) {
         return c.json({ error: "Recovery email delivery is not configured" }, 500);
       }
       const url = `${origin}/recover?token=${encodeURIComponent(token)}`;
       delivery = {
-        credentials: { accessKeyId: sesAccessKeyId, secretAccessKey: sesSecretAccessKey, region: sesRegion },
+        config: mailConfig,
         message: {
           from: `HideMyEmail <noreply@${mainGlobalDomain}>`,
           to: email,
@@ -149,9 +147,8 @@ export function adminRoutes() {
     if (issued.meta.changes !== 1) return c.json({ error: "User not found" }, 404);
 
     if (delivery) {
-      const sesSend: typeof sendRaw = (c.env as any).__sesSend ?? sendRaw;
       try {
-        await sesSend(delivery.credentials, delivery.message);
+        await sendMail(db, c.env, delivery.message, delivery.config);
       } catch {
         c.header("Cache-Control", "no-store");
         return c.json({
@@ -320,13 +317,6 @@ export function adminRoutes() {
     if (!email) return c.json({ error: "Invalid destination email" }, 400);
 
     const db = c.env.DB;
-    const sesAccessKeyId = await getEnvWithOverride(db, c.env, "ses_access_key_id");
-    const sesSecretAccessKey = await getEnvWithOverride(db, c.env, "ses_secret_access_key");
-    const sesRegion = await getEnvWithOverride(db, c.env, "ses_region");
-    if (!sesAccessKeyId || !sesSecretAccessKey || !sesRegion) {
-      return c.json({ error: "SES is not configured" }, 400);
-    }
-
     const mainGlobalDomain = await getMainGlobalDomain(db, c.env) || "example.com";
     const { buildRecoveryEmail, buildMfaEmail, buildNotificationEmail } = await import("../../lib/emails");
     let rawBase64: string;
@@ -353,11 +343,7 @@ export function adminRoutes() {
       );
     }
 
-    const sesSend: typeof sendRaw = (c.env as any).__sesSend ?? sendRaw;
-    await sesSend(
-      { accessKeyId: sesAccessKeyId, secretAccessKey: sesSecretAccessKey, region: sesRegion },
-      { from: fromAddr, to: email, rawBase64 }
-    );
+    await sendMail(db, c.env, { from: fromAddr, to: email, rawBase64 });
 
     return c.json({ ok: true, type: emailType, to: email });
   });

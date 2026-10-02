@@ -111,7 +111,7 @@ CI: `.github/workflows/docs.yml` builds and deploys to GitHub Pages on push to
 - **Branches:** use short-lived branches based on current `main` and open PRs
   directly to `main`. Keep `main` releasable; do not push commits to it or merge
   a PR before CI is green. Use another base branch only when the task explicitly
-  requires one.
+  requires one. CI also checks PRs to `dev` for explicitly requested integration.
 - **Commits:** conventional commits (`feat(worker): …`, `fix(email): …`).
   Bodies explain *why*. No AI co-author trailers.
 - **Releases:** tag only validated commits on `main`; patch releases must not
@@ -208,3 +208,7 @@ CI: `.github/workflows/docs.yml` builds and deploys to GitHub Pages on push to
 - Docker self-host runs the same Worker under Miniflare
   (`docker/server.mjs`) — Worker features used must exist there too (e.g.
   the cron `scheduled()` handler is invoked by a `setInterval` shim).
+- Docker custom SMTP uses a private Miniflare service binding for outbound and
+  a receive-only authenticated listener for a trusted queueing/scanning MTA.
+  The listener is never published by default and never treats SMTP AUTH as an
+  SPF/DMARC verdict.

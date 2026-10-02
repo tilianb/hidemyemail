@@ -22,6 +22,15 @@ These are deployment-specific, not secrets. Store them in the Cloudflare dashboa
 | `ENVIRONMENT` | yes | `production`, `preview`, `local`, or `self-hosted`. The Docker host sets `self-hosted` and supplies the Worker's private client-IP header after validating the socket peer. Do not expose a self-hosted Worker without that host boundary. |
 | `BLOCKED_SUBDOMAINS` | no | Comma-separated exact DNS labels that cannot be claimed as new personal subdomains. An absent or whitespace-only value uses `admin,api,www,dev,mail,smtp,imap,pop,pop3,webmail,autoconfig,autodiscover`; a nonblank value replaces that default list. Entries are trimmed and lowercased; requests are likewise trimmed and lowercased before exact matching, so `api` does not block `myapi` or `api2`. Each nonempty component must be a single 1–63 character ASCII DNS label containing only letters, digits, and interior hyphens, and starting and ending alphanumeric. Empty components, dots, wildcards, regex/glob syntax, underscores, embedded spaces, edge hyphens, and overlong labels make the configuration malformed. Malformed nonempty configuration fails closed: new claims return a server configuration error until the value is corrected, while the raw value is never logged. Valid blocked labels return “Subdomain is not available.” This affects only new claims: existing subdomains remain visible, editable, and deletable. Set this plain variable in the Cloudflare dashboard / Wrangler config or as `BLOCKED_SUBDOMAINS` in Docker. |
 | `SES_REGION` | yes for mail | AWS SES/S3/SNS region, for example `ap-southeast-2`. |
+| `MAIL_OUTBOUND_PROVIDER` | no | `ses` (default) or `smtp`. Custom SMTP is Docker-only. A D1 admin override wins over this environment default. |
+| `SMTP_OUTBOUND_HOST`, `SMTP_OUTBOUND_PORT` | for custom SMTP | Supplier or private relay endpoint. |
+| `SMTP_OUTBOUND_TLS` | for custom SMTP | `starttls` (required upgrade, normally 587), `implicit` (normally 465), or `trusted-cleartext` for an explicitly trusted port-25 connector only. Certificate verification never downgrades. |
+| `SMTP_OUTBOUND_USERNAME`, `SMTP_OUTBOUND_PASSWORD` | if relay requires auth | SMTP credentials, independent from inbound listener credentials. |
+| `SMTP_INBOUND_ENABLED` | no | Enables the Docker receive-only SMTP listener after restart. It does not poll a mailbox. |
+| `SMTP_INBOUND_HOST`, `SMTP_INBOUND_PORT`, `SMTP_INBOUND_TLS` | for SMTP ingress | Listener bind, port, and `starttls`/`implicit` TLS mode. Defaults stay private (`127.0.0.1:2525`). Docker Compose does not publish this port. |
+| `SMTP_INBOUND_USERNAME`, `SMTP_INBOUND_PASSWORD`, `SMTP_INBOUND_GATEWAY_ID` | for SMTP ingress | Dedicated upstream-gateway authentication and stable dedup namespace. Never reuse outbound credentials. |
+| `SMTP_INBOUND_TRUSTED_PEERS` | recommended | Comma-separated exact socket peer IPs. Authentication remains mandatory. |
+| `SMTP_INBOUND_TLS_CERT`, `SMTP_INBOUND_TLS_KEY` | non-loopback ingress | Deployment-managed PEM paths. The UI cannot choose arbitrary filesystem paths. |
 | `S3_INBOUND_BUCKET` | yes for inbound | Bucket where SES stores raw MIME. |
 | `SNS_INBOUND_TOPIC_ARN` | yes for inbound SNS | Exact SNS topic for SES receipt notifications. |
 | `SNS_ALLOWED_TOPIC_ARN` | yes for outbound SNS | Exact SNS topic for SES bounce and complaint notifications. Topic ARNs identify webhook authority but are not secrets. |
@@ -156,6 +165,82 @@ The app stores feature settings in D1. Important defaults:
 | `soft_bounce_threshold` | `3` | Soft bounces within 24h before a destination is paused (0 disables). |
 
 Most settings are editable from the Admin dashboard.
+Mail transport settings follow **explicit database override → environment →
+default** precedence. The API never returns SMTP credentials. Leaving a masked
+credential unchanged preserves it; resetting an override restores the env
+credential. Explicitly saving both credential fields empty disables inherited
+SMTP authentication; resetting them restores the environment values. SMTP
+usernames and passwords stored in D1 are encrypted with
+`DESTINATION_ENCRYPTION_KEY`. The API returns only configured state, never an
+environment or decrypted credential. Docker SMTP transport and listener
+changes are saved as configured state and become active only after a restart.
+
+## Custom SMTP recipes
+
+Set `MAIL_OUTBOUND_PROVIDER=smtp`, then use any standards-compliant SMTP relay:
+
+| Supplier | Host | Port/TLS | Authentication and sender requirements |
+|---|---|---|---|
+| [Resend](https://resend.com/docs/send-with-smtp) | `smtp.resend.com` | 587/STARTTLS or 465/implicit | Username `resend`, API key as password; [verify each sending domain](https://resend.com/docs/dashboard/domains/introduction). |
+| [Mailchimp Transactional (Mandrill)](https://mailchimp.com/developer/transactional/docs/smtp-integration/) | `smtp.mandrillapp.com` | 587/STARTTLS or 465/implicit | Primary contact email as username, Transactional API key as password; verify/sign sending domains. This is not Mailchimp's marketing API. |
+| [SendGrid](https://www.twilio.com/docs/sendgrid/for-developers/sending-email/integrating-with-the-smtp-api) | `smtp.sendgrid.net` | 587/STARTTLS or 465/implicit | Literal username `apikey`, scoped API key as password; complete domain authentication or Single Sender verification. |
+| [Mailgun](https://documentation.mailgun.com/docs/mailgun/user-manual/sending-messages/send-smtp) | `smtp.mailgun.org` (US) or `smtp.eu.mailgun.org` (EU) | 587/STARTTLS or 465/implicit | Use per-domain **SMTP credentials**, not an HTTP API key; verify the sending domain. |
+
+These recipes use the same raw-MIME SMTP implementation, not supplier-specific
+adapters. Disable click/open tracking in each supplier dashboard for forwarding
+privacy. HideMyEmail strips `Resend-Idempotency-Key`, `X-MC-*`, SendGrid
+`X-SMTPAPI`, and `X-Mailgun-*` from inbound mail before submission so external
+senders cannot inject recipients, tracking, tags, routing, or dedup controls.
+Provider acceptable-use rules and dynamic alias From-address policies vary;
+the project validates protocol integration but has not live-tested account
+acceptance. SMTP suppliers do not provide SES feedback webhook parity.
+
+## Trusted SMTP reception
+
+Run a public MTA such as [Stalwart](https://stalw.art/docs/mta/overview/) on MX
+port 25. It must queue retries durably, validate SPF and DMARC, scan spam and
+malware, strip sender-supplied `X-HideMyEmail-Gateway-Result`, add the exact
+contract documented in [the implementation plan](MAIL-PROVIDERS-PLAN.md), and
+relay one envelope recipient per transaction to HideMyEmail with dedicated
+AUTH and TLS. HideMyEmail waits for processing before `250`; a 4xx leaves the
+message in the upstream queue. Public-MX delivery direct to HideMyEmail without
+that trusted gateway is unsupported. Ports 465/587 are secure relay/submission
+options, not alternate public MX ports.
+
+### Stalwart gateway recipe
+
+Use current Stalwart WebUI objects rather than copying an old flat config:
+
+1. Create a public SMTP [`NetworkListener`](https://stalw.art/docs/mta) on port
+   25 for the HideMyEmail domains. Enable the DATA-stage
+   [spam filter](https://stalw.art/docs/mta/inbound/data/) and keep SPF/DMARC
+   authentication enabled.
+2. Attach a trusted DATA-stage
+   [Sieve system script](https://stalw.art/docs/mta/rewrite/headers/) that starts
+   with `require ["editheader"]; deleteheader
+   "X-HideMyEmail-Gateway-Result";`. This removes every sender-supplied
+   lookalike before trusted metadata is created.
+3. Add the contract header from a trusted DATA-stage MTA Hook or filter. It must
+   generate a cryptographically unique ID once, before Stalwart queues the
+   modified message, and map Stalwart's documented `env.spf.result`,
+   `env.dmarc.result`, and spam/virus scanner results to the contract values.
+   Do not derive the ID from `Message-ID`. Stalwart does not document a queue-ID
+   Sieve variable, so a Sieve-only setup cannot satisfy this contract; leave
+   HideMyEmail ingress disabled until the hook is installed and tested.
+4. Define a [`Relay` MTA route](https://stalw.art/docs/mta/outbound/routing/)
+   targeting the private HideMyEmail listener, with `protocol: "smtp"`, the
+   configured listener port, `allowInvalidCerts: false`, `authUsername`, and an
+   `authSecret` loaded from an environment variable or file. Select this route
+   only for HideMyEmail domains.
+5. Keep Stalwart's durable [virtual queue](https://stalw.art/docs/mta/outbound/queue/)
+   and [retry schedule](https://stalw.art/docs/mta/outbound/schedule/) enabled.
+   Configure one envelope recipient per relay transaction. Confirm a simulated
+   HideMyEmail `451` remains queued and a `250` removes the queue item before
+   changing MX records.
+
+This recipe identifies the required Stalwart objects and trust points, but it
+is not a bundled Stalwart adapter. Header-hook deployment and public-MTA policy
+remain operator-managed because scanner products and verdict APIs differ.
 Mail limits reserve capacity before SES, so concurrent deliveries cannot share
 the last quota slot. SES-accepted reservations continue to count until their
 hourly or daily window closes if bookkeeping must retry.

@@ -6,6 +6,29 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Added independent SES/custom-SMTP outbound selection and protected
+  receive-only SMTP ingress for Docker deployments, configurable through both
+  environment variables and encrypted admin settings.
+- Added documented SMTP recipes for Resend, Mailchimp Transactional, SendGrid,
+  Mailgun, and arbitrary standards-compliant relays.
+
+### Fixed
+
+- Keep mail settings and admin dropdowns readable on narrow screens, with
+  visible SMTP field labels and wrapping credential-name forms.
+
+### Security
+
+- Strip supplier control headers from forwarded MIME and require authenticated,
+  TLS-protected gateway metadata for Docker SMTP receipt.
+
+### Upgrade Notes
+
+- Existing SES deployments need no configuration changes. Docker operators may
+  opt into custom SMTP; inbound listener changes require a restart.
+
 ## [1.4.2] — 2026-09-28
 
 HideMyEmail 1.4.2 is a maintenance release that refreshes application and
