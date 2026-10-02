@@ -24,19 +24,16 @@ All notable changes to this project are documented here. The format follows
   alias, and destination JSON payloads before running business logic.
 - Replaced custom SNS certificate parsing and push-provider JWT assembly with
   native crypto and `jose`, retaining existing authentication formats.
-- Updated Worker, dashboard, Chromium extension, and documentation dependencies,
-  including Hono, SimpleWebAuthn, PostalMime, Wrangler, Lucide, Vite, Vitest,
-  Astro, and Starlight.
 
 ### Fixed
 
+- Keep mail settings and admin dropdowns readable on narrow screens, with
+  visible SMTP field labels and wrapping credential-name forms.
 - Allow SMTP-only Docker startup without SES credentials and route private
   SMTP configuration requests to the Worker rather than static assets.
 
 ### Security
 
-- Updated Sharp to 0.35.4 in the Worker and Docker dependency trees to address
-  published high-severity libheif vulnerabilities.
 - Strip supplier control headers from forwarded MIME and require authenticated,
   TLS-protected gateway metadata for Docker SMTP receipt.
 
@@ -44,6 +41,29 @@ All notable changes to this project are documented here. The format follows
 
 - Existing SES deployments need no configuration changes. Docker operators may
   opt into custom SMTP; inbound listener changes require a restart.
+
+## [1.4.2] — 2026-09-28
+
+HideMyEmail 1.4.2 is a maintenance release that refreshes application and
+documentation dependencies and updates Sharp to address published libheif
+vulnerabilities.
+
+### Changed
+
+- Updated Worker, dashboard, Chromium extension, and documentation dependencies,
+  including Hono, SimpleWebAuthn, PostalMime, Wrangler, Lucide, Vite, Vitest,
+  Astro, and Starlight.
+- Simplified contribution and release automation around short-lived branches
+  that target `main` directly, removing the duplicate `dev` promotion step.
+
+### Security
+
+- Updated Sharp to 0.35.4 in the Worker and Docker dependency trees to address
+  published high-severity libheif vulnerabilities.
+
+### Upgrade Notes
+
+- No database migrations or configuration changes are required.
 
 ## [1.4.1] — 2026-09-15
 
@@ -587,7 +607,8 @@ encryption, deployment, and release safety for every installation.
 Pre-v1 baseline: core alias forwarding, reply-from-alias, MFA + passkeys,
 admin settings, Docker self-host, Cloudflare Workers deploy.
 
-[Unreleased]: https://github.com/tilianb/hidemyemail/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/tilianb/hidemyemail/compare/v1.4.2...HEAD
+[1.4.2]: https://github.com/tilianb/hidemyemail/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/tilianb/hidemyemail/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/tilianb/hidemyemail/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/tilianb/hidemyemail/compare/v1.2.1...v1.3.0

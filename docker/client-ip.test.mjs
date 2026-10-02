@@ -148,7 +148,7 @@ test("release is the only direct tag publisher", async () => {
   assert.match(testflight, /workflow_call:/);
 });
 
-test("dev publishes multi-arch GHCR dev and SHA tags while latest tracks stable releases", async () => {
+test("main publishes multi-arch GHCR and SHA tags while latest tracks stable releases", async () => {
   const workflow = await readFile(
     new URL("../.github/workflows/docker.yml", import.meta.url),
     "utf8",
@@ -161,8 +161,8 @@ test("dev publishes multi-arch GHCR dev and SHA tags while latest tracks stable 
     return block.slice(start, next === -1 ? undefined : next);
   };
 
-  assert.match(workflow, /branches: \['main', 'dev'\]/);
-  assert.match(workflow, /refs\/heads\/(?:main|dev)/);
+  assert.match(workflow, /branches: \['main'\]/);
+  assert.doesNotMatch(workflow, /refs\/heads\/dev/);
   assert.match(build, /fromJSON\('\[\{"platform":"linux\/amd64"\},\{"platform":"linux\/arm64"\}\]'\)/);
   assert.match(build, /environment:.*refs\/heads\/main.*stable-release == 'true'.*production/);
   assert.match(step(build, "Log in to GHCR"), /if: github\.event_name != 'pull_request'/);
@@ -179,7 +179,6 @@ test("dev publishes multi-arch GHCR dev and SHA tags while latest tracks stable 
   assert.match(merge, /type=sha,format=short,prefix=sha-/);
   assert.match(merge, /type=raw,value=latest,enable=\$\{\{ needs\.publish-gate\.outputs\.stable-release == 'true' \}\}/);
   assert.doesNotMatch(merge, /type=raw,value=latest,enable=.*refs\/heads\/main/);
-  assert.doesNotMatch(merge, /type=raw,value=latest,enable=.*dev/);
   for (const name of [
     "Log in to Docker Hub",
     "Extract Docker Hub metadata",
@@ -190,16 +189,20 @@ test("dev publishes multi-arch GHCR dev and SHA tags while latest tracks stable 
   }
 });
 
-test("dev sync only accepts the repository's own dev branch", async () => {
-  const workflow = await readFile(
-    new URL("../.github/workflows/sync-dev.yml", import.meta.url),
-    "utf8",
+test("automation targets main directly", async () => {
+  const [ci, codeql, docker, dependabot, testflight] = await Promise.all(
+    ["ci", "codeql", "docker", "dependabot", "testflight"].map((name) =>
+      readFile(new URL(`../.github/${name === "dependabot" ? "" : "workflows/"}${name}.yml`, import.meta.url), "utf8")),
   );
-  const syncJob = workflow.slice(workflow.indexOf("  sync-dev:"));
-  assert.match(
-    syncJob,
-    /if: >-\n\s+github\.event\.pull_request\.merged == true &&\n\s+github\.event\.pull_request\.head\.ref == 'dev' &&\n\s+github\.event\.pull_request\.head\.repo\.full_name == github\.repository/,
-  );
+  await assert.rejects(readFile(new URL("../.github/workflows/sync-dev.yml", import.meta.url), "utf8"));
+  // Explicit dev integration PRs receive CI, but must not restore dev pushes
+  // or the removed promotion/publication workflow.
+  assert.match(ci, /pull_request:\n\s+branches:\n\s+- main\n\s+- dev/);
+  for (const workflow of [ci.split("  pull_request:")[0], codeql, docker]) {
+    assert.doesNotMatch(workflow, /branches:[^\n]*dev|^\s+- dev$/m);
+  }
+  assert.match(dependabot, /target-branch: "main"/);
+  assert.match(testflight, /github\.ref_name == 'main'/);
 });
 
 test("Namespace is reserved for right-sized native, Java CodeQL, and Docker builds", async () => {
@@ -211,7 +214,6 @@ test("Namespace is reserved for right-sized native, Java CodeQL, and Docker buil
     "docs",
     "ios",
     "release",
-    "sync-dev",
     "testflight",
   ];
   const workflows = Object.fromEntries(await Promise.all(workflowNames.map(async (name) => [
