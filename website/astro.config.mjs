@@ -24,7 +24,7 @@ export default defineConfig({
       // Source of truth lives in the repo root, not in website/. The sync step
       // copies it into src/content/docs/, so "edit this page" points back there.
       editLink: {
-        baseUrl: "https://github.com/tilianb/hidemyemail/edit/dev/",
+        baseUrl: "https://github.com/tilianb/hidemyemail/edit/main/",
       },
       sidebar: [
         { label: "Overview", slug: "index" },
