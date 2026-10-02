@@ -147,8 +147,8 @@ const mf = new Miniflare({
     // Secrets — Miniflare treats `bindings` and secrets the same way; the
     // worker reads them off `env`. Keep them in this map so the Env interface
     // sees the full surface.
-    SES_ACCESS_KEY_ID: env.SES_ACCESS_KEY_ID,
-    SES_SECRET_ACCESS_KEY: env.SES_SECRET_ACCESS_KEY,
+    SES_ACCESS_KEY_ID: env.SES_ACCESS_KEY_ID ?? "",
+    SES_SECRET_ACCESS_KEY: env.SES_SECRET_ACCESS_KEY ?? "",
     SMTP_OUTBOUND_PASSWORD: env.SMTP_OUTBOUND_PASSWORD ?? "",
     SMTP_INBOUND_PASSWORD: env.SMTP_INBOUND_PASSWORD ?? "",
     SESSION_SECRET: env.SESSION_SECRET,

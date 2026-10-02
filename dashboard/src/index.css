@@ -1087,6 +1087,7 @@ table.dossier tbody td {
 }
 .setting-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-6);
@@ -1096,7 +1097,7 @@ table.dossier tbody td {
 .setting-row:last-child { border-bottom: none; }
 .setting-info {
   flex: 1;
-  min-width: 0;
+  min-width: min(240px, 100%);
 }
 .setting-label {
   font-family: var(--font-display);
@@ -1118,13 +1119,40 @@ table.dossier tbody td {
   opacity: 0.7;
 }
 .setting-control {
-  flex-shrink: 0;
+  flex: 0 1 420px;
+  min-width: 0;
+  max-width: 100%;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 .setting-control .input {
   width: 160px;
+}
+.setting-control select.input,
+.mail-settings-control .input {
+  width: 100%;
+  min-width: 0;
+}
+.mail-settings-control {
+  display: grid;
+  gap: var(--space-3);
+}
+.mail-field {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.mail-connection-row {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: var(--space-2);
+}
+.mail-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 .test-email-control {
   flex-wrap: wrap;
@@ -1155,6 +1183,13 @@ table.dossier tbody td {
   }
   .setting-control .input {
     width: 100%;
+  }
+  .setting-control {
+    flex-basis: auto;
+    width: 100%;
+  }
+  .mail-connection-row {
+    grid-template-columns: minmax(0, 1fr);
   }
   .test-email-control {
     width: 100%;
@@ -1708,10 +1743,14 @@ table.dossier tbody td {
 .security-danger-form { display: flex; flex-direction: column; gap: 14px; margin-top: var(--space-5); padding: var(--space-4); border: 1px solid rgba(255,80,80,0.2); border-radius: var(--radius-md); background: var(--canvas); }
 .security-code-block { margin-bottom: var(--space-4); }
 .security-form-stack { display: flex; flex-direction: column; gap: 12px; }
-.security-inline-form { display: flex; align-items: center; gap: var(--space-2); }
+.security-inline-form { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.security-inline-form .flex-input { flex: 1 1 280px; }
 .passkey-list { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-4); }
 .passkey-row { display: flex; align-items: center; gap: 10px; padding: 10px var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--canvas); }
-.passkey-edit-form { display: flex; flex: 1; align-items: center; gap: 6px; }
+.passkey-edit-form { display: flex; flex: 1; flex-wrap: wrap; min-width: 0; align-items: center; gap: 6px; }
+.passkey-edit-form .flex-input { flex: 1 1 240px; }
+.security-inline-form .field-label,
+.passkey-edit-form .field-label { flex-basis: 100%; }
 .passkey-name { color: var(--text-primary); font-size: 0.85rem; font-weight: 500; }
 .passkey-meta { color: var(--text-muted); font-size: 0.75rem; }
 

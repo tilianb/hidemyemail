@@ -1,4 +1,7 @@
 import { Hono } from "hono";
+import { zValidator } from "@hono/zod-validator";
+import { createDestinationSchema } from "../../contracts/requests";
+import type { DestinationDto } from "../../contracts/api";
 import { createMimeMessage, Mailbox } from "mimetext";
 import type { AppEnv } from "../app";
 import { resolveMailProviderConfig, sendMail } from "../../lib/mail-provider";
@@ -20,17 +23,9 @@ export function destinationRoutes() {
 
   r.get("/destinations", async (c) => {
     const userId = c.get("userId");
-    let rows;
-    try {
-      rows = await c.env.DB.prepare(
-        "SELECT id, email, is_default, verified_at, created_at, suppressed_at, suppression_reason, suppression_class FROM destinations WHERE user_id = ? ORDER BY created_at DESC"
-      ).bind(userId).all<{ id: number, email: string, is_default: number, verified_at: number | null, created_at: number, suppressed_at: number | null, suppression_reason: string | null, suppression_class: string | null }>();
-    } catch {
-      // is_default column may be missing if migration 0002 hasn't been applied yet
-      rows = await c.env.DB.prepare(
-        "SELECT id, email, 0 as is_default, verified_at, created_at, NULL as suppressed_at, NULL as suppression_reason, NULL as suppression_class FROM destinations WHERE user_id = ? ORDER BY created_at DESC"
-      ).bind(userId).all<{ id: number, email: string, is_default: number, verified_at: number | null, created_at: number, suppressed_at: number | null, suppression_reason: string | null, suppression_class: string | null }>();
-    }
+    const rows = await c.env.DB.prepare(
+      "SELECT id, email, is_default, verified_at, created_at, suppressed_at, suppression_reason, suppression_class FROM destinations WHERE user_id = ? ORDER BY created_at DESC"
+    ).bind(userId).all<DestinationDto>();
 
     const results = [];
     for (const row of rows.results ?? []) {
@@ -40,9 +35,11 @@ export function destinationRoutes() {
     return c.json(results);
   });
 
-  r.post("/destinations", async (c) => {
+  r.post("/destinations", zValidator("json", createDestinationSchema, (result, c) => {
+    if (!result.success) return c.json({ error: "Invalid email" }, 400);
+  }), async (c) => {
     const userId = c.get("userId");
-    let { email } = await c.req.json<{ email: string }>().catch(() => ({ email: "" }));
+    let { email } = c.req.valid("json");
     if (!email || !email.includes("@")) return c.json({ error: "Invalid email" }, 400);
     email = email.toLowerCase();
 

@@ -1,21 +1,29 @@
 import type { Hono } from "hono";
+import { zValidator } from "@hono/zod-validator";
+import { z } from "zod";
 import type { AppEnv } from "../../app";
-import { VALID_SETTING_KEYS } from "../../../config";
+import {
+  ENCRYPTED_SETTING_KEYS,
+  FRESH_AUTH_SETTING_KEYS,
+  MAIL_SETTING_KEYS,
+  MASKED_SETTING_KEYS,
+  SETTING_DEFINITIONS,
+  type SettingDefinition,
+  type SettingKey,
+} from "../../../config";
 import { encryptDestination } from "../../../lib/crypto";
 import { getAllSettings, getEnvWithOverride } from "../../../lib/settings";
 import { maskSecret, normalizeDomain } from "./helpers";
 import { freshAuthRequired, hasFreshAuth } from "../../auth-helpers";
 
-const MAIL_SETTINGS = new Set([
-  "ses_region", "ses_access_key_id", "ses_secret_access_key",
-  "mail_outbound_provider", "smtp_outbound_host", "smtp_outbound_port", "smtp_outbound_tls",
-  "smtp_outbound_username", "smtp_outbound_password", "smtp_inbound_enabled", "smtp_inbound_host",
-  "smtp_inbound_port", "smtp_inbound_tls", "smtp_inbound_username", "smtp_inbound_password",
-  "smtp_inbound_gateway_id", "smtp_inbound_trusted_peers", "smtp_inbound_max_bytes",
-]);
-const MAIL_SECRETS = new Set(["smtp_outbound_username", "smtp_outbound_password", "smtp_inbound_username", "smtp_inbound_password"]);
-const ENCRYPTED_SECRETS = new Set(["ses_secret_access_key", ...MAIL_SECRETS]);
-const MASKED_MAIL_SETTINGS = new Set(["ses_access_key_id", "ses_secret_access_key", ...MAIL_SECRETS]);
+const settingsPatchSchema = z.record(z.string(), z.union([z.string(), z.null()]));
+const mailSettings = new Set<string>(MAIL_SETTING_KEYS);
+const freshAuthSettings = new Set<string>(FRESH_AUTH_SETTING_KEYS);
+const definitionFor = (key: SettingKey): SettingDefinition => SETTING_DEFINITIONS[key];
+const envValue = (env: AppEnv["Bindings"], key: SettingKey): string => {
+  const name = definitionFor(key).env;
+  return name ? (env as unknown as Record<string, string | undefined>)[name] ?? "" : "";
+};
 
 export function registerAdminSettingsRoutes(r: Hono<AppEnv>) {
   // ── Environment Variables (read-only) ──────────────────────────────────────
@@ -59,18 +67,18 @@ export function registerAdminSettingsRoutes(r: Hono<AppEnv>) {
   r.get("/settings", async (c) => {
     const settings = await getAllSettings(c.env.DB, c.env);
     // Mask sensitive secrets so they don't leak to the frontend UI
-    for (const key of MAIL_SETTINGS) {
-      if (MASKED_MAIL_SETTINGS.has(key)) continue;
+    for (const key of MAIL_SETTING_KEYS) {
+      if (MASKED_SETTING_KEYS.has(key)) continue;
       const overridden = (settings[key]?.updated_at ?? 0) > 0;
-      const envValue = (c.env as any)[key.toUpperCase()] as string | undefined;
+      const inherited = envValue(c.env, key);
       settings[key] = {
-        value: overridden ? settings[key]?.value ?? "" : envValue || settings[key]?.value || "",
+        value: overridden ? settings[key]?.value ?? "" : inherited || settings[key]?.value || "",
         updated_at: settings[key]?.updated_at ?? 0,
-        source: overridden ? "override" : envValue ? "environment" : "default",
+        source: overridden ? "override" : inherited ? "environment" : "default",
       } as any;
     }
-    for (const key of MASKED_MAIL_SETTINGS) {
-      const envConfigured = !!(c.env as any)[key.toUpperCase()];
+    for (const key of MASKED_SETTING_KEYS) {
+      const envConfigured = !!envValue(c.env, key);
       const overridden = (settings[key]?.updated_at ?? 0) > 0;
       const configured = overridden ? !!settings[key]?.value : envConfigured;
       settings[key] = {
@@ -82,9 +90,10 @@ export function registerAdminSettingsRoutes(r: Hono<AppEnv>) {
     return c.json({ settings });
   });
 
-  r.patch("/settings", async (c) => {
-    const body: Record<string, string | null> = await c.req.json<Record<string, string | null>>()
-      .catch((): Record<string, string | null> => ({}));
+  r.patch("/settings", zValidator("json", settingsPatchSchema, (result, c) => {
+    if (!result.success) return c.json({ error: "Invalid settings payload" }, 400);
+  }), async (c) => {
+    const body = c.req.valid("json");
     const db = c.env.DB;
     const now = Date.now();
 
@@ -92,12 +101,12 @@ export function registerAdminSettingsRoutes(r: Hono<AppEnv>) {
     const updates: { key: string; value: string }[] = [];
     const resets: string[] = [];
 
-    if (Object.keys(body).some((key) => MAIL_SETTINGS.has(key)) && !(await hasFreshAuth(c))) {
+    if (Object.keys(body).some((key) => freshAuthSettings.has(key)) && !(await hasFreshAuth(c))) {
       return freshAuthRequired(c);
     }
 
     for (const [key, value] of Object.entries(body)) {
-      if (!VALID_SETTING_KEYS.includes(key)) {
+      if (!Object.hasOwn(SETTING_DEFINITIONS, key)) {
         errors.push(`Unknown setting: ${key}`);
         continue;
       }
@@ -107,104 +116,14 @@ export function registerAdminSettingsRoutes(r: Hono<AppEnv>) {
       }
 
       // Ignore masked secrets that weren't changed by the user
-      if (MASKED_MAIL_SETTINGS.has(key) && value.includes("••••••")) {
+      const settingKey = key as SettingKey;
+      if (MASKED_SETTING_KEYS.has(settingKey) && value.includes("••••••")) {
         continue;
       }
-
-      if (key === "mail_outbound_provider" && !["", "ses", "smtp"].includes(value)) errors.push(`${key}: must be ses or smtp`);
-      if ((key === "smtp_outbound_tls" && !["", "implicit", "starttls", "trusted-cleartext"].includes(value))
-        || (key === "smtp_inbound_tls" && !["", "implicit", "starttls"].includes(value))) errors.push(`${key}: invalid TLS mode`);
-      if (key === "smtp_inbound_enabled" && !["", "true", "false"].includes(value)) errors.push(`${key}: must be true or false`);
-      if (["smtp_outbound_port", "smtp_inbound_port"].includes(key) && value !== "") {
-        const port = Number(value);
-        if (!Number.isInteger(port) || port < 1 || port > 65535) errors.push(`${key}: must be a port from 1 to 65535`);
-      }
-      if (key === "smtp_inbound_trusted_peers" && value && value.split(",").some((peer) => !/^[0-9a-f:.]+$/i.test(peer.trim()))) {
-        errors.push(`${key}: use comma-separated exact IP addresses`);
-      }
-      if (["smtp_outbound_host", "smtp_inbound_host", "smtp_outbound_username", "smtp_inbound_username", "smtp_inbound_gateway_id"].includes(key)
-        && /[\r\n]/.test(value)) errors.push(`${key}: must not contain line breaks`);
-      if (key === "smtp_inbound_gateway_id" && value && !/^[A-Za-z0-9._:-]{1,200}$/.test(value)) errors.push(`${key}: invalid gateway id`);
-      if (key === "smtp_inbound_max_bytes" && value !== "") {
-        const bytes = Number(value);
-        if (!Number.isInteger(bytes) || bytes < 1024) errors.push(`${key}: must be at least 1024`);
-      }
-
-      if (key === "rate_limit_per_alias" || key === "rate_limit_reply_per_alias" || key === "rate_limit_global" || key === "reply_distinct_recipient_cap") {
-        const n = parseInt(value, 10);
-        if (isNaN(n) || n < -1) {
-          errors.push(`${key}: must be a number greater than or equal to -1`);
-          continue;
-        }
-      }
-
-      if (key === "soft_bounce_threshold") {
-        const n = parseInt(value, 10);
-        if (isNaN(n) || n < 0) {
-          errors.push(`${key}: must be a number greater than or equal to 0`);
-          continue;
-        }
-      }
-
-      if (key === "spam_verdict_action" || key === "virus_verdict_action") {
-        if (value !== "forward" && value !== "flag" && value !== "drop") {
-          errors.push(`${key}: must be "forward", "flag", or "drop"`);
-          continue;
-        }
-      }
-
-      if (key === "unsubscribe_header_mode") {
-        if (value !== "always" && value !== "bulk_only" && value !== "never") {
-          errors.push(`${key}: must be "always", "bulk_only", or "never"`);
-          continue;
-        }
-      }
-
-      if (key === "max_total_aliases" || key === "max_subdomains") {
-        const n = parseInt(value, 10);
-        if (isNaN(n) || n < -1) {
-          errors.push(`${key}: must be a number greater than or equal to -1`);
-          continue;
-        }
-      }
-
-      if (key === "max_inbound_bytes") {
-        const n = parseInt(value, 10);
-        if (isNaN(n) || n < 1024) {
-          errors.push(`${key}: must be at least 1024 (1KB)`);
-          continue;
-        }
-      }
-
-      if (key === "catch_all_auto_create" || key === "registration_enabled" || key === "alias_quota_buffer_enabled") {
-        if (value !== "true" && value !== "false") {
-          errors.push(`${key}: must be "true" or "false"`);
-          continue;
-        }
-      }
-
-      if (key === "forwarded_from_format") {
-        const allowed = new Set([
-          "name_address_parens",
-          "name_address_parens_at",
-          "name_address_dash",
-          "name_address_dash_at",
-          "name_only",
-          "address_only",
-          "address_only_at",
-          "via_hidemyemail",
-        ]);
-        if (!allowed.has(value)) {
-          errors.push(`${key}: invalid format`);
-          continue;
-        }
-      }
-
-      if (key === "cors_allowed_domains") {
-        if (!value || value.trim().length === 0) {
-          errors.push(`${key}: cannot be empty`);
-          continue;
-        }
+      const validationError = definitionFor(settingKey).validate?.(value);
+      if (validationError) {
+        errors.push(`${key}: ${validationError}`);
+        continue;
       }
 
       if (key === "main_global_domain") {
@@ -227,9 +146,9 @@ export function registerAdminSettingsRoutes(r: Hono<AppEnv>) {
     }
 
     const proposed: Record<string, string> = {};
-    for (const key of MAIL_SETTINGS) {
+    for (const key of MAIL_SETTING_KEYS) {
       const supplied = body[key];
-      if (supplied === null) proposed[key] = (c.env as any)[key.toUpperCase()] || "";
+      if (supplied === null) proposed[key] = envValue(c.env, key);
       else if (typeof supplied === "string" && !supplied.includes("••••••")) proposed[key] = supplied;
       else proposed[key] = await getEnvWithOverride(db, c.env, key);
     }
@@ -253,7 +172,7 @@ export function registerAdminSettingsRoutes(r: Hono<AppEnv>) {
     }
 
     for (let { key, value } of updates) {
-      if (value && ENCRYPTED_SECRETS.has(key)) {
+      if (value && ENCRYPTED_SETTING_KEYS.has(key as SettingKey)) {
         value = await encryptDestination(value, c.env.DESTINATION_ENCRYPTION_KEY);
       }
       await db.prepare(
@@ -263,6 +182,6 @@ export function registerAdminSettingsRoutes(r: Hono<AppEnv>) {
 
     for (const key of resets) await db.prepare("DELETE FROM settings WHERE key = ?").bind(key).run();
 
-    return c.json({ ok: true, updated: updates.length, reset: resets.length, restart_required: [...updates, ...resets.map((key) => ({ key, value: "" }))].some(({ key }) => MAIL_SETTINGS.has(key)) });
+    return c.json({ ok: true, updated: updates.length, reset: resets.length, restart_required: [...updates, ...resets.map((key) => ({ key, value: "" }))].some(({ key }) => mailSettings.has(key)) });
   });
 }

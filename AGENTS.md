@@ -51,7 +51,7 @@ built dashboard assets.
 | `worker/src/lib/` | Crypto, auth primitives, settings, MIME, SES SigV4 client |
 | `worker/migrations/` | D1 migrations, numbered `00NN_name.sql`, append-only |
 | `worker/test/` | Vitest + `@cloudflare/vitest-pool-workers` (`cloudflare:test` env) |
-| `dashboard/` | React 19 + Vite SPA (TypeScript), no UI framework — hand-rolled CSS in `src/index.css` |
+| `dashboard/` | React 19 + Vite SPA; Radix dialogs, TanStack Query for alias data, hand-rolled CSS in `src/index.css` |
 | `extension/` | Chromium Manifest V3 popup — vanilla TypeScript, local-only credentials, optional per-origin access |
 | `docker/` | Self-host runtime: Node server wrapping the Worker via Miniflare |
 | `docs/` | Setup/deploy/config docs + `ROADMAP.md` (tracked backlog) |
@@ -86,7 +86,10 @@ built dashboard assets.
 cd worker && npm ci && npm test && npx tsc --noEmit
 
 # Dashboard — tsc is part of the build
-cd dashboard && npm ci && npm run build
+cd dashboard && npm ci && npm test && npm run build
+
+# Dashboard browser checks (synthetic API fixtures, no external mail)
+cd dashboard && npx playwright install chromium && npm run test:browser
 
 # Chromium extension — tests + reproducible dist/ and ZIP
 cd extension && npm ci && npm test && npm run build && npm run zip
@@ -131,11 +134,20 @@ CI: `.github/workflows/docs.yml` builds and deploys to GitHub Pages on push to
   applied one. Keep columns nullable / defaulted so existing rows keep their
   behavior. Code does NOT tolerate missing tables (no try/catch migration
   fallbacks — that pattern was deliberately removed).
-- **Settings:** runtime-tunable knobs go in `SETTING_DEFAULTS`
-  (`worker/src/config.ts`), get validation in
-  `worker/src/api/routes/admin/settings.ts`, a UI row in
-  `dashboard/src/pages/Admin.tsx`, and a row in `docs/CONFIGURATION.md`.
-  All four or it's not done.
+- **Settings:** add default, validation, env mapping, and secret/fresh-auth
+  metadata to `SETTING_DEFINITIONS` (`worker/src/config.ts`). Defaults and
+  security classifications derive from it. Cross-field/DB checks live in
+  `worker/src/api/routes/admin/settings.ts`; add the UI row in
+  `dashboard/src/pages/admin/SystemSettingsSection.tsx` and document it in
+  `docs/CONFIGURATION.md`. Preserve explicit empty overrides versus null resets.
+- **API contracts:** pure dashboard/Worker DTOs live in
+  `worker/src/contracts/api.ts`; Zod request schemas live alongside them in
+  `requests.ts`. Browser imports must be type-only, without Worker bindings.
+  Native bearer and extension API-key transports remain separate.
+- **Dashboard state:** alias query keys include the account ID. Clear caches
+  on account reset; do not retry auth errors or mutations automatically.
+  Use the shared `security/FreshAuth.tsx` continuation and Radix dialogs;
+  preserve cancellation, unmount fencing, and focus restoration.
 - **Docs:** user-visible behavior and changes to APIs, configuration, security,
   deployment, or setup must update their source docs (`README.md`, `docs/`,
   and `CHANGELOG.md` when release-facing) in the same PR. The website syncs

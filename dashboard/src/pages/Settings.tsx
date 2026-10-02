@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { QRCode } from "react-qr-code";
-import { api, isFreshAuthRequired } from "../api";
+import { api } from "../api";
 import { useAuth } from "../auth";
 import { useToast, ConfirmDialog } from "../ui";
-import { ShieldCheck, ShieldOff, KeyRound, Copy, RefreshCw, Loader2, Fingerprint, Trash2, Pencil, Mail, Download, AlertTriangle, Bell } from "lucide-react";
+import { FreshAuthDialog, useFreshAuth } from "../security/FreshAuth";
+import { InlineForwardingPreferences } from "./settings/InlineForwardingPreferences";
+import { ShieldCheck, ShieldOff, KeyRound, Copy, RefreshCw, Loader2, Fingerprint, Trash2, Pencil, Download, AlertTriangle, Bell } from "lucide-react";
 
 type SetupStep = "idle" | "qr" | "verify" | "backup";
 type PasskeyRow = { id: string; device_name: string | null; created_at: number };
@@ -20,16 +22,7 @@ export function Settings() {
   const [loading, setLoading] = useState(true);
   const profileId = useRef<number | null>(null);
 
-  // Exactly one failed operation can wait for elevation. A second failure is
-  // surfaced normally rather than opening an authentication loop.
-  const [freshPrompt, setFreshPrompt] = useState(false);
-  const pendingFresh = useRef<null | (() => Promise<void>)>(null);
-  const pendingFreshProfileId = useRef<number | null>(null);
-  const retryingFresh = useRef(false);
-  const [reauthPassphrase, setReauthPassphrase] = useState("");
-  const [reauthCode, setReauthCode] = useState("");
-  const [reauthLoading, setReauthLoading] = useState(false);
-  const [reauthError, setReauthError] = useState("");
+  const freshAuth = useFreshAuth({ onError: message => toast(message, "error") });
 
   // Passkey state
   const [passkeys, setPasskeys] = useState<PasskeyRow[]>([]);
@@ -78,15 +71,6 @@ export function Settings() {
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  // Email preferences
-  type Tri = "on" | "off" | null;
-  type Pos = "header" | "footer" | null;
-  const [inlineActionsPref, setInlineActionsPref] = useState<Tri>(null);
-  const [inlineActionsPosition, setInlineActionsPosition] = useState<Pos>(null);
-  const [defaultsEnabled, setDefaultsEnabled] = useState(false);
-  const [defaultsPosition, setDefaultsPosition] = useState("footer");
-  const [savingInlineActions, setSavingInlineActions] = useState(false);
-
   // Profile (username) + self-service recovery codes
   const [username, setUsername] = useState<string | null>(null);
   const [usernameInput, setUsernameInput] = useState("");
@@ -99,15 +83,10 @@ export function Settings() {
   async function loadStatus() {
     setLoading(true);
     try {
-      const [mfa, pks, keys, prefs, profile] = await Promise.all([
+      const [mfa, pks, keys, profile] = await Promise.all([
         api.mfaStatus(),
         api.passkeyList().catch(() => []),
         api.apiKeys().catch(() => []),
-        api.preferences().catch(() => ({
-          inline_actions_pref: null as Tri,
-          inline_actions_position: null as Pos,
-          defaults: { inline_actions_enabled: false, inline_actions_position: "footer" },
-        })),
         api.profile().catch(() => null),
       ]);
       setEnabled(mfa.enabled);
@@ -120,10 +99,6 @@ export function Settings() {
         setUsernameInput(profile.username ?? "");
         setRecoveryRemaining(profile.recovery_codes_remaining);
       }
-      setInlineActionsPref(prefs.inline_actions_pref);
-      setInlineActionsPosition(prefs.inline_actions_position);
-      setDefaultsEnabled(prefs.defaults.inline_actions_enabled);
-      setDefaultsPosition(prefs.defaults.inline_actions_position);
     } catch {
       toast("Failed to load settings", "error");
     } finally {
@@ -131,116 +106,9 @@ export function Settings() {
     }
   }
 
-  // Combined value used by the single select. "inherit" resets both fields to
-  // NULL so the user picks back up whatever the admin's default is set to.
-  type InlineChoice = "inherit" | "off" | "header" | "footer";
-
-  async function updateInlineChoice(next: InlineChoice) {
-    const prevPref = inlineActionsPref;
-    const prevPos = inlineActionsPosition;
-    let pref: Tri;
-    let pos: Pos;
-    if (next === "inherit") { pref = null; pos = null; }
-    else if (next === "off") { pref = "off"; pos = null; }
-    else { pref = "on"; pos = next; }
-
-    setInlineActionsPref(pref);
-    setInlineActionsPosition(pos);
-    setSavingInlineActions(true);
-    try {
-      await api.updatePreferences({ inline_actions_pref: pref, inline_actions_position: pos });
-    } catch (err: any) {
-      setInlineActionsPref(prevPref);
-      setInlineActionsPosition(prevPos);
-      toast(err?.message || "Failed to update preference", "error");
-    } finally {
-      setSavingInlineActions(false);
-    }
-  }
-
-  const effectiveEnabled = inlineActionsPref === "on" || (inlineActionsPref === null && defaultsEnabled);
-  const effectivePosition = inlineActionsPosition ?? defaultsPosition;
-  const currentChoice: InlineChoice =
-    inlineActionsPref === null ? "inherit"
-    : inlineActionsPref === "off" ? "off"
-    : (inlineActionsPosition ?? (defaultsPosition === "header" ? "header" : "footer")) as InlineChoice;
-  const defaultLabel = defaultsEnabled ? `${defaultsPosition}` : "disabled";
-
   useEffect(() => { loadStatus(); }, []);
 
-  async function freshGuard<T>(operation: () => Promise<T>, afterElevation: () => Promise<void>): Promise<{ ok: true; value: T } | { ok: false }> {
-    const boundProfileId = profileId.current ?? (await api.profile()).id;
-    if (profileId.current === null) profileId.current = boundProfileId;
-    try {
-      return { ok: true, value: await operation() };
-    } catch (err) {
-      if (!isFreshAuthRequired(err) || pendingFresh.current || retryingFresh.current) throw err;
-      const currentProfile = await api.profile();
-      if (currentProfile.id !== boundProfileId) {
-        throw new Error("The signed-in account changed. Please start the action again.");
-      }
-      pendingFresh.current = afterElevation;
-      pendingFreshProfileId.current = boundProfileId;
-      setReauthPassphrase("");
-      setReauthCode("");
-      setReauthError("");
-      setFreshPrompt(true);
-      return { ok: false };
-    }
-  }
-
-  function cancelReauth() {
-    pendingFresh.current = null;
-    pendingFreshProfileId.current = null;
-    setFreshPrompt(false);
-    setReauthPassphrase("");
-    setReauthCode("");
-    setReauthError("");
-  }
-
-  async function finishReauth() {
-    const operation = pendingFresh.current;
-    const boundProfileId = pendingFreshProfileId.current;
-    if (!operation || boundProfileId === null) return;
-    const profile = await api.profile();
-    if (profile.id !== boundProfileId) {
-      cancelReauth();
-      toast("The signed-in account changed. Please start the action again.", "error");
-      return;
-    }
-    pendingFresh.current = null; // retry at most once
-    pendingFreshProfileId.current = null;
-    setFreshPrompt(false);
-    setReauthPassphrase("");
-    setReauthCode("");
-    retryingFresh.current = true;
-    try { await operation(); }
-    catch (err: any) { toast(err?.message || "The action could not be completed", "error"); }
-    finally { retryingFresh.current = false; }
-  }
-
-  async function submitReauth(e: React.FormEvent) {
-    e.preventDefault();
-    setReauthLoading(true); setReauthError("");
-    try {
-      await api.reauth(reauthPassphrase, enabled ? reauthCode.trim() : undefined);
-      await finishReauth();
-    } catch (err: any) { setReauthError(err?.message || "Authentication failed"); }
-    finally { setReauthLoading(false); }
-  }
-
-  async function submitPasskeyReauth() {
-    setReauthLoading(true); setReauthError("");
-    try {
-      const options = await api.reauthPasskeyChallenge();
-      const { startAuthentication } = await import("@simplewebauthn/browser");
-      const response = await startAuthentication({ optionsJSON: options as unknown as Parameters<typeof startAuthentication>[0]["optionsJSON"] });
-      await api.reauthPasskeyComplete(response);
-      await finishReauth();
-    } catch (err: any) {
-      if (err?.name !== "NotAllowedError") setReauthError(err?.message || "Passkey verification failed");
-    } finally { setReauthLoading(false); }
-  }
+  const freshGuard = freshAuth.guard;
 
   async function addPasskey(e: React.FormEvent) {
     e.preventDefault();
@@ -801,45 +669,7 @@ export function Settings() {
         </div>
       </div>
 
-      {/* Email preferences card */}
-      <div className="card stagger-1 card-spaced-bottom">
-        <div className="card-header">
-          <span className="card-title">Email Preferences</span>
-        </div>
-        <div className="card-body">
-          <div className="inline-actions-wrap inline-actions-nowrap">
-            <div className="security-status-media">
-              <Mail size={20} className="icon-muted" />
-              <div>
-                <div className="status-title">Inline action links</div>
-                <div className="status-caption">
-                  Choose where the Block / Mute&nbsp;7d / Disable alias bar appears in your forwarded emails, or disable it entirely. Currently <strong>{effectiveEnabled ? effectivePosition : "disabled"}</strong>{inlineActionsPref === null ? <> (inheriting site default: <em>{defaultLabel}</em>)</> : null}.
-                </div>
-              </div>
-            </div>
-            <div className="inline-actions inline-actions-select">
-              <select
-                aria-label="Inline action links"
-                className="input"
-                value={currentChoice}
-                disabled={savingInlineActions}
-                onChange={e => updateInlineChoice(e.target.value as InlineChoice)}
-              >
-                <option value="inherit">Inherit default ({defaultLabel})</option>
-                <option value="off">Disabled</option>
-                <option value="header">Header</option>
-                <option value="footer">Footer</option>
-              </select>
-            </div>
-          </div>
-          {effectiveEnabled && (
-            <details className="callout help-callout" style={{ marginTop: "var(--space-3)" }}>
-              <summary>Deliverability note</summary>
-              <div>The inline action bar adds three <code>mailto:</code> buttons to every forwarded message. Spam filters at Microsoft / Outlook treat that pattern as marketing-list footer, which — combined with a new sending domain — can push messages to Junk. If you see forwards landing in Spam, switch this to <em>Disabled</em> while your sending domain builds reputation; the same actions remain available via the email's standard Unsubscribe button.</div>
-            </details>
-          )}
-        </div>
-      </div>
+      <InlineForwardingPreferences />
 
       {/* 2FA status card */}
       <div className="card stagger-2 card-spaced-bottom">
@@ -1036,7 +866,9 @@ export function Settings() {
                       onSubmit={e => { e.preventDefault(); renamePasskey(pk.id, editingPasskeyName); }}
                       className="passkey-edit-form"
                     >
+                      <label className="field-label" htmlFor={`passkey-name-${pk.id}`}>Passkey name</label>
                       <input
+                        id={`passkey-name-${pk.id}`}
                         className="input flex-input btn-compact"
                         value={editingPasskeyName}
                         onChange={e => setEditingPasskeyName(e.target.value)}
@@ -1086,11 +918,13 @@ export function Settings() {
                   Give this passkey a name so you can recognise it later (optional).
                 </div>
                 <div className="security-inline-form">
+                  <label className="field-label" htmlFor="new-passkey-name">Passkey name (optional)</label>
                   <input
+                    id="new-passkey-name"
                     className="input flex-input"
                     value={newPasskeyName}
                     onChange={e => setNewPasskeyName(e.target.value)}
-                    placeholder="e.g. MacBook Touch ID, iPhone Face ID"
+                    placeholder="e.g. MacBook Touch ID"
                     maxLength={64}
                     disabled={addingPasskey}
                     autoFocus
@@ -1220,7 +1054,9 @@ export function Settings() {
                 Name the key after where you'll use it, so you can revoke it precisely later.
               </div>
               <div className="security-inline-form">
+                <label className="field-label" htmlFor="new-api-key-name">API key name</label>
                 <input
+                  id="new-api-key-name"
                   className="input flex-input"
                   value={newApiKeyName}
                   onChange={e => setNewApiKeyName(e.target.value)}
@@ -1468,43 +1304,7 @@ export function Settings() {
         </div>
       )}
 
-      {freshPrompt && (
-        <div className="overlay" role="presentation">
-          <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="reauth-title" aria-describedby="reauth-description">
-            <h2 className="dialog-title" id="reauth-title">Confirm it’s you</h2>
-            <p className="dialog-body" id="reauth-description">
-              This security-sensitive action needs a recent identity check.
-            </p>
-            <form onSubmit={submitReauth} className="security-form-stack">
-              <div className="field field-tight">
-                <label className="field-label" htmlFor="reauth-passphrase">Passphrase</label>
-                <input id="reauth-passphrase" className="input" type="password" autoComplete="current-password"
-                  autoFocus value={reauthPassphrase} onChange={e => setReauthPassphrase(e.target.value)} disabled={reauthLoading} />
-              </div>
-              {enabled && (
-                <div className="field field-tight">
-                  <label className="field-label" htmlFor="reauth-code">Authentication or backup code</label>
-                  <input id="reauth-code" className="input" type="text" inputMode="text" autoComplete="one-time-code"
-                    value={reauthCode} onChange={e => setReauthCode(e.target.value.replace(/\s/g, "").slice(0, 32))}
-                    placeholder="000000 or XXXX-XXXX-…" disabled={reauthLoading} />
-                </div>
-              )}
-              {reauthError && <p className="form-error" role="alert">{reauthError}</p>}
-              {passkeysSupported && passkeys.length > 0 && (
-                <button type="button" className="btn btn-soft btn-center" onClick={submitPasskeyReauth} disabled={reauthLoading}>
-                  <Fingerprint size={14} /> Use Passkey
-                </button>
-              )}
-              <div className="dialog-actions">
-                <button type="button" className="btn btn-soft" onClick={cancelReauth} disabled={reauthLoading}>Cancel</button>
-                <button type="submit" className="btn btn-primary" disabled={reauthLoading || !reauthPassphrase || (enabled && !reauthCode.trim())}>
-                  {reauthLoading && <Loader2 size={14} className="spin" />} Confirm
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <FreshAuthDialog controller={freshAuth} body="This security-sensitive action needs a recent identity check." />
 
     </div>
   );

@@ -1,3 +1,5 @@
+/// <reference types="node" />
+import { X509Certificate, createPublicKey, verify } from "node:crypto";
 import { fromBase64, streamToBytes, utf8 } from "./bytes";
 
 type SnsBody = Record<string, string>;
@@ -57,59 +59,10 @@ function isAllowedSigningCertUrl(value: string, region: string): boolean {
   }
 }
 
-function pemToDer(pem: string, label: "PUBLIC KEY" | "CERTIFICATE"): Uint8Array | null {
-  const match = new RegExp(`-----BEGIN ${label}-----([\\s\\S]+?)-----END ${label}-----`).exec(pem);
-  if (!match) return null;
-  return fromBase64(match[1]!.replace(/\s+/g, ""));
-}
-
-function readLength(bytes: Uint8Array, offset: number): { length: number; offset: number } {
-  const first = bytes[offset++];
-  if (first === undefined) throw new Error("truncated der length");
-  if ((first & 0x80) === 0) return { length: first, offset };
-  const count = first & 0x7f;
-  if (count === 0 || count > 4) throw new Error("invalid der length");
-  let length = 0;
-  for (let i = 0; i < count; i++) {
-    const b = bytes[offset++];
-    if (b === undefined) throw new Error("truncated der length");
-    length = (length << 8) | b;
-  }
-  return { length, offset };
-}
-
-function readTlv(bytes: Uint8Array, offset: number): { tag: number; start: number; valueStart: number; end: number } {
-  const start = offset;
-  const tag = bytes[offset++];
-  if (tag === undefined) throw new Error("truncated der tag");
-  const len = readLength(bytes, offset);
-  const valueStart = len.offset;
-  const end = valueStart + len.length;
-  if (end > bytes.length) throw new Error("truncated der value");
-  return { tag, start, valueStart, end };
-}
-
-function extractSpkiFromCertificate(cert: Uint8Array): Uint8Array {
-  const certSeq = readTlv(cert, 0);
-  if (certSeq.tag !== 0x30) throw new Error("invalid certificate");
-  const tbs = readTlv(cert, certSeq.valueStart);
-  if (tbs.tag !== 0x30) throw new Error("invalid certificate tbs");
-
-  let offset = tbs.valueStart;
-  const first = readTlv(cert, offset);
-  if (first.tag === 0xa0) offset = first.end; // optional version
-  for (let i = 0; i < 5; i++) offset = readTlv(cert, offset).end; // serial, signature, issuer, validity, subject
-  const spki = readTlv(cert, offset);
-  if (spki.tag !== 0x30) throw new Error("missing certificate public key");
-  return cert.subarray(spki.start, spki.end);
-}
-
-function publicKeyDerFromPem(pem: string): Uint8Array {
-  const publicKey = pemToDer(pem, "PUBLIC KEY");
-  if (publicKey) return publicKey;
-  const cert = pemToDer(pem, "CERTIFICATE");
-  if (!cert) throw new Error("missing public key");
-  return extractSpkiFromCertificate(cert);
+function publicKeyFromPem(pem: string) {
+  return pem.includes("-----BEGIN CERTIFICATE-----")
+    ? new X509Certificate(pem).publicKey
+    : createPublicKey(pem);
 }
 
 export async function verifySnsMessage(
@@ -144,19 +97,12 @@ export async function verifySnsMessage(
     if (!certRes.ok) return { ok: false, error: "sns cert fetch failed" };
     if (!certRes.body) return { ok: false, error: "sns cert fetch failed" };
     const certPem = new TextDecoder().decode(await streamToBytes(certRes.body, MAX_SNS_CERT_BYTES));
-    const hash = body.SignatureVersion === "2" ? "SHA-256" : "SHA-1";
-    const key = await crypto.subtle.importKey(
-      "spki",
-      publicKeyDerFromPem(certPem),
-      { name: "RSASSA-PKCS1-v1_5", hash },
-      false,
-      ["verify"],
-    );
-    const valid = await crypto.subtle.verify(
-      "RSASSA-PKCS1-v1_5",
-      key,
-      fromBase64(signature),
+    const hash = body.SignatureVersion === "2" ? "sha256" : "sha1";
+    const valid = verify(
+      hash,
       utf8(canonicalSnsString(body)),
+      publicKeyFromPem(certPem),
+      fromBase64(signature),
     );
     return valid ? { ok: true } : { ok: false, error: "invalid sns signature" };
   } catch {

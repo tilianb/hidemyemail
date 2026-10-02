@@ -1,4 +1,7 @@
 import { Hono } from "hono";
+import { zValidator } from "@hono/zod-validator";
+import { createAliasSchema, patchAliasSchema } from "../../contracts/requests";
+import type { AliasDto } from "../../contracts/api";
 import type { AppEnv } from "../app";
 import { hashDestination, encryptDestination, decryptDestination } from "../../lib/crypto";
 import { isValidLocalPart, randomLocalPart, escapeLike } from "../../lib/alias-format";
@@ -15,7 +18,7 @@ export function aliasRoutes() {
       ? "SELECT a.*, d.domain FROM aliases a JOIN domains d ON d.id=a.domain_id WHERE a.user_id = ? AND a.full_address LIKE ? ESCAPE '\\' ORDER BY a.created_at DESC LIMIT 500"
       : "SELECT a.*, d.domain FROM aliases a JOIN domains d ON d.id=a.domain_id WHERE a.user_id = ? ORDER BY a.created_at DESC LIMIT 500";
     const stmt = query ? c.env.DB.prepare(sql).bind(userId, `%${escapeLike(query)}%`) : c.env.DB.prepare(sql).bind(userId);
-    const rows = await stmt.all<any>();
+    const rows = await stmt.all<AliasDto>();
     
     const results = [];
     for (const row of rows.results ?? []) {
@@ -27,9 +30,11 @@ export function aliasRoutes() {
     return c.json(results);
   });
 
-  r.post("/aliases", async (c) => {
+  r.post("/aliases", zValidator("json", createAliasSchema, (result, c) => {
+    if (!result.success) return c.json({ error: "Invalid alias payload" }, 400);
+  }), async (c) => {
     const userId = c.get("userId");
-    const b = await c.req.json<{ domain_id: number; local_part: string; destination?: string; label?: string }>();
+    const b = c.req.valid("json");
     const dom = await c.env.DB.prepare("SELECT domain, is_global, user_id, allow_custom_aliases, active, verified_at FROM domains WHERE id=?").bind(b.domain_id).first<{ domain: string, is_global: number, user_id: number, allow_custom_aliases: number, active: number, verified_at: number | null }>();
     if (!dom) return c.json({ error: "Unknown domain" }, 400);
     
@@ -97,10 +102,12 @@ export function aliasRoutes() {
     }
   });
 
-  r.patch("/aliases/:id", async (c) => {
+  r.patch("/aliases/:id", zValidator("json", patchAliasSchema, (result, c) => {
+    if (!result.success) return c.json({ error: "Invalid alias payload" }, 400);
+  }), async (c) => {
     const userId = c.get("userId");
     const id = Number(c.req.param("id"));
-    const b = await c.req.json<{ active?: number; destination?: string | null; label?: string | null }>();
+    const b = c.req.valid("json");
     
     if (b.destination) {
       const emailHash = await hashDestination(b.destination.toLowerCase(), c.env.DESTINATION_ENCRYPTION_KEY);

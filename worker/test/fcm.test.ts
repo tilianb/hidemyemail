@@ -10,7 +10,7 @@ beforeEach(async () => { await resetDb(DB()); __clearAccessTokenCache(); });
 
 // A real RSA key so the assertion-JWT path (import + RS256 sign) is exercised
 // end to end, wrapped in a service-account JSON shaped like Google's.
-async function makeServiceAccount(): Promise<string> {
+async function makeServiceAccount(): Promise<{ json: string; publicKey: CryptoKey }> {
   const pair = await crypto.subtle.generateKey(
     { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
     true, ["sign", "verify"],
@@ -20,12 +20,12 @@ async function makeServiceAccount(): Promise<string> {
   for (const b of pkcs8) bin += String.fromCharCode(b);
   const b64 = btoa(bin);
   const pem = `-----BEGIN PRIVATE KEY-----\n${b64.match(/.{1,64}/g)!.join("\n")}\n-----END PRIVATE KEY-----\n`;
-  return JSON.stringify({
+  return { json: JSON.stringify({
     project_id: "demo-project",
     client_email: "sa@demo-project.iam.gserviceaccount.com",
     private_key: pem,
     token_uri: "https://oauth2.googleapis.com/token",
-  });
+  }), publicKey: pair.publicKey };
 }
 
 // A long, mixed-case, URL-safe token like FCM actually issues.
@@ -48,7 +48,7 @@ function fcmFetch(sendBehaviour: (token: string) => Response): typeof fetch {
 async function fcmEnv(sendBehaviour: (token: string) => Response, extra: Record<string, unknown> = {}) {
   return {
     ...env,
-    FCM_SERVICE_ACCOUNT: await makeServiceAccount(),
+    FCM_SERVICE_ACCOUNT: (await makeServiceAccount()).json,
     // Clear APNs so these tests exercise only the FCM transport.
     APNS_AUTH_KEY: "", APNS_KEY_ID: "", APNS_TEAM_ID: "", APNS_BUNDLE_ID: "", APPLE_APP_ID: "",
     __fcmFetch: fcmFetch(sendBehaviour),
@@ -58,7 +58,7 @@ async function fcmEnv(sendBehaviour: (token: string) => Response, extra: Record<
 
 test("fcmConfig is null when unset and parses a service account when present", async () => {
   expect(fcmConfig({} as any)).toBeNull();
-  const cfg = fcmConfig({ FCM_SERVICE_ACCOUNT: await makeServiceAccount() } as any);
+  const cfg = fcmConfig({ FCM_SERVICE_ACCOUNT: (await makeServiceAccount()).json } as any);
   expect(cfg?.projectId).toBe("demo-project");
   expect(cfg?.clientEmail).toBe("sa@demo-project.iam.gserviceaccount.com");
 });
@@ -70,7 +70,7 @@ test("isValidFcmToken accepts realistic tokens and rejects junk", () => {
 });
 
 test("sendFcm marks 404 / UNREGISTERED as dead and keeps others", async () => {
-  const cfg = fcmConfig({ FCM_SERVICE_ACCOUNT: await makeServiceAccount() } as any) as FcmConfig;
+  const cfg = fcmConfig({ FCM_SERVICE_ACCOUNT: (await makeServiceAccount()).json } as any) as FcmConfig;
   const token = await getAccessToken(cfg, 1_000, fcmFetch(() => new Response("", { status: 200 })));
 
   const ok = await sendFcm(cfg, token, FCM_TOKEN, { title: "t", body: "b" },
@@ -84,6 +84,32 @@ test("sendFcm marks 404 / UNREGISTERED as dead and keeps others", async () => {
   const quota = await sendFcm(cfg, token, FCM_TOKEN, { title: "t", body: "b" },
     fcmFetch(() => new Response(JSON.stringify({ error: { status: "QUOTA_EXCEEDED" } }), { status: 429 })));
   expect(quota).toMatchObject({ ok: false, dead: false });
+});
+
+test("OAuth assertion has the expected claims and a valid RS256 signature", async () => {
+  const serviceAccount = await makeServiceAccount();
+  const cfg = fcmConfig({ FCM_SERVICE_ACCOUNT: serviceAccount.json } as any) as FcmConfig;
+  let assertion = "";
+  await getAccessToken(cfg, 1_234_567, (async (_url: string, init?: RequestInit) => {
+    assertion = new URLSearchParams(String(init?.body)).get("assertion") ?? "";
+    return new Response(JSON.stringify({ access_token: "token" }), { status: 200 });
+  }) as unknown as typeof fetch);
+  const [encodedHeader, encodedClaims, encodedSignature] = assertion.split(".");
+  const fromBase64url = (value: string) => Uint8Array.from(atob(value.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+  const decode = (value: string) => JSON.parse(new TextDecoder().decode(fromBase64url(value)));
+  expect(decode(encodedHeader!)).toEqual({ alg: "RS256", typ: "JWT" });
+  expect(decode(encodedClaims!)).toEqual({
+    iss: cfg.clientEmail,
+    scope: "https://www.googleapis.com/auth/firebase.messaging",
+    aud: cfg.tokenUri,
+    iat: 1_234_567,
+    exp: 1_238_167,
+  });
+  expect(await crypto.subtle.verify(
+    "RSASSA-PKCS1-v1_5", serviceAccount.publicKey,
+    fromBase64url(encodedSignature!),
+    new TextEncoder().encode(`${encodedHeader}.${encodedClaims}`),
+  )).toBe(true);
 });
 
 test("pushToUser routes android devices to FCM and prunes a 404", async () => {

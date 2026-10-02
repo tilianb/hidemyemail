@@ -14,6 +14,24 @@ All notable changes to this project are documented here. The format follows
 - Added documented SMTP recipes for Resend, Mailchimp Transactional, SendGrid,
   Mailgun, and arbitrary standards-compliant relays.
 
+### Changed
+
+- Consolidated dashboard fresh-auth prompts and added accessible keyboard/focus
+  handling to shared dialogs while keeping the existing appearance.
+- Separated system-settings and forwarding-preference editors and added
+  account-scoped alias query caching with no automatic mutation retries.
+- Centralized settings metadata and shared API contracts; validate settings,
+  alias, and destination JSON payloads before running business logic.
+- Replaced custom SNS certificate parsing and push-provider JWT assembly with
+  native crypto and `jose`, retaining existing authentication formats.
+
+### Fixed
+
+- Keep mail settings and admin dropdowns readable on narrow screens, with
+  visible SMTP field labels and wrapping credential-name forms.
+- Allow SMTP-only Docker startup without SES credentials and route private
+  SMTP configuration requests to the Worker rather than static assets.
+
 ### Security
 
 - Strip supplier control headers from forwarded MIME and require authenticated,

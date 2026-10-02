@@ -4,6 +4,13 @@ HideMyEmail exposes an [addy.io](https://addy.io/api-documentation/)-compatible
 API under `/api/v1` so tools that already speak the addy.io dialect work
 unmodified — most usefully **Bitwarden's username generator**.
 
+The separate dashboard/native `/api` surface uses session authentication.
+Its alias create/update, destination create, and admin settings endpoints
+validate JSON shapes at runtime and reject incorrectly typed payloads with
+HTTP 400. Alias updates still distinguish omitted fields (unchanged) from
+`null` labels/destinations (clear or resolve the default as applicable).
+This does not change `/api/v1` authentication or its response format.
+
 ## Authentication
 
 Create an API key in **Settings → API Keys** (shown once — store it in your

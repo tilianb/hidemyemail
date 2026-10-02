@@ -2,6 +2,16 @@
 
 ## What Has Worked
 
+**2026-10-02 — Dashboard field readability**
+- Observation: The shared 160px settings-input rule clipped SMTP placeholders and policy dropdowns, while SMTP's inline 360px minimum overflowed mobile cards. Security naming forms also shrank inputs between action buttons.
+- Action: Give compound settings responsive full-width fields with persistent labels; wrap naming actions and measure the longest dropdown option at mobile, tablet, and desktop widths.
+- Confidence: high
+
+**2026-10-01 — SMTP-only host startup**
+- Observation: The Docker host passed undefined SES bindings to Miniflare in SMTP-only mode, and its static-assets routing intercepted internal SMTP configuration requests before the Worker ran.
+- Action: Exercise actual host startup without SES credentials; keep internal dispatch paths Worker-first while blocking them at the public HTTP listener.
+- Confidence: high
+
 **2026-09-06 — Open-shadow autofill integration**
 - Observation: Document hit-testing reports a shadow input's host, whose rectangle was incorrectly classified as a competing overlay. Document subtree observers also miss label changes within shadow roots.
 - Action: Exclude the target's shadow-host ancestor chain from overlay collisions and observe that chain's roots while the target is active. Verify with rendered web-component fields, not only mocked focus paths.
@@ -67,6 +77,11 @@
 **2026-10-06 — GitHub Actions runner cost**
 - Observation: Namespace runner usage costs more than the performance benefit for this public repository, including Android, CodeQL, Docker, iOS, and release jobs.
 - Action: Use GitHub-hosted Linux, ARM64, and macOS runners for every workflow; keep the Docker platform matrix native by pairing `ubuntu-latest` with `ubuntu-24.04-arm`.
+- Confidence: high
+
+**2026-10-01 — Dashboard settings editor ownership**
+- Observation: Rebuilding admin setting drafts whenever the parent reloads all control-room data can erase unsaved edits and couples unrelated domain/user refreshes to the editor lifecycle.
+- Action: Keep the system-settings draft and reload flow inside its mounted feature section; notify the parent only after a successful save so domain/DNS-derived views receive committed values.
 - Confidence: high
 
 **2026-09-30 — Docker mail transport boundaries**
