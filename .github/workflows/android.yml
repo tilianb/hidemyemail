@@ -23,7 +23,7 @@ concurrency:
 jobs:
   build:
     name: Build & Lint (Debug)
-    runs-on: namespace-profile-github-4x8
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: android
