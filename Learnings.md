@@ -2,6 +2,11 @@
 
 ## What Has Worked
 
+**2026-10-02 — Dashboard field readability**
+- Observation: The shared 160px settings-input rule clipped SMTP placeholders and policy dropdowns, while SMTP's inline 360px minimum overflowed mobile cards. Security naming forms also shrank inputs between action buttons.
+- Action: Give compound settings responsive full-width fields with persistent labels; wrap naming actions and measure the longest dropdown option at mobile, tablet, and desktop widths.
+- Confidence: high
+
 **2026-09-06 — Open-shadow autofill integration**
 - Observation: Document hit-testing reports a shadow input's host, whose rectangle was incorrectly classified as a competing overlay. Document subtree observers also miss label changes within shadow roots.
 - Action: Exclude the target's shadow-host ancestor chain from overlay collisions and observe that chain's roots while the target is active. Verify with rendered web-component fields, not only mocked focus paths.
@@ -62,6 +67,11 @@
 **2026-09-30 — Docker mail transport boundaries**
 - Observation: Miniflare service bindings can target a Node fetch handler, allowing raw-MIME SMTP submission without a public arbitrary-send endpoint; inbound SMTP still needs a trusted public MTA because Workers cannot listen for TCP.
 - Action: Keep inbound and outbound configuration independent, resolve explicit D1 overrides before environment defaults, and preserve uncertain-acceptance send fences across retries.
+- Confidence: high
+
+**2026-09-28 — Maintenance release preparation**
+- Observation: The release validator requires synchronized versions across Worker, dashboard, extension, Android, and iOS, plus an Android version code greater than the previous stable tag.
+- Action: Update every validator-owned version surface together, open the short-lived branch directly against `main`, and run `validate-release.mjs` before creating the release tag. Keep CI, Dependabot, docs links, and publication workflows aligned to `main`; do not maintain a `dev` synchronization job.
 - Confidence: high
 
 **2026-09-26 — Dependency security updates**

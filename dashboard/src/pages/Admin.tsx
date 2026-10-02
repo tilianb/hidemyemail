@@ -944,22 +944,22 @@ export function Admin() {
                   <label htmlFor="setting-mail-provider" className="setting-label">Outbound mail transport</label>
                   <div className="setting-desc">SES remains the default. Custom SMTP runs only in Docker through a private service binding.</div>
                 </div>
-                <div className="setting-control" style={{ display: "grid", gap: 8, minWidth: 360 }}>
+                <div className="setting-control mail-settings-control">
                   <select id="setting-mail-provider" className="input" value={editedSettings.mail_outbound_provider || "ses"} onChange={e => setEditedSettings({...editedSettings, mail_outbound_provider: e.target.value})}>
                     <option value="ses">AWS SES</option><option value="smtp">Custom SMTP</option>
                   </select>
                   <div className="setting-desc">Source: {settingsData.mail_outbound_provider?.source ?? "default"}. Saved SMTP changes become active after Docker restarts.</div>
                   {editedSettings.mail_outbound_provider === "smtp" && <>
-                    <input className="input input-mono" aria-label="SMTP outbound host" placeholder="smtp.example.com" value={editedSettings.smtp_outbound_host || ""} onChange={e => setEditedSettings({...editedSettings, smtp_outbound_host: e.target.value})} />
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <input className="input" aria-label="SMTP outbound port" inputMode="numeric" placeholder="587" value={editedSettings.smtp_outbound_port || ""} onChange={e => setEditedSettings({...editedSettings, smtp_outbound_port: e.target.value.replace(/\D/g, "")})} />
-                      <select className="input" aria-label="SMTP outbound TLS mode" value={editedSettings.smtp_outbound_tls || "starttls"} onChange={e => setEditedSettings({...editedSettings, smtp_outbound_tls: e.target.value})}>
+                    <label className="mail-field"><span className="setting-label">SMTP host</span><input className="input input-mono" aria-label="SMTP outbound host" placeholder="smtp.example.com" value={editedSettings.smtp_outbound_host || ""} onChange={e => setEditedSettings({...editedSettings, smtp_outbound_host: e.target.value})} /></label>
+                    <div className="mail-connection-row">
+                      <label className="mail-field"><span className="setting-label">Port</span><input className="input" aria-label="SMTP outbound port" inputMode="numeric" placeholder="587" value={editedSettings.smtp_outbound_port || ""} onChange={e => setEditedSettings({...editedSettings, smtp_outbound_port: e.target.value.replace(/\D/g, "")})} /></label>
+                      <label className="mail-field"><span className="setting-label">Connection security</span><select className="input" aria-label="SMTP outbound TLS mode" value={editedSettings.smtp_outbound_tls || "starttls"} onChange={e => setEditedSettings({...editedSettings, smtp_outbound_tls: e.target.value})}>
                         <option value="starttls">Required STARTTLS</option><option value="implicit">Implicit TLS</option><option value="trusted-cleartext">Trusted port-25 relay</option>
-                      </select>
+                      </select></label>
                     </div>
-                    <input className="input input-mono" aria-label="SMTP outbound username" autoComplete="off" placeholder="Username (write-only)" value={editedSettings.smtp_outbound_username || ""} onChange={e => setEditedSettings({...editedSettings, smtp_outbound_username: e.target.value})} />
-                    <input className="input" aria-label="SMTP outbound password" type="password" autoComplete="new-password" placeholder="Password (leave unchanged to preserve)" value={editedSettings.smtp_outbound_password || ""} onChange={e => setEditedSettings({...editedSettings, smtp_outbound_password: e.target.value})} />
-                    <div style={{ display: "flex", gap: 8 }}><button type="button" className="btn btn-outline btn-sm" onClick={() => setEditedSettings({...editedSettings, smtp_outbound_username: "", smtp_outbound_password: ""})}>Remove credentials</button><button type="button" className="btn btn-outline btn-sm" onClick={() => resetMailSettings(["mail_outbound_provider", "smtp_outbound_host", "smtp_outbound_port", "smtp_outbound_tls", "smtp_outbound_username", "smtp_outbound_password"])}>Use environment</button></div>
+                    <label className="mail-field"><span className="setting-label">Username (write-only)</span><input className="input input-mono" aria-label="SMTP outbound username" autoComplete="off" value={editedSettings.smtp_outbound_username || ""} onChange={e => setEditedSettings({...editedSettings, smtp_outbound_username: e.target.value})} /></label>
+                    <label className="mail-field"><span className="setting-label">Password</span><input className="input" aria-label="SMTP outbound password" type="password" autoComplete="new-password" value={editedSettings.smtp_outbound_password || ""} onChange={e => setEditedSettings({...editedSettings, smtp_outbound_password: e.target.value})} /><span className="setting-desc">Leave unchanged to preserve the saved password.</span></label>
+                    <div className="mail-settings-actions"><button type="button" className="btn btn-outline btn-sm" onClick={() => setEditedSettings({...editedSettings, smtp_outbound_username: "", smtp_outbound_password: ""})}>Remove credentials</button><button type="button" className="btn btn-outline btn-sm" onClick={() => resetMailSettings(["mail_outbound_provider", "smtp_outbound_host", "smtp_outbound_port", "smtp_outbound_tls", "smtp_outbound_username", "smtp_outbound_password"])}>Use environment</button></div>
                     <div className="setting-desc">Verified certificates stay mandatory. Disable provider click/open tracking in the supplier dashboard for privacy.</div>
                   </>}
                 </div>
@@ -970,20 +970,20 @@ export function Admin() {
                   <div className="setting-label">SMTP receiving</div>
                   <div className="setting-desc">Receive-only Docker listener for a trusted scanning MTA. This does not poll an IMAP/POP mailbox. Changes activate after restart.</div>
                 </div>
-                <div className="setting-control" style={{ display: "grid", gap: 8, minWidth: 360 }}>
+                <div className="setting-control mail-settings-control">
                   <label className="domain-toggle"><span>Enabled after restart</span><div className="switch"><input type="checkbox" checked={editedSettings.smtp_inbound_enabled === "true"} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_enabled: e.target.checked ? "true" : "false"})} /><span className="switch-track"></span></div></label>
                   <div className="setting-desc">Source: {settingsData.smtp_inbound_enabled?.source ?? "default"}. Configured state may differ from the active listener until restart.</div>
                   {editedSettings.smtp_inbound_enabled === "true" && <>
-                    <input className="input input-mono" aria-label="SMTP inbound bind address" placeholder="127.0.0.1" value={editedSettings.smtp_inbound_host || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_host: e.target.value})} />
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <input className="input" aria-label="SMTP inbound port" inputMode="numeric" placeholder="2525" value={editedSettings.smtp_inbound_port || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_port: e.target.value.replace(/\D/g, "")})} />
-                      <select className="input" aria-label="SMTP inbound TLS mode" value={editedSettings.smtp_inbound_tls || "starttls"} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_tls: e.target.value})}><option value="starttls">Required STARTTLS</option><option value="implicit">Implicit TLS</option></select>
+                    <label className="mail-field"><span className="setting-label">Bind address</span><input className="input input-mono" aria-label="SMTP inbound bind address" placeholder="127.0.0.1" value={editedSettings.smtp_inbound_host || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_host: e.target.value})} /></label>
+                    <div className="mail-connection-row">
+                      <label className="mail-field"><span className="setting-label">Port</span><input className="input" aria-label="SMTP inbound port" inputMode="numeric" placeholder="2525" value={editedSettings.smtp_inbound_port || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_port: e.target.value.replace(/\D/g, "")})} /></label>
+                      <label className="mail-field"><span className="setting-label">Connection security</span><select className="input" aria-label="SMTP inbound TLS mode" value={editedSettings.smtp_inbound_tls || "starttls"} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_tls: e.target.value})}><option value="starttls">Required STARTTLS</option><option value="implicit">Implicit TLS</option></select></label>
                     </div>
-                    <input className="input input-mono" aria-label="SMTP inbound gateway ID" placeholder="Gateway ID, e.g. stalwart-1" value={editedSettings.smtp_inbound_gateway_id || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_gateway_id: e.target.value})} />
-                    <input className="input input-mono" aria-label="SMTP inbound trusted peers" placeholder="Exact peer IPs, comma-separated" value={editedSettings.smtp_inbound_trusted_peers || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_trusted_peers: e.target.value})} />
-                    <input className="input input-mono" aria-label="SMTP inbound username" autoComplete="off" placeholder="Listener username (write-only)" value={editedSettings.smtp_inbound_username || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_username: e.target.value})} />
-                    <input className="input" aria-label="SMTP inbound password" type="password" autoComplete="new-password" placeholder="Listener password (leave unchanged to preserve)" value={editedSettings.smtp_inbound_password || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_password: e.target.value})} />
-                    <div style={{ display: "flex", gap: 8 }}><button type="button" className="btn btn-outline btn-sm" onClick={() => setEditedSettings({...editedSettings, smtp_inbound_username: "", smtp_inbound_password: ""})}>Remove credentials</button><button type="button" className="btn btn-outline btn-sm" onClick={() => resetMailSettings(["smtp_inbound_enabled", "smtp_inbound_host", "smtp_inbound_port", "smtp_inbound_tls", "smtp_inbound_username", "smtp_inbound_password", "smtp_inbound_gateway_id", "smtp_inbound_trusted_peers", "smtp_inbound_max_bytes"])}>Use environment</button></div>
+                    <label className="mail-field"><span className="setting-label">Gateway ID</span><input className="input input-mono" aria-label="SMTP inbound gateway ID" placeholder="stalwart-1" value={editedSettings.smtp_inbound_gateway_id || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_gateway_id: e.target.value})} /></label>
+                    <label className="mail-field"><span className="setting-label">Trusted peer IPs</span><input className="input input-mono" aria-label="SMTP inbound trusted peers" placeholder="127.0.0.1, ::1" value={editedSettings.smtp_inbound_trusted_peers || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_trusted_peers: e.target.value})} /><span className="setting-desc">Exact IP addresses, separated by commas.</span></label>
+                    <label className="mail-field"><span className="setting-label">Listener username (write-only)</span><input className="input input-mono" aria-label="SMTP inbound username" autoComplete="off" value={editedSettings.smtp_inbound_username || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_username: e.target.value})} /></label>
+                    <label className="mail-field"><span className="setting-label">Listener password</span><input className="input" aria-label="SMTP inbound password" type="password" autoComplete="new-password" value={editedSettings.smtp_inbound_password || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_password: e.target.value})} /><span className="setting-desc">Leave unchanged to preserve the saved password.</span></label>
+                    <div className="mail-settings-actions"><button type="button" className="btn btn-outline btn-sm" onClick={() => setEditedSettings({...editedSettings, smtp_inbound_username: "", smtp_inbound_password: ""})}>Remove credentials</button><button type="button" className="btn btn-outline btn-sm" onClick={() => resetMailSettings(["smtp_inbound_enabled", "smtp_inbound_host", "smtp_inbound_port", "smtp_inbound_tls", "smtp_inbound_username", "smtp_inbound_password", "smtp_inbound_gateway_id", "smtp_inbound_trusted_peers", "smtp_inbound_max_bytes"])}>Use environment</button></div>
                     <div className="setting-desc">Certificate and key paths remain deployment-managed environment values. Non-loopback listeners refuse startup without them.</div>
                   </>}
                 </div>
@@ -1276,7 +1276,7 @@ export function Admin() {
                   <div className="setting-desc">
                     When to add the one-click unsubscribe header (disables the alias) to forwards.
                     Adding it to personal mail makes forwards look like bulk mail to spam filters;
-                    {" "}<strong>Bulk mail only</strong> adds it only when the original message already carried one.
+                    {" "}the recommended <strong>Bulk mail only</strong> option adds it only when the original message already carried one.
                   </div>
                 </div>
                 <div className="setting-control" style={{ minWidth: 160 }}>
@@ -1286,7 +1286,7 @@ export function Admin() {
                     value={editedSettings.unsubscribe_header_mode || "bulk_only"}
                     onChange={e => setEditedSettings({...editedSettings, unsubscribe_header_mode: e.target.value})}
                   >
-                    <option value="bulk_only">Bulk mail only (recommended)</option>
+                    <option value="bulk_only">Bulk mail only</option>
                     <option value="always">Every forward</option>
                     <option value="never">Never</option>
                   </select>

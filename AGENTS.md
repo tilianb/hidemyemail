@@ -108,11 +108,13 @@ CI: `.github/workflows/docs.yml` builds and deploys to GitHub Pages on push to
 
 ## Conventions
 
-- **Branches:** work lands on `dev` via feature branches; `main` is release.
-  PRs to `dev` unless told otherwise. Never merge a PR before CI is green.
+- **Branches:** use short-lived branches based on current `main` and open PRs
+  directly to `main`. Keep `main` releasable; do not push commits to it or merge
+  a PR before CI is green. Use another base branch only when the task explicitly
+  requires one. CI also checks PRs to `dev` for explicitly requested integration.
 - **Commits:** conventional commits (`feat(worker): …`, `fix(email): …`).
   Bodies explain *why*. No AI co-author trailers.
-- **Releases:** release PRs merge `dev` into `main`; patch releases must not
+- **Releases:** tag only validated commits on `main`; patch releases must not
   contain new features. Before tagging, update `CHANGELOG.md`, Worker and
   dashboard package versions and lockfiles, Android `versionName` /
   monotonically increasing `versionCode`, and the iOS baseline versions in
