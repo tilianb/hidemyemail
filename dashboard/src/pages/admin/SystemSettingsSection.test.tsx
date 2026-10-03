@@ -54,6 +54,25 @@ describe("system settings editor", () => {
     expect(mockedApi.adminUpdateSettings).toHaveBeenCalledWith(expect.objectContaining({ smtp_outbound_password: null }));
   });
 
+  it("discards drafts without changing saved mail configuration", async () => {
+    const user = await open();
+    const host = screen.getByLabelText("SMTP outbound host");
+    await user.clear(host); await user.type(host, "draft.example.net");
+    await user.clear(screen.getByLabelText("Max Inbound Email Size"));
+    await user.type(screen.getByLabelText("Max Inbound Email Size"), "12");
+    await user.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(host).toHaveValue("smtp.example.com");
+    expect(screen.getByLabelText("Max Inbound Email Size")).toHaveValue("25");
+    expect(screen.getByRole("button", { name: "Save Changes" })).toBeDisabled();
+    expect(mockedApi.adminUpdateSettings).not.toHaveBeenCalled();
+  });
+
+  it("does not send test mail with unsaved transport changes", async () => {
+    const user = await open();
+    await user.type(screen.getByLabelText("SMTP outbound host"), ".draft");
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+  });
+
   it("attempts save before requesting fresh auth, then retries once", async () => {
     mockedApi.adminUpdateSettings.mockRejectedValueOnce(new FreshAuthRequiredError()).mockResolvedValueOnce({ ok: true, updated: 1, reset: 0, restart_required: false });
     mockedApi.profile.mockResolvedValue({ id: 1 } as never);

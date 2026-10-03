@@ -32,6 +32,8 @@ export const SETTING_DEFINITIONS = {
   ses_region: mail({ default: "", env: "SES_REGION" }),
   ses_access_key_id: mail({ default: "", env: "SES_ACCESS_KEY_ID", masked: true }),
   ses_secret_access_key: mail({ default: "", env: "SES_SECRET_ACCESS_KEY", encrypted: true, masked: true }),
+  inbound_mx_host: mail({ default: "", env: "INBOUND_MX_HOST", validate: dnsHost }),
+  outbound_spf_include: mail({ default: "", env: "OUTBOUND_SPF_INCLUDE", validate: dnsHost }),
   mail_outbound_provider: mail({ default: "", env: "MAIL_OUTBOUND_PROVIDER", validate: oneOf(["", "ses", "smtp"], "must be ses or smtp") }),
   smtp_outbound_host: mail({ default: "", env: "SMTP_OUTBOUND_HOST", validate: noLineBreaks }),
   smtp_outbound_port: mail({ default: "", env: "SMTP_OUTBOUND_PORT", validate: port }),
@@ -70,6 +72,13 @@ export const SETTING_DEFINITIONS = {
 
 function noLineBreaks(value: string): string | null {
   return /[\r\n]/.test(value) ? "must not contain line breaks" : null;
+}
+function dnsHost(value: string): string | null {
+  if (value === "") return null;
+  if (value.length > 253 || value !== value.toLowerCase()) return "must be a canonical DNS host name";
+  const labels = value.split(".");
+  return labels.length >= 2 && labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))
+    ? null : "must be a canonical DNS host name";
 }
 function port(value: string): string | null {
   if (value === "") return null;

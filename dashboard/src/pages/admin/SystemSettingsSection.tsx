@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Send, Settings } from "lucide-react";
 import { api, type Domain } from "../../api";
 import { FreshAuthDialog, useFreshAuth } from "../../security/FreshAuth";
@@ -39,6 +39,18 @@ export function SystemSettingsSection({ initialSettings, globalDomains, onSaved 
   const selectableMainGlobalDomains = globalDomains.filter(domain => domain.active === 1 && domain.verified_at !== null);
   const isSettingsDirty = Object.keys(editedSettings).some(key => settingsData[key]?.value !== editedSettings[key]);
 
+  useEffect(() => {
+    if (!isSettingsDirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [isSettingsDirty]);
+
+  function discardChanges() {
+    setEditedSettings(valuesOf(settingsData));
+    setInboundBytesInput(settingsData.max_inbound_bytes?.value ? (parseInt(settingsData.max_inbound_bytes.value, 10) / 1024 / 1024).toString() : "");
+  }
+
   async function reload() {
     const response = await api.adminSettings();
     setSettingsData(response.settings);
@@ -61,6 +73,11 @@ export function SystemSettingsSection({ initialSettings, globalDomains, onSaved 
     finally { setSavingSettings(false); }
   }
   async function resetMailSettings(keys: string[]) {
+    if (isSettingsDirty || savingSettings) {
+      toast("Save or discard your changes before restoring environment settings", "error");
+      return;
+    }
+    setSavingSettings(true);
     try {
       const reset = Object.fromEntries(keys.map(key => [key, null]));
       const result = await freshGuard(() => api.adminUpdateSettings(reset), () => resetMailSettings(keys));
@@ -68,6 +85,7 @@ export function SystemSettingsSection({ initialSettings, globalDomains, onSaved 
       toast("Environment/default mail settings restored. Restart Docker to activate them.", "success");
       await reload();
     } catch (err: any) { toast(err.message || "Failed to reset mail settings", "error"); }
+    finally { setSavingSettings(false); }
   }
   async function sendTestEmail(event: React.FormEvent) {
     event.preventDefault(); setSendingTestEmail(true);
@@ -86,17 +104,23 @@ export function SystemSettingsSection({ initialSettings, globalDomains, onSaved 
               </span>
               <p className="admin-section-subtitle">Runtime policy, rate limits, registration, and relay behavior.</p>
             </div>
-            <button className="admin-panel-toggle" type="button" onClick={(e) => { e.stopPropagation(); setShowSettings(!showSettings); }}>
+            <button className="admin-panel-toggle" type="button" aria-expanded={showSettings} aria-controls="admin-settings-body" onClick={(e) => { e.stopPropagation(); setShowSettings(!showSettings); }}>
               {showSettings ? "Hide" : "Show"}
             </button>
           </div>
           {showSettings && (
-          <div className="card-body">
-            <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 24 }}>
-              These settings are stored in the database and can be modified at runtime without redeploying the worker.
+          <div className="card-body" id="admin-settings-body">
+            <p className="admin-settings-intro">
+              Set instance-wide defaults here. Save changes before testing mail. SMTP listener and transport changes require a Docker restart.
             </p>
+            <nav className="admin-jump-nav" aria-label="Settings sections">
+              {[["mail", "Mail transport"], ["limits", "Limits"], ["defaults", "Account defaults"], ["privacy", "Filtering & privacy"], ["diagnostics", "Test mail & AWS"]].map(([id, label]) =>
+                <button key={id} type="button" className="btn btn-outline btn-sm" onClick={() => { const heading = document.getElementById(`admin-setting-${id}`); heading?.scrollIntoView({ block: "start" }); heading?.focus({ preventScroll: true }); }}>{label}</button>
+              )}
+            </nav>
 
             <div className="settings-grid" style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+              <h2 className="admin-settings-heading" id="admin-setting-mail" tabIndex={-1}>Mail transport</h2>
               <div className="setting-row" style={{ alignItems: "flex-start" }}>
                 <div className="setting-info">
                   <label htmlFor="setting-mail-provider" className="setting-label">Outbound mail transport</label>
@@ -138,7 +162,8 @@ export function SystemSettingsSection({ initialSettings, globalDomains, onSaved 
                       <label className="mail-field"><span className="setting-label">Connection security</span><select className="input" aria-label="SMTP inbound TLS mode" value={editedSettings.smtp_inbound_tls || "starttls"} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_tls: e.target.value})}><option value="starttls">Required STARTTLS</option><option value="implicit">Implicit TLS</option></select></label>
                     </div>
                     <label className="mail-field"><span className="setting-label">Gateway ID</span><input className="input input-mono" aria-label="SMTP inbound gateway ID" placeholder="stalwart-1" value={editedSettings.smtp_inbound_gateway_id || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_gateway_id: e.target.value})} /></label>
-                    <label className="mail-field"><span className="setting-label">Trusted peer IPs</span><input className="input input-mono" aria-label="SMTP inbound trusted peers" placeholder="127.0.0.1, ::1" value={editedSettings.smtp_inbound_trusted_peers || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_trusted_peers: e.target.value})} /><span className="setting-desc">Exact IP addresses, separated by commas.</span></label>
+                    <label className="mail-field"><span className="setting-label">Trusted peer IPs</span><input className="input input-mono" aria-label="SMTP inbound trusted peers" placeholder="127.0.0.1, ::1" value={editedSettings.smtp_inbound_trusted_peers || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_trusted_peers: e.target.value})} /><span className="setting-desc">Exact IP addresses, separated by commas. Empty allows any peer with valid listener credentials.</span></label>
+                    <label className="mail-field"><span className="setting-label">Listener size limit (bytes)</span><input className="input input-mono" aria-label="SMTP inbound size limit" inputMode="numeric" placeholder="26214400" value={editedSettings.smtp_inbound_max_bytes || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_max_bytes: e.target.value.replace(/\D/g, "")})} /><span className="setting-desc">Empty uses 25 MiB. The instance-wide inbound size limit below also applies.</span></label>
                     <label className="mail-field"><span className="setting-label">Listener username (write-only)</span><input className="input input-mono" aria-label="SMTP inbound username" autoComplete="off" value={editedSettings.smtp_inbound_username || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_username: e.target.value})} /></label>
                     <label className="mail-field"><span className="setting-label">Listener password</span><input className="input" aria-label="SMTP inbound password" type="password" autoComplete="new-password" value={editedSettings.smtp_inbound_password || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_password: e.target.value})} /><span className="setting-desc">Leave unchanged to preserve the saved password.</span></label>
                     <div className="mail-settings-actions"><button type="button" className="btn btn-outline btn-sm" onClick={() => setEditedSettings({...editedSettings, smtp_inbound_username: "", smtp_inbound_password: ""})}>Remove credentials</button><button type="button" className="btn btn-outline btn-sm" onClick={() => resetMailSettings(["smtp_inbound_enabled", "smtp_inbound_host", "smtp_inbound_port", "smtp_inbound_tls", "smtp_inbound_username", "smtp_inbound_password", "smtp_inbound_gateway_id", "smtp_inbound_trusted_peers", "smtp_inbound_max_bytes"])}>Use environment</button></div>
@@ -147,6 +172,19 @@ export function SystemSettingsSection({ initialSettings, globalDomains, onSaved 
                 </div>
               </div>
 
+              <div className="setting-row">
+                <div className="setting-info">
+                  <div className="setting-label">Provider DNS targets</div>
+                  <div className="setting-desc">Use your public scanning gateway for MX and the outbound supplier’s SPF include. Configure DKIM with your supplier. Empty values keep SES defaults.</div>
+                </div>
+                <div className="setting-control mail-settings-control">
+                  <label className="mail-field"><span className="setting-label">Inbound MX hostname</span><input className="input input-mono" aria-label="Inbound MX hostname" placeholder="mx.example.com" value={editedSettings.inbound_mx_host || ""} onChange={e => setEditedSettings({...editedSettings, inbound_mx_host: e.target.value.toLowerCase()})} /></label>
+                  <label className="mail-field"><span className="setting-label">Outbound SPF include hostname</span><input className="input input-mono" aria-label="Outbound SPF include hostname" placeholder="amazonses.com" value={editedSettings.outbound_spf_include || ""} onChange={e => setEditedSettings({...editedSettings, outbound_spf_include: e.target.value.toLowerCase()})} /></label>
+                  <button type="button" className="btn btn-outline btn-sm" disabled={isSettingsDirty || savingSettings} onClick={() => resetMailSettings(["inbound_mx_host", "outbound_spf_include"])}>Use environment</button>
+                </div>
+              </div>
+
+              <h2 className="admin-settings-heading" id="admin-setting-limits" tabIndex={-1}>Limits & quotas</h2>
               <div className="setting-row">
                 <div className="setting-info">
                   <label htmlFor="setting-rate-global" className="setting-label">Global Rate Limit (emails/hr)</label>
@@ -241,6 +279,7 @@ export function SystemSettingsSection({ initialSettings, globalDomains, onSaved 
                   <label className="switch">
                     <input
                       type="checkbox"
+                      aria-label="Alias Quota Buffer"
                       checked={editedSettings.alias_quota_buffer_enabled === "true"}
                       onChange={e => setEditedSettings({...editedSettings, alias_quota_buffer_enabled: e.target.checked ? "true" : "false"})}
                     />
@@ -313,6 +352,7 @@ export function SystemSettingsSection({ initialSettings, globalDomains, onSaved 
                 </div>
               </div>
 
+              <h2 className="admin-settings-heading" id="admin-setting-defaults" tabIndex={-1}>Alias & account defaults</h2>
               <div className="setting-row">
                 <div className="setting-info">
                   <div className="setting-label">Catch-All Auto-Create</div>
@@ -322,6 +362,7 @@ export function SystemSettingsSection({ initialSettings, globalDomains, onSaved 
                   <label className="switch">
                     <input
                       type="checkbox"
+                      aria-label="Catch-All Auto-Create"
                       checked={editedSettings.catch_all_auto_create === "true"}
                       onChange={e => setEditedSettings({...editedSettings, catch_all_auto_create: e.target.checked ? "true" : "false"})}
                     />
@@ -339,6 +380,7 @@ export function SystemSettingsSection({ initialSettings, globalDomains, onSaved 
                   <label className="switch">
                     <input
                       type="checkbox"
+                      aria-label="User Registration"
                       checked={editedSettings.registration_enabled === "true"}
                       onChange={e => setEditedSettings({...editedSettings, registration_enabled: e.target.checked ? "true" : "false"})}
                     />
@@ -386,6 +428,7 @@ export function SystemSettingsSection({ initialSettings, globalDomains, onSaved 
                 </div>
               </div>
 
+              <h2 className="admin-settings-heading" id="admin-setting-privacy" tabIndex={-1}>Filtering & privacy</h2>
               <div className="setting-row">
                 <div className="setting-info">
                   <label htmlFor="setting-spam-verdict" className="setting-label">Spam Verdict Action</label>
@@ -516,10 +559,12 @@ export function SystemSettingsSection({ initialSettings, globalDomains, onSaved 
                 </div>
               </div>
 
+              <h2 className="admin-settings-heading" id="admin-setting-diagnostics" tabIndex={-1}>Test mail & AWS configuration</h2>
               <div className="setting-row">
                 <div className="setting-info">
                   <label htmlFor="test-email-to" className="setting-label">Send Test Email</label>
-                  <div className="setting-desc">Send a sample system email through the selected outbound transport to verify delivery acceptance.</div>
+                  <div className="setting-desc">Send using the saved transport. After SMTP changes, restart Docker first. Acceptance does not guarantee inbox delivery.</div>
+                  {isSettingsDirty && <p className="setting-desc">Save or discard your changes before sending a test.</p>}
                 </div>
                 <form className="setting-control test-email-control" onSubmit={sendTestEmail}>
                   <select
@@ -541,7 +586,7 @@ export function SystemSettingsSection({ initialSettings, globalDomains, onSaved 
                     onChange={e => setTestEmailForm(f => ({ ...f, to: e.target.value }))}
                     required
                   />
-                  <button className="btn btn-primary" type="submit" disabled={sendingTestEmail}>
+                  <button className="btn btn-primary" type="submit" disabled={sendingTestEmail || isSettingsDirty || savingSettings}>
                     <Send size={14} />
                     {sendingTestEmail ? "Sending..." : "Send"}
                   </button>
@@ -658,33 +703,15 @@ export function SystemSettingsSection({ initialSettings, globalDomains, onSaved 
 
             </div>
 
-            <div style={{ marginTop: 32, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.05)", display: "flex", justifyContent: "flex-end", gap: 12 }}>
+            <div className="admin-settings-savebar">
+              <span role="status">{isSettingsDirty ? "You have unsaved changes" : "No unsaved changes"}</span>
               <button
                 className="btn btn-ghost"
-                onClick={() => {
-                  setEditedSettings({
-                    rate_limit_per_alias: "20",
-                    rate_limit_reply_per_alias: "10",
-                    rate_limit_global: "1000",
-                    reply_distinct_recipient_cap: "15",
-                    max_inbound_bytes: "26214400",
-                    catch_all_auto_create: "true",
-                    alias_quota_buffer_enabled: "true",
-                    registration_enabled: "false",
-                    inline_actions_default_enabled: "false",
-                    inline_actions_default_position: "footer",
-                    main_global_domain: "",
-                    cors_allowed_domains: "http://localhost:5173",
-                    forwarded_from_format: "name_address_parens",
-                    soft_bounce_threshold: "3",
-                    spam_verdict_action: "flag",
-                    virus_verdict_action: "drop",
-                    unsubscribe_header_mode: "bulk_only",
-                  });
-                }}
+                onClick={discardChanges}
+                disabled={!isSettingsDirty || savingSettings}
                 type="button"
               >
-                Reset to Defaults
+                Discard changes
               </button>
               <button
                 className="btn btn-primary"

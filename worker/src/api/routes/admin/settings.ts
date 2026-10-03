@@ -153,6 +153,9 @@ export function registerAdminSettingsRoutes(r: Hono<AppEnv>) {
       else proposed[key] = await getEnvWithOverride(db, c.env, key);
     }
     if ((proposed.mail_outbound_provider || "ses") === "smtp") {
+      if (Object.hasOwn(body, "mail_outbound_provider") && !c.env.SMTP_TRANSPORT) {
+        errors.push("Custom SMTP requires the Docker SMTP_TRANSPORT binding");
+      }
       if (!proposed.smtp_outbound_host || !proposed.smtp_outbound_port || !proposed.smtp_outbound_tls) errors.push("Custom SMTP requires host, port, and TLS mode");
       if (!!proposed.smtp_outbound_username !== !!proposed.smtp_outbound_password) errors.push("SMTP outbound username and password must be configured together");
       if (proposed.smtp_outbound_tls === "trusted-cleartext" && proposed.smtp_outbound_port !== "25") errors.push("Trusted cleartext SMTP is restricted to port 25");

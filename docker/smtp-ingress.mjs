@@ -61,7 +61,10 @@ export async function createSmtpIngress(env, dispatch) {
     cert: await readFile(env.SMTP_INBOUND_TLS_CERT), key: await readFile(env.SMTP_INBOUND_TLS_KEY),
   } : {};
   const peers = trustedProxySet(env.SMTP_INBOUND_TRUSTED_PEERS);
-  const maxBytes = Number(env.SMTP_INBOUND_MAX_BYTES ?? 25 * 1024 * 1024);
+  const configuredMaxBytes = Number(env.SMTP_INBOUND_MAX_BYTES);
+  const maxBytes = Number.isInteger(configuredMaxBytes) && configuredMaxBytes > 0
+    ? configuredMaxBytes
+    : 25 * 1024 * 1024;
   const server = new SMTPServer({
     ...tls, secure: mode === "implicit", authOptional: false, size: maxBytes,
     socketTimeout: 60_000, closeTimeout: 30_000, hidePIPELINING: true,
@@ -84,8 +87,16 @@ export async function createSmtpIngress(env, dispatch) {
     async onRcptTo(address, session, callback) {
       if (session.envelope.rcptTo.length > 0) return callback(Object.assign(new Error("One recipient per transaction"), { responseCode: 452 }));
       if (!ADDRESS.test(address.address)) return callback(Object.assign(new Error("Invalid recipient"), { responseCode: 550 }));
-      const response = await dispatch("smtp-recipient", { to: address.address });
-      callback(response.ok && (await response.json()).accepted ? undefined : Object.assign(new Error("Recipient rejected"), { responseCode: 550 }));
+      try {
+        const response = await dispatch("smtp-recipient", { to: address.address });
+        if (response.status >= 500) {
+          return callback(Object.assign(new Error("Recipient lookup unavailable"), { responseCode: 451 }));
+        }
+        const result = await response.json();
+        callback(response.ok && result.accepted ? undefined : Object.assign(new Error("Recipient rejected"), { responseCode: 550 }));
+      } catch {
+        callback(Object.assign(new Error("Recipient lookup unavailable"), { responseCode: 451 }));
+      }
     },
     onData(stream, session, callback) {
       const chunks = [];

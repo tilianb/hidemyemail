@@ -63,3 +63,14 @@ test("concurrent SMTP duplicates keep one claim and completed retries do not res
   expect(await completedRetry.json()).toEqual({ ok: true, duplicate: true });
   expect(sent).toHaveLength(1);
 });
+
+test("mail-provider misconfiguration leaves inbound SMTP delivery retryable", async () => {
+  const body = {
+    gateway: "stalwart-1", deliveryId: "missing-provider", from: "alice@sender.example",
+    to: "shop@test.hidemyemail.dev", rawBase64: btoa("From: Alice <alice@sender.example>\r\n\r\nbody"),
+    auth: { spf: "PASS", dmarc: "PASS", spam: "PASS", virus: "PASS" },
+  };
+  const overrides = { __mailSend: undefined, MAIL_OUTBOUND_PROVIDER: "smtp", SMTP_TRANSPORT: undefined };
+  expect((await request("smtp-ingest", body, secret, overrides)).status).toBe(503);
+  expect((await request("smtp-ingest", body, secret, overrides)).status).toBe(503);
+});

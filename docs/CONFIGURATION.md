@@ -8,6 +8,17 @@ disables inheritance; **Use environment** removes the override instead. The UI
 never returns stored SMTP credentials. Settings JSON must be an object whose
 values are strings or `null` (reset); malformed values return HTTP 400.
 
+In **Admin → System Settings**, use the section buttons to jump to mail,
+limits, account defaults, filtering, or test mail. **Discard changes** restores
+the saved values without writing to the server. Save or discard a draft before
+using **Use environment** or sending a test email. SMTP transport/listener
+changes need a Docker restart before testing. Test success confirms provider
+acceptance, not delivery to the recipient's inbox.
+
+The **Users** panel supports name and exact user-ID search (with or without `#`).
+If the dashboard cannot load admin data or alias creation options, retry from
+the error banner rather than treating the missing data as an empty account.
+
 For maintainers, `SETTING_DEFINITIONS` in `worker/src/config.ts` owns defaults,
 field validation, environment names, and secret/fresh-auth classifications.
 The settings route retains checks that require database state or multiple
@@ -34,6 +45,8 @@ These are deployment-specific, not secrets. Store them in the Cloudflare dashboa
 | `ENVIRONMENT` | yes | `production`, `preview`, `local`, or `self-hosted`. The Docker host sets `self-hosted` and supplies the Worker's private client-IP header after validating the socket peer. Do not expose a self-hosted Worker without that host boundary. |
 | `BLOCKED_SUBDOMAINS` | no | Comma-separated exact DNS labels that cannot be claimed as new personal subdomains. An absent or whitespace-only value uses `admin,api,www,dev,mail,smtp,imap,pop,pop3,webmail,autoconfig,autodiscover`; a nonblank value replaces that default list. Entries are trimmed and lowercased; requests are likewise trimmed and lowercased before exact matching, so `api` does not block `myapi` or `api2`. Each nonempty component must be a single 1–63 character ASCII DNS label containing only letters, digits, and interior hyphens, and starting and ending alphanumeric. Empty components, dots, wildcards, regex/glob syntax, underscores, embedded spaces, edge hyphens, and overlong labels make the configuration malformed. Malformed nonempty configuration fails closed: new claims return a server configuration error until the value is corrected, while the raw value is never logged. Valid blocked labels return “Subdomain is not available.” This affects only new claims: existing subdomains remain visible, editable, and deletable. Set this plain variable in the Cloudflare dashboard / Wrangler config or as `BLOCKED_SUBDOMAINS` in Docker. |
 | `SES_REGION` | yes for mail | AWS SES/S3/SNS region, for example `ap-southeast-2`. |
+| `INBOUND_MX_HOST` | no | Exact public MX host operators should publish for inbound mail. Empty preserves the SES target derived from `SES_REGION`. For custom ingress, set this to the public queueing/scanning gateway's canonical lowercase DNS name, not HideMyEmail's private listener. A D1 admin override wins over this environment default. |
+| `OUTBOUND_SPF_INCLUDE` | no | Exact provider domain used in the sending domain's SPF `include:` mechanism. Empty preserves `amazonses.com`. Enter only the canonical lowercase DNS name, without `include:`. A D1 admin override wins over this environment default. The outbound provider still supplies and documents its required DKIM records. |
 | `MAIL_OUTBOUND_PROVIDER` | no | `ses` (default) or `smtp`. Custom SMTP is Docker-only. A D1 admin override wins over this environment default. |
 | `SMTP_OUTBOUND_HOST`, `SMTP_OUTBOUND_PORT` | for custom SMTP | Supplier or private relay endpoint. |
 | `SMTP_OUTBOUND_TLS` | for custom SMTP | `starttls` (required upgrade, normally 587), `implicit` (normally 465), or `trusted-cleartext` for an explicitly trusted port-25 connector only. Certificate verification never downgrades. |
@@ -43,6 +56,7 @@ These are deployment-specific, not secrets. Store them in the Cloudflare dashboa
 | `SMTP_INBOUND_USERNAME`, `SMTP_INBOUND_PASSWORD`, `SMTP_INBOUND_GATEWAY_ID` | for SMTP ingress | Dedicated upstream-gateway authentication and stable dedup namespace. Never reuse outbound credentials. |
 | `SMTP_INBOUND_TRUSTED_PEERS` | recommended | Comma-separated exact socket peer IPs. Authentication remains mandatory. |
 | `SMTP_INBOUND_TLS_CERT`, `SMTP_INBOUND_TLS_KEY` | non-loopback ingress | Deployment-managed PEM paths. The UI cannot choose arbitrary filesystem paths. |
+| `SMTP_INBOUND_MAX_BYTES` | no | Maximum raw SMTP message size in bytes. Empty or invalid values use 25 MiB. The ingress currently rejects null-envelope-sender (`MAIL FROM:<>`) delivery-status notifications because forwarding them safely would require a separate bounce-processing path; do not route DSNs to this listener. |
 | `S3_INBOUND_BUCKET` | yes for inbound | Bucket where SES stores raw MIME. |
 | `SNS_INBOUND_TOPIC_ARN` | yes for inbound SNS | Exact SNS topic for SES receipt notifications. |
 | `SNS_ALLOWED_TOPIC_ARN` | yes for outbound SNS | Exact SNS topic for SES bounce and complaint notifications. Topic ARNs identify webhook authority but are not secrets. |
@@ -165,6 +179,8 @@ The app stores feature settings in D1. Important defaults:
 | `registration_enabled` | `false` | Enable only if other users should self-register. |
 | `cors_allowed_domains` | `http://localhost:5173` | Add deployed dashboard origins if needed. |
 | `main_global_domain` | empty | Set after verifying a global domain. |
+| `inbound_mx_host` | empty | Exact inbound MX target checked for global domains, wildcard MX, and personal subdomains. Empty derives the SES regional inbound host. Environment source: `INBOUND_MX_HOST`. |
+| `outbound_spf_include` | empty | Exact outbound SPF include target checked during global-domain verification. Empty uses `amazonses.com`. Environment source: `OUTBOUND_SPF_INCLUDE`. |
 | `catch_all_auto_create` | enabled | Allows first inbound mail to create aliases. |
 | `max_inbound_bytes` | `26214400` (25 MiB) | Hard cap applied while streaming raw MIME from S3 and before parsing replies. Oversize inbound mail is acknowledged without forwarding. |
 | `rate_limit_per_alias` | `20` | Maximum inbound forwards per alias in the rolling one-hour window. |
@@ -217,7 +233,10 @@ relay one envelope recipient per transaction to HideMyEmail with dedicated
 AUTH and TLS. HideMyEmail waits for processing before `250`; a 4xx leaves the
 message in the upstream queue. Public-MX delivery direct to HideMyEmail without
 that trusted gateway is unsupported. Ports 465/587 are secure relay/submission
-options, not alternate public MX ports.
+options, not alternate public MX ports. Configure `INBOUND_MX_HOST` with this
+gateway's actual public MX name; the private HideMyEmail listener is not an MX
+target. The outbound provider supplies the DKIM records for its sending domain.
+The listener still rejects null-envelope-sender DSNs; do not route DSNs to it.
 
 ### Stalwart gateway recipe
 

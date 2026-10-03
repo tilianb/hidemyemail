@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
-import { getEnvWithOverride, getMainGlobalDomain } from "../../lib/settings";
+import { getMailDnsTargets, getMainGlobalDomain, mxRecordMatches, spfRecordIncludes } from "../../lib/settings";
 import { resolveMailProviderConfig, sendMail } from "../../lib/mail-provider";
 import { normalizeDomain, normalizeEmail } from "./admin/helpers";
 import { registerAdminSettingsRoutes } from "./admin/settings";
@@ -241,8 +241,7 @@ export function adminRoutes() {
 
     const tokenRecord = `hidemyemail-verify=${row.verification_token}`;
     const checkDomain = `_hidemyemail.${row.domain}`;
-    const sesRegion = await getEnvWithOverride(db, c.env, "ses_region") || "us-east-1";
-    const expectedMx = `inbound-smtp.${sesRegion}.amazonaws.com`;
+    const { inboundMxHost: expectedMx, outboundSpfInclude: expectedSpfInclude } = await getMailDnsTargets(db, c.env);
     
     try {
       const dohFetch = (url: string) =>
@@ -272,19 +271,18 @@ export function adminRoutes() {
 
       if (dnsMx?.Status === 0 && dnsMx.Answer) {
         // MX record data sometimes has priority included or trailing dot
-        mxOk = dnsMx.Answer.some((a: any) => a.type === 15 && a.data.includes(expectedMx));
+        mxOk = dnsMx.Answer.some((a: any) => a.type === 15 && mxRecordMatches(a.data, expectedMx));
       }
 
       if (dnsSpf?.Status === 0 && dnsSpf.Answer) {
         spfOk = dnsSpf.Answer.some((a: any) => {
           if (a.type !== 16) return false;
-          const data = a.data.replace(/"/g, "");
-          return data.startsWith("v=spf1") && data.includes("include:amazonses.com");
+          return spfRecordIncludes(a.data, expectedSpfInclude);
         });
       }
 
       if (row.allow_subdomain_aliases === 1 && dnsWildcardMx?.Status === 0 && dnsWildcardMx.Answer) {
-        wildcardMxOk = dnsWildcardMx.Answer.some((a: any) => a.type === 15 && a.data.includes(expectedMx));
+        wildcardMxOk = dnsWildcardMx.Answer.some((a: any) => a.type === 15 && mxRecordMatches(a.data, expectedMx));
       }
 
       const verified = verifyTxtOk; // Only require the verification TXT to actually "verify" domain ownership
