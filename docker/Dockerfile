@@ -4,8 +4,8 @@
 #
 # Runs the Cloudflare Worker via Miniflare (workerd embedded in Node) so the
 # production code paths (D1, Assets binding, WebCrypto, fetch) work unchanged.
-# Inbound MX, S3 raw store, and SNS notifications are still expected to come
-# from AWS SES — this container only replaces the Workers runtime.
+# SES remains the default mail pipeline. Operators may instead configure
+# custom outbound SMTP and a private listener behind a trusted scanning MTA.
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Stage 1: build dashboard SPA + bundle worker

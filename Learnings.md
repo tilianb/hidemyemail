@@ -79,6 +79,16 @@
 - Action: Use GitHub-hosted Linux, ARM64, and macOS runners for every workflow; keep the Docker platform matrix native by pairing `ubuntu-latest` with `ubuntu-24.04-arm`.
 - Confidence: high
 
+**2026-10-03 — Alias query usage counts**
+- Observation: The aliases page uses search-specific query results; deriving quota usage from those rows makes the displayed account quota shrink during search.
+- Action: Read usage from the account's unfiltered alias query and keep resource-loading failures distinct from empty domain/destination lists.
+- Confidence: high
+
+**2026-10-03 — Mail-provider DNS verification**
+- Observation: Global-domain, wildcard, and personal-subdomain MX checks must share one resolved inbound target, while SPF verification needs an independently resolved outbound provider include.
+- Action: Resolve D1 override → environment → SES-compatible defaults in one settings helper, and compare parsed MX hosts and SPF mechanisms exactly rather than with substring matching.
+- Confidence: high
+
 **2026-10-01 — Dashboard settings editor ownership**
 - Observation: Rebuilding admin setting drafts whenever the parent reloads all control-room data can erase unsaved edits and couples unrelated domain/user refreshes to the editor lifecycle.
 - Action: Keep the system-settings draft and reload flow inside its mounted feature section; notify the parent only after a successful save so domain/DNS-derived views receive committed values.

@@ -239,3 +239,45 @@ test("admin verify does not require wildcard MX when subdomain aliases are disab
   expect(body.verified).toBe(true);
   expect(body.results.wildcard_mx).toBe(true);
 });
+
+test("custom DNS targets verify by exact MX and SPF matches", async () => {
+  const app = createApp();
+  const db = env.DB as D1Database;
+  const h = { cookie, "Content-Type": "application/json" };
+  await db.prepare(
+    "INSERT INTO domains (id, user_id, is_global, domain, allow_subdomain_aliases, active, verification_token, created_at) VALUES (41, 1, 1, 'custom.example', 1, 1, 'customtok', 123)"
+  ).run();
+  await db.prepare("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, 1) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = 1").bind("inbound_mx_host", "mx.gateway.example").run();
+  await db.prepare("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, 1) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = 1").bind("outbound_spf_include", "spf.provider.example").run();
+
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    const name = url.searchParams.get("name");
+    const type = url.searchParams.get("type");
+    if (name === "_hidemyemail.custom.example" && type === "TXT") return Response.json({ Status: 0, Answer: [{ type: 16, data: "hidemyemail-verify=customtok" }] });
+    if (name === "custom.example" && type === "MX") return Response.json({ Status: 0, Answer: [{ type: 15, data: "10 mx.gateway.example.evil." }, { type: 15, data: "20 mx.gateway.example." }] });
+    if (name === "custom.example" && type === "TXT") return Response.json({ Status: 0, Answer: [{ type: 16, data: "v=spf1 include:spf.provider.example.evil -all" }, { type: 16, data: "v=spf1 include:spf.provider.example -all" }] });
+    if (name === "_hidemyemail-probe.custom.example" && type === "MX") return Response.json({ Status: 0, Answer: [{ type: 15, data: "10 mx.gateway.example.evil." }] });
+    return Response.json({ Status: 3 });
+  }) as any;
+
+  const response = await app.request("/api/admin/domains/41/verify", { method: "POST", headers: h }, testEnv);
+  expect(response.status).toBe(200);
+  expect((await response.json<any>()).results).toMatchObject({ mx: true, spf: true, wildcard_mx: false });
+});
+
+test("personal subdomain requires the exact configured inbound MX target", async () => {
+  const app = createApp();
+  const db = env.DB as D1Database;
+  const h = { cookie, "Content-Type": "application/json" };
+  await db.prepare("UPDATE settings SET value = 'base.example' WHERE key = 'main_global_domain'").run();
+  await db.prepare("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, 1) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = 1").bind("inbound_mx_host", "mx.gateway.example").run();
+  await db.prepare("INSERT INTO domains (id, user_id, is_global, domain, allow_subdomain_aliases, active, verified_at, created_at) VALUES (42, 1, 1, 'base.example', 1, 1, 123, 123)").run();
+  globalThis.fetch = vi.fn(async () => Response.json({ Status: 0, Answer: [{ type: 15, data: "10 mx.gateway.example.evil." }] })) as any;
+
+  const response = await app.request("/api/domains", {
+    method: "POST", headers: h, body: JSON.stringify({ domain: "shop", default_destination: "global" }),
+  }, testEnv);
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ error: "No MX record found for shop.base.example pointing to mx.gateway.example. Add a wildcard MX record on *.base.example first." });
+});

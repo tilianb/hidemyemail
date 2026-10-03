@@ -16,6 +16,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Grouped admin settings with section navigation, a sticky save/discard bar,
+  searchable users, and retry actions for failed admin or alias-option loads.
+- Added provider-specific MX and SPF DNS targets with SES-compatible defaults;
+  domain setup now displays and checks the configured targets.
 - Consolidated dashboard fresh-auth prompts and added accessible keyboard/focus
   handling to shared dialogs while keeping the existing appearance.
 - Separated system-settings and forwarding-preference editors and added
@@ -27,6 +31,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Apply the 25 MiB SMTP ingress default when its size setting is empty and
+  return temporary SMTP errors when recipient lookup fails.
+- Keep unconfigured mail transports retryable instead of acknowledging mail
+  that was not delivered; reject custom SMTP selection outside Docker.
+- Preserve saved settings when discarding a draft, prevent testing unsaved
+  mail configuration, and keep alias quota counts independent of search.
 - Keep mail settings and admin dropdowns readable on narrow screens, with
   visible SMTP field labels and wrapping credential-name forms.
 - Allow SMTP-only Docker startup without SES credentials and route private
@@ -34,6 +44,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Security
 
+- Match DNS MX targets and SPF includes exactly, rejecting lookalike suffixes.
+- Updated Worker tooling's Undici and the docs site's Devalue dependencies to
+  patched versions following the dependency audit.
 - Strip supplier control headers from forwarded MIME and require authenticated,
   TLS-protected gateway metadata for Docker SMTP receipt.
 

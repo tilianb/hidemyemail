@@ -13,6 +13,7 @@ async function mockApi(context: BrowserContext) {
     smtp_inbound_tls: "starttls", smtp_inbound_gateway_id: "gateway-1",
     smtp_inbound_username: "•••••• configured", smtp_inbound_password: "•••••• configured",
     max_inbound_bytes: "26214400", ses_region: "us-east-1",
+    inbound_mx_host: "mx.gateway.example", outbound_spf_include: "spf.relay.example",
   }).map(([key, value]) => [key, { value, updated_at: 1, source: "override" }]));
   await context.route("**/api/**", async route => {
     const request = route.request();
@@ -40,7 +41,10 @@ async function mockApi(context: BrowserContext) {
       "/api/destinations": [{ id: 1, email: "operator@example.net", created_at: 1700000000000, verified_at: 1700000000000, is_default: 1 }],
       "/api/blocks": [],
       "/api/aliases": [{ id: 1, domain_id: 1, full_address: `account${account}@example.com`, local_part: `account${account}`, active: 1, label: "Shopping", destination: null, source: "dashboard", fwd_count: 3, reply_count: 1, blocked_count: 0, created_at: 1700000000000, last_seen_at: null, muted_until: null }],
-      "/api/admin/users": { users: [] }, "/api/admin/stats": { totals: { users: 1, aliases: 1, active: 1 } },
+      "/api/admin/users": { users: [
+        { id: 1, name: "Operator", created_at: 1700000000000, alias_count: 4, active: 1, forwarding: 1 },
+        { id: 12, name: "Camille", created_at: 1700000000000, alias_count: 2, active: 0, forwarding: 1 },
+      ] }, "/api/admin/stats": { totals: { users: 2, aliases: 6, active: 5 } },
       "/api/admin/env": { vars: { SES_REGION: { value: "us-east-1", secret: false } }, secrets: {} },
       "/api/admin/settings": { settings },
       "/api/admin/suppressions": { suppressions: [], totals: {}, health: "healthy" },
@@ -95,6 +99,7 @@ test("mail settings render expanded and elevate through the shared prompt", asyn
   await expect(page.getByLabel("SMTP inbound gateway ID")).toHaveValue("gateway-1");
   await page.getByLabel("SMTP outbound host").fill("relay.example.com");
   await page.locator(".admin-settings-card").scrollIntoViewIfNeeded();
+  await expect(page.getByRole("button", { name: "Save Changes", exact: true })).toBeInViewport();
   await page.screenshot({ path: info.outputPath("mail-settings.png"), animations: "disabled" });
   await page.getByRole("button", { name: "Save Changes", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Confirm it’s you" });
@@ -107,6 +112,51 @@ test("mail settings render expanded and elevate through the shared prompt", asyn
   await page.goto("/#settings");
   await expect(page.getByLabel("Inline action links")).toHaveValue("inherit");
   await page.screenshot({ path: info.outputPath("account-settings.png"), animations: "disabled" });
+});
+
+test("admin users are searchable by name or ID with labelled controls", async ({ page, context }, info) => {
+  await mockApi(context);
+  await page.goto("/#admin");
+  await page.locator(".admin-users-card").getByRole("button").click();
+  await page.getByLabel("Find users").fill("camille");
+  await expect(page.getByText("Camille", { exact: true })).toBeVisible();
+  await expect(page.locator(".admin-users-table tbody tr")).toHaveCount(1);
+  await expect(page.getByLabel("Allow login for user #12")).not.toBeChecked();
+  await expect(page.getByLabel("Forward email for user #12")).toBeChecked();
+  await page.getByLabel("Find users").fill("#1");
+  await expect(page.locator(".admin-users-table tbody tr")).toHaveCount(1);
+  await page.getByLabel("Find users").fill("missing");
+  await expect(page.getByText("No matching users", { exact: true })).toBeVisible();
+  await page.getByLabel("Find users").fill("");
+  await page.screenshot({ path: info.outputPath("admin-users.png"), animations: "disabled" });
+});
+
+test("admin loading failures offer retry instead of empty controls", async ({ page, context }, info) => {
+  await mockApi(context);
+  await page.route("**/api/admin/users", route => route.fulfill({ status: 503, json: { error: "Unavailable" } }));
+  await page.goto("/#admin");
+  await expect(page.getByRole("button", { name: "Retry loading" })).toBeVisible();
+  await expect(page.locator(".admin-domain-form")).toHaveCount(0);
+  await page.screenshot({ path: info.outputPath("admin-load-error.png"), animations: "disabled" });
+  await page.unroute("**/api/admin/users");
+  await page.getByRole("button", { name: "Retry loading" }).click();
+  await expect(page.getByRole("button", { name: "Retry loading" })).toBeHidden();
+  await expect(page.getByText("System Settings", { exact: true })).toBeVisible();
+});
+
+test("alias resource failure can be retried without creating against missing options", async ({ page, context }, info) => {
+  await mockApi(context);
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.route("**/api/domains", route => route.fulfill({ status: 503, json: { error: "Unavailable" } }));
+  await page.goto("/#aliases");
+  await expect(page.getByRole("button", { name: "Retry loading" })).toBeVisible();
+  await page.getByLabel("Local part").fill("new-alias");
+  await expect(page.getByRole("button", { name: "Create", exact: true })).toBeDisabled();
+  await page.screenshot({ path: info.outputPath("alias-options-error.png"), animations: "disabled" });
+  await page.unroute("**/api/domains");
+  await page.getByRole("button", { name: "Retry loading" }).click();
+  await expect(page.getByRole("button", { name: "Retry loading" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Create", exact: true })).toBeEnabled();
 });
 
 for (const width of [390, 768, 1280]) {
@@ -136,7 +186,18 @@ for (const width of [390, 768, 1280]) {
       expect((await field.boundingBox())!.width).toBeGreaterThan(240);
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Limits", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Limits & quotas" })).toBeFocused();
+    await expect(page.getByRole("heading", { name: "Limits & quotas" })).toBeInViewport();
     await page.getByLabel("SMTP inbound gateway ID").scrollIntoViewIfNeeded();
+    await page.getByLabel("SMTP inbound gateway ID").focus();
+    const savebar = await page.locator(".admin-settings-savebar").boundingBox();
+    const field = await page.getByLabel("SMTP inbound gateway ID").boundingBox();
+    expect(field!.y + field!.height).toBeLessThanOrEqual(savebar!.y);
+    if (width === 390) {
+      const nav = await page.locator(".sidebar").boundingBox();
+      expect(savebar!.y + savebar!.height).toBeLessThanOrEqual(nav!.y);
+    }
     await page.screenshot({ path: info.outputPath(`receiving-${width}.png`), animations: "disabled" });
     await page.goto("/#settings");
     await page.getByRole("button", { name: "Create API Key", exact: true }).click();
@@ -144,6 +205,16 @@ for (const width of [390, 768, 1280]) {
     await page.screenshot({ path: info.outputPath(`account-fields-${width}.png`), animations: "disabled" });
   });
 }
+
+test("custom-provider DNS records match saved configuration", async ({ page, context }, info) => {
+  await mockApi(context);
+  await page.goto("/#admin");
+  await page.locator(".admin-domain-card").getByRole("button", { name: "Show" }).click();
+  await page.getByRole("button", { name: "DNS records", exact: true }).click();
+  await expect(page.getByText("mx.gateway.example", { exact: true })).toHaveCount(2);
+  await expect(page.getByText("v=spf1 include:spf.relay.example ~all", { exact: true })).toBeVisible();
+  await page.locator(".admin-domain-card").screenshot({ path: info.outputPath("provider-dns.png"), animations: "disabled" });
+});
 
 for (const width of [390, 1280]) {
   test(`dashboard page audit at ${width}px`, async ({ page, context }, info) => {

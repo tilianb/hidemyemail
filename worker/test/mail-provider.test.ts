@@ -48,7 +48,12 @@ describe("mail provider selection", () => {
 
   test("fails clearly when Cloudflare is configured for Docker-only SMTP", async () => {
     await expect(sendMail(env.DB as D1Database, { MAIL_OUTBOUND_PROVIDER: "smtp" } as any, message))
-      .rejects.toThrow(/Docker-only SMTP_TRANSPORT/);
+      .rejects.toBeInstanceOf(MailRetryableError);
+  });
+
+  test("treats incomplete SES configuration as retryable", async () => {
+    await expect(sendMail(env.DB as D1Database, {} as any, message))
+      .rejects.toBeInstanceOf(MailRetryableError);
   });
 
   test.each([
@@ -118,6 +123,7 @@ test("admin mail settings require fresh auth, mask encrypted credentials, and re
     SMTP_OUTBOUND_TLS: "starttls",
     SMTP_OUTBOUND_USERNAME: "env-user",
     SMTP_OUTBOUND_PASSWORD: "env-password",
+    SMTP_TRANSPORT: { fetch: async () => new Response(null, { status: 202 }) },
   } as any;
   const session = `__Host-session=${await signSession(runtime.SESSION_SECRET, 1, 3600)}`;
   const body = {
@@ -162,4 +168,27 @@ test("admin mail settings require fresh auth, mask encrypted credentials, and re
   expect(reset.status).toBe(200);
   expect(await getEnvWithOverride(db, runtime, "smtp_outbound_host")).toBe("env.smtp.example");
   expect(await getEnvWithOverride(db, runtime, "smtp_outbound_password")).toBe("env-password");
+});
+
+test("admin settings reject selecting unavailable SMTP without blocking unrelated saves", async () => {
+  const runtime = {
+    ...env, SESSION_SECRET: "settings-secret", SMTP_OUTBOUND_HOST: "smtp.example",
+    SMTP_OUTBOUND_PORT: "587", SMTP_OUTBOUND_TLS: "starttls",
+  } as any;
+  const session = `__Host-session=${await signSession(runtime.SESSION_SECRET, 1, 3600)}`;
+  const fresh = `__Host-fresh-auth=${await signFreshAuth(runtime.SESSION_SECRET, 1, 300)}`;
+  const app = createApp();
+
+  const smtp = await app.request("/api/admin/settings", {
+    method: "PATCH", headers: { cookie: `${session}; ${fresh}`, "content-type": "application/json" },
+    body: JSON.stringify({ mail_outbound_provider: "smtp" }),
+  }, runtime);
+  expect(smtp.status).toBe(400);
+  expect(await smtp.json()).toMatchObject({ error: expect.stringMatching(/SMTP_TRANSPORT/) });
+
+  const unrelated = await app.request("/api/admin/settings", {
+    method: "PATCH", headers: { cookie: session, "content-type": "application/json" },
+    body: JSON.stringify({ registration_enabled: "true" }),
+  }, runtime);
+  expect(unrelated.status).toBe(200);
 });

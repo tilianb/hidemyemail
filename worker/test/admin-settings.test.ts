@@ -1,9 +1,9 @@
 import { env } from "cloudflare:test";
 import { beforeAll, beforeEach, expect, test } from "vitest";
 import { createApp } from "../src/api/app";
-import { signSession } from "../src/lib/auth";
+import { signFreshAuth, signSession } from "../src/lib/auth";
 import { resetDb } from "./helpers";
-import { getEnvWithOverride } from "../src/lib/settings";
+import { getEnvWithOverride, mxRecordMatches, spfRecordIncludes } from "../src/lib/settings";
 import {
   ENCRYPTED_SETTING_KEYS,
   FRESH_AUTH_SETTING_KEYS,
@@ -15,11 +15,13 @@ import {
 } from "../src/config";
 
 let cookie: string;
+let freshCookie: string;
 let testEnv: any;
 
 beforeAll(async () => {
   testEnv = { ...env, SESSION_SECRET: "settings-schema-secret" };
   cookie = `__Host-session=${await signSession(testEnv.SESSION_SECRET, 1, 3600)}`;
+  freshCookie = `${cookie}; __Host-fresh-auth=${await signFreshAuth(testEnv.SESSION_SECRET, 1, 300)}`;
 });
 
 beforeEach(async () => resetDb(env.DB as D1Database));
@@ -37,6 +39,13 @@ test.each([
   }, testEnv);
 
   expect(response.status).toBe(400);
+});
+
+test("DNS verification matches provider targets exactly", () => {
+  expect(mxRecordMatches("10 mx.gateway.example.", "mx.gateway.example")).toBe(true);
+  expect(mxRecordMatches("10 mx.gateway.example.evil.", "mx.gateway.example")).toBe(false);
+  expect(spfRecordIncludes("v=spf1 include:spf.provider.example -all", "spf.provider.example")).toBe(true);
+  expect(spfRecordIncludes("v=spf1 include:spf.provider.example.evil -all", "spf.provider.example")).toBe(false);
 });
 
 test.each(["invented_setting", "constructor", "toString"])("reports unknown setting %s without writing it", async (key) => {
@@ -68,6 +77,26 @@ test("derives defaults and security classifications from canonical definitions",
   expect(FRESH_AUTH_SETTING_KEYS).toEqual(new Set(MAIL_SETTING_KEYS));
   expect(SETTING_DEFAULTS.smtp_outbound_host).toBe("");
   expect(SETTING_DEFAULTS.smtp_inbound_host).toBe("");
+  expect(SETTING_DEFINITIONS.inbound_mx_host.env).toBe("INBOUND_MX_HOST");
+  expect(SETTING_DEFINITIONS.outbound_spf_include.env).toBe("OUTBOUND_SPF_INCLUDE");
+  expect(SETTING_DEFAULTS.inbound_mx_host).toBe("");
+  expect(SETTING_DEFAULTS.outbound_spf_include).toBe("");
+});
+
+test.each([
+  ["inbound_mx_host", "MX.EXAMPLE.COM"],
+  ["inbound_mx_host", "mx.example.com."],
+  ["inbound_mx_host", "evil..example.com"],
+  ["outbound_spf_include", "include:spf.example.com"],
+  ["outbound_spf_include", "https://spf.example.com"],
+])("rejects non-canonical DNS setting %s=%s", async (key, value) => {
+  const response = await createApp().request("/api/admin/settings", {
+    method: "PATCH",
+    headers: { cookie: freshCookie, "content-type": "application/json" },
+    body: JSON.stringify({ [key]: value }),
+  }, testEnv);
+
+  expect(response.status).toBe(400);
 });
 
 test("treats updated_at zero as a seed and preserves legacy integer parsing", async () => {

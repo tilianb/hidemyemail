@@ -15,11 +15,11 @@ export function EnvironmentSection({ data }: { data: EnvironmentData }) {
           <span className="card-title admin-section-title"><Server size={18} /> Environment</span>
           <p className="admin-section-subtitle">Read-only Worker variables and secret configuration status.</p>
         </div>
-        <button className="admin-panel-toggle" type="button" onClick={event => { event.stopPropagation(); setOpen(!open); }}>
+        <button className="admin-panel-toggle" type="button" aria-expanded={open} aria-controls="admin-environment-body" onClick={event => { event.stopPropagation(); setOpen(!open); }}>
           {open ? "Hide" : "Show"}
         </button>
       </div>
-      {open && <div className="card-body">
+      {open && <div className="card-body" id="admin-environment-body">
         <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 16 }}>
           Read-only view of Cloudflare Worker environment variables and secrets. Note that secrets cannot be modified here.
         </p>

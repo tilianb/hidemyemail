@@ -74,3 +74,23 @@ export async function getMainGlobalDomain(db: D1Database, env: any): Promise<str
   if (dbVal) return dbVal;
   return (env.MAIN_GLOBAL_DOMAIN as string) || SETTING_DEFAULTS.main_global_domain || "";
 }
+
+/** Resolve the exact DNS targets shown and checked during domain setup. */
+export async function getMailDnsTargets(db: D1Database, env: any): Promise<{ inboundMxHost: string; outboundSpfInclude: string }> {
+  const sesRegion = await getEnvWithOverride(db, env, "ses_region") || "us-east-1";
+  return {
+    inboundMxHost: await getEnvWithOverride(db, env, "inbound_mx_host") || `inbound-smtp.${sesRegion}.amazonaws.com`,
+    outboundSpfInclude: await getEnvWithOverride(db, env, "outbound_spf_include") || "amazonses.com",
+  };
+}
+
+export function mxRecordMatches(data: string, expectedHost: string): boolean {
+  const [priority, host, extra] = data.trim().split(/\s+/);
+  if (!priority || !host || extra || !/^\d+$/.test(priority)) return false;
+  return host.replace(/\.$/, "").toLowerCase() === expectedHost;
+}
+
+export function spfRecordIncludes(data: string, expectedHost: string): boolean {
+  const terms = data.replace(/"/g, "").trim().toLowerCase().split(/\s+/);
+  return terms[0] === "v=spf1" && terms.includes(`include:${expectedHost}`);
+}

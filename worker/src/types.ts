@@ -5,6 +5,8 @@ export interface Env {
   BLOCKED_SUBDOMAINS?: string;
   DB: D1Database;
   MAIL_OUTBOUND_PROVIDER?: string;
+  INBOUND_MX_HOST?: string;
+  OUTBOUND_SPF_INCLUDE?: string;
   SMTP_TRANSPORT?: Fetcher;
   SMTP_INGRESS_SECRET?: string;
   SMTP_OUTBOUND_HOST?: string;

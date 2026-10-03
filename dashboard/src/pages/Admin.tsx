@@ -6,16 +6,16 @@ import { EnvironmentSection } from "./admin/EnvironmentSection";
 import { SystemSettingsSection, type SettingsData } from "./admin/SystemSettingsSection";
 import { Users, Trash2, Globe, Cloud, Edit3, Key, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
 
-function verificationRecords(domain: Domain, sesRegion: string) {
+function verificationRecords(domain: Domain, mxHost: string, spfInclude: string) {
   return {
     txtHost: `_hidemyemail.${domain.domain}`,
     txtValue: `hidemyemail-verify=${domain.verification_token ?? ""}`,
     mxHost: domain.domain,
-    mxValue: `inbound-smtp.${sesRegion}.amazonaws.com`,
+    mxValue: mxHost,
     spfHost: domain.domain,
-    spfValue: "v=spf1 include:amazonses.com ~all",
+    spfValue: `v=spf1 include:${spfInclude} ~all`,
     wildcardMxHost: `*.${domain.domain}`,
-    wildcardMxValue: `inbound-smtp.${sesRegion}.amazonaws.com`,
+    wildcardMxValue: mxHost,
   };
 }
 
@@ -59,6 +59,8 @@ export function Admin() {
   const [stats, setStats] = useState<{ users: number; aliases: number; active: number } | null>(null);
   const [globalDomains, setGlobalDomains] = useState<Domain[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [userSearch, setUserSearch] = useState("");
   const [domainForm, setDomainForm] = useState("");
   const [submittingDomain, setSubmittingDomain] = useState(false);
   const [awsTab, setAwsTab] = useState<"auto" | "manual">("auto");
@@ -87,9 +89,14 @@ export function Admin() {
   const freshAuth = useFreshAuth({ onError: message => toast(message, "error") });
   const workerOrigin = window.location.origin;
   const currentMainGlobalDomain = settingsData?.main_global_domain?.value || "";
-  const sesRegion = settingsData?.ses_region?.value || envData?.vars.SES_REGION.value || "us-east-1";
+  const sesRegion = settingsData?.ses_region?.value || envData?.vars.SES_REGION?.value || "us-east-1";
+  const inboundMxHost = settingsData?.inbound_mx_host?.value || `inbound-smtp.${sesRegion}.amazonaws.com`;
+  const outboundSpfInclude = settingsData?.outbound_spf_include?.value || "amazonses.com";
   const activeUserCount = users.filter(u => u.active === 1).length;
   const forwardingUserCount = users.filter(u => u.forwarding === 1).length;
+  const userTerm = userSearch.trim().toLowerCase();
+  const visibleUsers = users.filter(user => !userTerm || (user.name || "").toLowerCase().includes(userTerm)
+    || String(user.id) === userTerm.replace(/^#/, ""));
   const sortedGlobalDomains = [...globalDomains].sort((a, b) => {
     if (a.domain === currentMainGlobalDomain) return -1;
     if (b.domain === currentMainGlobalDomain) return 1;
@@ -98,6 +105,7 @@ export function Admin() {
 
   async function load() {
     setLoading(true);
+    setLoadError(false);
     try {
       const [uRes, sRes, doms, envRes, setRes, supRes] = await Promise.all([
         api.adminUsers(),
@@ -116,7 +124,7 @@ export function Admin() {
       setSuppressionSummary(supRes.totals);
       setSuppressionHealth(supRes.health);
     } catch {
-      toast("Failed to load admin data", "error");
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -244,10 +252,14 @@ export function Admin() {
           <span className="badge badge-amber">Operator</span>
         </div>
         <p className="page-subtitle">
-          Manage runtime policy, user access, global domains, and SES infrastructure from one coherent console.
+          Manage instance-wide settings, user access, domains, and mail delivery. Personal preferences stay in Settings.
         </p>
       </div>
 
+      {loadError ? <div className="banner danger" role="alert">
+        <p>Could not load administration data. Check your connection and try again.</p>
+        <button type="button" className="btn btn-outline" onClick={load}>Retry loading</button>
+      </div> : loading && !stats ? <p role="status">Loading administration data…</p> : <>
       {stats && (
         <div className="admin-stat-grid stagger-1">
           <div className="stat-card">
@@ -273,12 +285,12 @@ export function Admin() {
             </span>
             <p className="admin-section-subtitle">Domains all users can select after DNS and relay readiness checks pass.</p>
           </div>
-          <button className="admin-panel-toggle" type="button" onClick={(e) => { e.stopPropagation(); setShowDomains(!showDomains); }}>
+          <button className="admin-panel-toggle" type="button" aria-expanded={showDomains} aria-controls="admin-domains-body" onClick={(e) => { e.stopPropagation(); setShowDomains(!showDomains); }}>
             {showDomains ? "Hide" : "Show"}
           </button>
         </div>
         {showDomains && (
-        <div className="card-body">
+        <div className="card-body" id="admin-domains-body">
           <form onSubmit={createGlobalDomain} className="form-strip admin-domain-form">
             <div className="field grow">
               <label className="field-label" htmlFor="global-dom">Add global domain</label>
@@ -301,7 +313,7 @@ export function Admin() {
           {globalDomains.length > 0 && (
             <div className="domain-control-stack">
               {sortedGlobalDomains.map(d => {
-                const records = verificationRecords(d, sesRegion);
+                const records = verificationRecords(d, inboundMxHost, outboundSpfInclude);
                 const expanded = expandedVerifyId === d.id;
                 const isMain = d.domain === currentMainGlobalDomain;
                 return (
@@ -501,13 +513,17 @@ export function Admin() {
             <p className="admin-section-subtitle">Login access, forwarding state, recovery, and account controls.</p>
           </div>
           <div className="admin-section-actions">
-            <button className="admin-panel-toggle" type="button" onClick={(e) => { e.stopPropagation(); setShowUsers(!showUsers); }}>
+            <button className="admin-panel-toggle" type="button" aria-expanded={showUsers} aria-controls="admin-users-body" onClick={(e) => { e.stopPropagation(); setShowUsers(!showUsers); }}>
               {users.length} users · {showUsers ? "Hide" : "Show"}
             </button>
           </div>
         </div>
         {showUsers && (
-        <div className="card-body">
+        <div className="card-body" id="admin-users-body">
+          <div className="field admin-user-search">
+            <label className="field-label" htmlFor="admin-user-search">Find users</label>
+            <input id="admin-user-search" className="input" type="search" placeholder="Name or user ID" value={userSearch} onChange={event => setUserSearch(event.target.value)} />
+          </div>
           <div className="admin-user-summary">
             <span><strong>{activeUserCount}</strong> active</span>
             <span><strong>{forwardingUserCount}</strong> forwarding</span>
@@ -530,7 +546,7 @@ export function Admin() {
               <TableSkeleton cols={4} rows={3} />
             ) : (
               <tbody>
-                {users.map(u => (
+                {visibleUsers.map(u => (
                   <tr key={u.id}>
                     <td data-label="ID" className="font-mono text-muted">
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -569,7 +585,7 @@ export function Admin() {
                     <td data-label="Aliases">{u.alias_count}</td>
                     <td data-label="Login" style={{ textAlign: "center" }}>
                       <label className="switch" style={{ margin: "0 auto", opacity: u.id === 1 ? 0.5 : 1 }}>
-                        <input type="checkbox" checked={u.active === 1} disabled={u.id === 1} onChange={async (e) => {
+                        <input type="checkbox" aria-label={`Allow login for user #${u.id}`} checked={u.active === 1} disabled={u.id === 1} onChange={async (e) => {
                           try {
                             await api.adminUpdateUser(u.id, { active: e.target.checked ? 1 : 0 });
                             load();
@@ -580,7 +596,7 @@ export function Admin() {
                     </td>
                     <td data-label="Email" style={{ textAlign: "center" }}>
                       <label className="switch" style={{ margin: "0 auto", opacity: u.id === 1 ? 0.5 : 1 }}>
-                        <input type="checkbox" checked={u.forwarding === 1} disabled={u.id === 1} onChange={async (e) => {
+                        <input type="checkbox" aria-label={`Forward email for user #${u.id}`} checked={u.forwarding === 1} disabled={u.id === 1} onChange={async (e) => {
                           try {
                             await api.adminUpdateUser(u.id, { forwarding: e.target.checked ? 1 : 0 });
                             load();
@@ -623,11 +639,11 @@ export function Admin() {
               </tbody>
             )}
           </table>
-          {!loading && users.length === 0 && (
+          {!loading && visibleUsers.length === 0 && (
             <EmptyState
               icon={<Users size={40} />}
-              title="No users"
-              body="No users have signed up yet."
+              title={users.length ? "No matching users" : "No users"}
+              body={users.length ? "Try another name or user ID, or clear the search." : "No users have signed up yet."}
             />
           )}
           </div>
@@ -643,12 +659,12 @@ export function Admin() {
             </span>
             <p className="admin-section-subtitle">Destinations suppressed due to bounces or complaints. Hard suppressions require admin clearance.</p>
           </div>
-          <button className="admin-panel-toggle" type="button" onClick={(e) => { e.stopPropagation(); setShowSuppressions(!showSuppressions); }}>
+          <button className="admin-panel-toggle" type="button" aria-expanded={showSuppressions} aria-controls="admin-suppressions-body" onClick={(e) => { e.stopPropagation(); setShowSuppressions(!showSuppressions); }}>
             {suppressions.length} suppressed · {showSuppressions ? "Hide" : "Show"}
           </button>
         </div>
         {showSuppressions && (
-          <div className="card-body">
+          <div className="card-body" id="admin-suppressions-body">
             {suppressionSummary && (
               <div className="admin-stats-grid" style={{ marginBottom: 16 }}>
                 <div className="stat-card">
@@ -753,12 +769,12 @@ export function Admin() {
             </span>
             <p className="admin-section-subtitle">One-time SES, SNS, and S3 provisioning templates.</p>
           </div>
-          <button className="admin-panel-toggle" type="button" onClick={(e) => { e.stopPropagation(); setShowAwsSetup(!showAwsSetup); }}>
+          <button className="admin-panel-toggle" type="button" aria-expanded={showAwsSetup} aria-controls="admin-aws-body" onClick={(e) => { e.stopPropagation(); setShowAwsSetup(!showAwsSetup); }}>
             {showAwsSetup ? "Hide" : "Show"}
           </button>
         </div>
         {showAwsSetup && (
-          <div className="card-body">
+          <div className="card-body" id="admin-aws-body">
             <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 16 }}>
             Set up the required AWS services (SES, SNS, S3) for inbound and outbound email routing.
             SNS requests are authenticated by AWS signature verification, so webhook URLs do not need shared secrets.
@@ -899,6 +915,7 @@ echo "SNS_ALLOWED_TOPIC_ARN=$OUTBOUND_TOPIC_ARN"`}
         )}
       </div>
 
+      </>}
       {confirmState && (
         <ConfirmDialog
           title={confirmState.title}

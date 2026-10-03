@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import { encryptDestination, decryptDestination, hashDestination } from "../../lib/crypto";
-import { getMainGlobalDomain, getEnvWithOverride } from "../../lib/settings";
+import { getMailDnsTargets, getMainGlobalDomain, mxRecordMatches } from "../../lib/settings";
 import { canUseIdentifier, isIdentifierReservationError, reserveIdentifierAndRun } from "../../db/reservations";
 
 type ResolvedDefaultDestination = {
@@ -147,8 +147,7 @@ export function domainRoutes() {
 
     const fullDomain = `${prefix}.${baseDomain.domain}`;
 
-    const sesRegion = await getEnvWithOverride(c.env.DB, c.env, "ses_region") || "us-east-1";
-    const expectedMx = `inbound-smtp.${sesRegion}.amazonaws.com`;
+    const { inboundMxHost: expectedMx } = await getMailDnsTargets(c.env.DB, c.env);
     try {
       const mxRes = await fetch(
         `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(fullDomain)}&type=MX`,
@@ -156,7 +155,7 @@ export function domainRoutes() {
       );
       if (mxRes.ok) {
         const mxData = await mxRes.json() as any;
-        const mxOk = mxData.Status === 0 && mxData.Answer?.some((a: any) => a.type === 15 && a.data.includes(expectedMx));
+        const mxOk = mxData.Status === 0 && mxData.Answer?.some((a: any) => a.type === 15 && mxRecordMatches(a.data, expectedMx));
         if (!mxOk) return c.json({ error: `No MX record found for ${fullDomain} pointing to ${expectedMx}. Add a wildcard MX record on *.${baseDomain.domain} first.` }, 400);
       }
     } catch {}

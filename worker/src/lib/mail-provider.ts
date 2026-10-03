@@ -34,7 +34,7 @@ export async function resolveMailProviderConfig(
   }
   if (provider !== "smtp") throw new MailPermanentError(`Unsupported MAIL_OUTBOUND_PROVIDER: ${provider}`);
   if (!env.SMTP_TRANSPORT) {
-    throw new MailPermanentError("MAIL_OUTBOUND_PROVIDER=smtp requires the Docker-only SMTP_TRANSPORT binding");
+    throw new MailRetryableError("MAIL_OUTBOUND_PROVIDER=smtp requires the Docker-only SMTP_TRANSPORT binding");
   }
   return { provider };
 }
@@ -49,7 +49,7 @@ export async function sendMail(
   if (injected) return injected(message);
 
   const config = resolvedConfig ?? await resolveMailProviderConfig(db, env);
-  if (!config) throw new MailPermanentError("Email sending is not configured");
+  if (!config) throw new MailRetryableError("Email sending is not configured");
   if (config.provider === "ses") {
     const ses = (env as any).__sesSend ?? sendRaw;
     try {
@@ -70,7 +70,7 @@ export async function sendMail(
   }
 
   const transport = env.SMTP_TRANSPORT;
-  if (!transport) throw new MailPermanentError("SMTP transport binding is unavailable");
+  if (!transport) throw new MailRetryableError("SMTP transport binding is unavailable");
   let response: Response;
   try {
     response = await transport.fetch("http://smtp.internal/send", {
