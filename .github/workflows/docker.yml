@@ -1,7 +1,7 @@
 name: Docker
 
 # Builds the self-host container.
-# - PRs: validate linux/amd64 only (no push) on the Namespace remote builder.
+# - PRs: validate linux/amd64 only (no push).
 # - Push to main: build + push multi-arch :main and :sha-<short> to GHCR.
 # - Stable SemVer release calls this workflow after release validation; pushes release tags and :latest to both registries.
 
@@ -100,14 +100,17 @@ jobs:
     strategy:
       matrix:
         # PRs validate linux/amd64 only; branch and release publications build both architectures.
-        include: ${{ github.event_name == 'pull_request' && fromJSON('[{"platform":"linux/amd64"}]') || fromJSON('[{"platform":"linux/amd64"},{"platform":"linux/arm64"}]') }}
-    runs-on: namespace-profile-default
+        include: ${{ github.event_name == 'pull_request' && fromJSON('[{"os":"ubuntu-latest","platform":"linux/amd64"}]') || fromJSON('[{"os":"ubuntu-latest","platform":"linux/amd64"},{"os":"ubuntu-24.04-arm","platform":"linux/arm64"}]') }}
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
       - name: Log in to Docker Hub
         if: needs.publish-gate.outputs.stable-release == 'true'

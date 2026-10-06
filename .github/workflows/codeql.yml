@@ -31,7 +31,7 @@ jobs:
             runner: ubuntu-latest
           - language: java-kotlin
             build-mode: manual
-            runner: namespace-profile-github-4x8
+            runner: ubuntu-latest
 
     steps:
     - name: Checkout repository

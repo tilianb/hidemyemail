@@ -163,7 +163,7 @@ test("main publishes multi-arch GHCR and SHA tags while latest tracks stable rel
 
   assert.match(workflow, /branches: \['main'\]/);
   assert.doesNotMatch(workflow, /refs\/heads\/dev/);
-  assert.match(build, /fromJSON\('\[\{"platform":"linux\/amd64"\},\{"platform":"linux\/arm64"\}\]'\)/);
+  assert.match(build, /fromJSON\('\[\{"os":"ubuntu-latest","platform":"linux\/amd64"\},\{"os":"ubuntu-24\.04-arm","platform":"linux\/arm64"\}\]'\)/);
   assert.match(build, /environment:.*refs\/heads\/main.*stable-release == 'true'.*production/);
   assert.match(step(build, "Log in to GHCR"), /if: github\.event_name != 'pull_request'/);
   assert.match(step(build, "Build for validation"), /if: github\.event_name == 'pull_request'/);
@@ -202,7 +202,7 @@ test("automation targets main directly", async () => {
   assert.match(testflight, /github\.ref_name == 'main'/);
 });
 
-test("Namespace is reserved for right-sized native, Java CodeQL, and Docker builds", async () => {
+test("all workflows use GitHub-hosted runners", async () => {
   const workflowNames = [
     "android",
     "ci",
@@ -236,25 +236,21 @@ test("Namespace is reserved for right-sized native, Java CodeQL, and Docker buil
     workflows.release.indexOf("  extension:"),
   );
 
-  assert.match(workflows.android, /runs-on: namespace-profile-github-4x8/);
-  assert.match(javaCodeql, /runner: namespace-profile-github-4x8/);
+  assert.match(workflows.android, /runs-on: ubuntu-latest/);
+  assert.match(javaCodeql, /runner: ubuntu-latest/);
   assert.match(javascriptCodeql, /runner: ubuntu-latest/);
-  assert.match(dockerBuild, /runs-on: namespace-profile-default/);
-  assert.doesNotMatch(dockerBuild, /docker\/setup-buildx-action|cache-(?:from|to): type=gha/);
+  assert.match(dockerBuild, /"os":"ubuntu-latest","platform":"linux\/amd64"/);
+  assert.match(dockerBuild, /"os":"ubuntu-24\.04-arm","platform":"linux\/arm64"/);
+  assert.match(dockerBuild, /runs-on: \$\{\{ matrix\.os \}\}/);
+  assert.match(dockerBuild, /docker\/setup-buildx-action/);
   assert.match(dockerMerge, /runs-on: ubuntu-latest/);
   assert.match(dockerMerge, /docker\/setup-buildx-action/);
-  assert.match(workflows.ios, /runs-on: namespace-profile-github-macos/);
-  assert.match(releaseAndroid, /runs-on: namespace-profile-github-4x8/);
-  assert.match(workflows.testflight, /runs-on: namespace-profile-github-macos/);
+  assert.match(workflows.ios, /runs-on: macos-latest/);
+  assert.match(releaseAndroid, /runs-on: ubuntu-latest/);
+  assert.match(workflows.testflight, /runs-on: macos-latest/);
 
   for (const [name, workflow] of Object.entries(workflows)) {
-    assert.doesNotMatch(workflow, /namespacelabs\/nscloud-cache-action/, `${name} uses paid Namespace caching`);
-    const expectedNamespaceJobs = ["android", "codeql", "docker", "ios", "release", "testflight"].includes(name) ? 1 : 0;
-    assert.equal(
-      workflow.match(/namespace-profile-/g)?.length ?? 0,
-      expectedNamespaceJobs,
-      `${name} has an unexpected number of Namespace jobs`,
-    );
+    assert.doesNotMatch(workflow, /namespacelabs|namespace-profile-/i, `${name} uses Namespace`);
   }
 });
 

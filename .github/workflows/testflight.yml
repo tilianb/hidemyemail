@@ -29,7 +29,7 @@ jobs:
   testflight:
     name: Upload to TestFlight
     if: github.event_name != 'workflow_dispatch' || github.ref_name == 'main'
-    runs-on: namespace-profile-github-macos
+    runs-on: macos-latest
     environment: production
     permissions:
       contents: read
