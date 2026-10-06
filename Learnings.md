@@ -59,6 +59,16 @@
 
 ## Patterns and Preferences
 
+**2026-10-06 — External review integrations**
+- Observation: The external PR review app was removed, leaving its repository configuration and review guidance unused.
+- Action: Remove configuration for uninstalled review integrations; add app-specific files only while the corresponding integration is active.
+- Confidence: high
+
+**2026-10-06 — GitHub Actions runner cost**
+- Observation: Namespace runner usage costs more than the performance benefit for this public repository, including Android, CodeQL, Docker, iOS, and release jobs.
+- Action: Use GitHub-hosted Linux, ARM64, and macOS runners for every workflow; keep the Docker platform matrix native by pairing `ubuntu-latest` with `ubuntu-24.04-arm`.
+- Confidence: high
+
 **2026-09-28 — Maintenance release preparation**
 - Observation: The release validator requires synchronized versions across Worker, dashboard, extension, Android, and iOS, plus an Android version code greater than the previous stable tag.
 - Action: Update every validator-owned version surface together, open the short-lived branch directly against `main`, and run `validate-release.mjs` before creating the release tag. Keep CI, Dependabot, docs links, and publication workflows aligned to `main`; do not maintain a `dev` synchronization job.
@@ -94,34 +104,9 @@
 - Action: Prefer selective, attributed detection rules and regression fixtures over importing the full DuckDuckGo runtime or migrating extension frameworks solely for autofill; preserve explicit-click generation and avoid GPL Bitwarden code in the MIT extension.
 - Confidence: high
 
-**2026-08-03 — Hybrid Namespace runner allocation**
-- Observation: At this repository's run volume, paid persistent cache storage costs more than the compute time it saves; two concurrent 4x8 Android/Java jobs use only 8 vCPU and 16 GB, while Docker can retain the cacheless default profile's remote builder independently of lightweight workflow jobs.
-- Action: Reserve Namespace 4x8 runners for Android and Java/Kotlin CodeQL, Namespace macOS for iOS and TestFlight, and the Namespace default profile for Docker image builds; run lightweight orchestration on GitHub-hosted runners and use GitHub-backed dependency caches.
-- Confidence: high
-
 **2026-08-03 — Local PR-check parity**
 - Observation: Local PR-check reproduction requires JDK 21, Android SDK 35, a compatible Xcode selected through `DEVELOPER_DIR`, and a Docker-compatible engine; Java/Kotlin CodeQL extraction requires Gradle `--no-daemon` so compilation runs under the tracer.
 - Action: Discover the available toolchain locations, export the standard environment variables, ensure the container engine is running, and disable the Gradle daemon when reproducing Java/Kotlin CodeQL.
-- Confidence: high
-
-**2026-08-03 — CI runner evaluation**
-- Observation: Standard GitHub-hosted runners are free for this public repository, while selected Namespace profiles are workspace-controlled and ephemeral; signed Android and TestFlight jobs may use Namespace, but signing files and credentials must stay outside persistent cache paths.
-- Action: Keep GitHub-hosted runners as the default for lightweight jobs; use Namespace only for approved measured workloads, preserve least-privilege job permissions, and never persist signing or publication credentials in cross-invocation caches.
-- Confidence: high
-
-**2026-08-03 — Namespace Linux runner benchmark**
-- Observation: The Namespace Linux profile cut Android and Java/Kotlin CodeQL execution by more than half, but burst scheduling added 73–160 seconds to later fan-out jobs and its Docker validation build took nearly three times as long as GitHub-hosted Ubuntu.
-- Action: Use Namespace selectively for Android and CodeQL compute-heavy jobs; retain GitHub-hosted Ubuntu for short fan-out and Docker validation jobs unless concurrency and Docker caching are improved.
-- Confidence: high
-
-**2026-08-03 — Namespace Docker remote builders**
-- Observation: `docker/setup-buildx-action` replaces the builder preconfigured by a Namespace runner with a local `docker-container` driver; skipping that action and using `outputs: type=cacheonly` preserves the `nsc-remote` builder and its persistent NVMe layer cache.
-- Action: On Namespace validation runners, use the profile-provided Buildx configuration directly; reserve `setup-buildx-action` for GitHub-hosted production publishing jobs.
-- Confidence: high
-
-**2026-08-03 — Namespace runner cache profiles**
-- Observation: The built-in `namespace-profile-default` provides a remote Docker builder but no runner Cache Volume; npm, Gradle, Xcode, and Git mirror acceleration require a cache-backed custom profile and `nscloud-cache-action` or `nscloud-checkout-action`.
-- Action: Use the default profile for Docker remote-builder orchestration, add persistent Namespace caches only when measured savings exceed storage cost, and avoid overlapping cache mechanisms.
 - Confidence: high
 
 **2026-08-01 — Web fresh-auth continuations**
@@ -152,11 +137,6 @@
 **2026-08-01 — Release workflow validation**
 - Observation: `docker/client-ip.test.mjs` also enforces release-workflow invariants, including TestFlight triggers and build-number inputs.
 - Action: When changing `.github/workflows/testflight.yml`, update and run the Docker test suite in the same change.
-- Confidence: high
-
-**2026-08-01 — Advisory-only automated review**
-- Observation: `.coderabbit.yaml` deliberately disables docstrings, autofixes, generated tests, simplification, CI fixes, and merge-conflict resolution after generated finishing touches damaged native indentation and displaced useful security comments.
-- Action: Keep automated review advisory-only, especially for Kotlin and Swift; do not enable CodeRabbit finishing touches that rewrite source.
 - Confidence: high
 
 ## What Has Failed
