@@ -6,14 +6,14 @@ import { EnvironmentSection } from "./admin/EnvironmentSection";
 import { SystemSettingsSection, type SettingsData } from "./admin/SystemSettingsSection";
 import { Users, Trash2, Globe, Cloud, Edit3, Key, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
 
-function verificationRecords(domain: Domain, mxHost: string, spfInclude: string) {
+function verificationRecords(domain: Domain, mxHost: string, spfMechanism: string) {
   return {
     txtHost: `_hidemyemail.${domain.domain}`,
     txtValue: `hidemyemail-verify=${domain.verification_token ?? ""}`,
     mxHost: domain.domain,
     mxValue: mxHost,
     spfHost: domain.domain,
-    spfValue: `v=spf1 include:${spfInclude} ~all`,
+    spfValue: `v=spf1 ${spfMechanism} ~all`,
     wildcardMxHost: `*.${domain.domain}`,
     wildcardMxValue: mxHost,
   };
@@ -90,8 +90,15 @@ export function Admin() {
   const workerOrigin = window.location.origin;
   const currentMainGlobalDomain = settingsData?.main_global_domain?.value || "";
   const sesRegion = settingsData?.ses_region?.value || envData?.vars.SES_REGION?.value || "us-east-1";
-  const inboundMxHost = settingsData?.inbound_mx_host?.value || `inbound-smtp.${sesRegion}.amazonaws.com`;
-  const outboundSpfInclude = settingsData?.outbound_spf_include?.value || "amazonses.com";
+  const inboundProvider = settingsData?.mail_inbound_provider?.value || (settingsData?.smtp_inbound_enabled?.value === "true" ? "gateway" : "ses");
+  const outboundProvider = settingsData?.mail_outbound_provider?.value || "ses";
+  const mailHostname = settingsData?.mail_hostname?.value || "";
+  const inboundMxHost = inboundProvider === "builtin" && mailHostname
+    ? mailHostname
+    : settingsData?.inbound_mx_host?.value || `inbound-smtp.${sesRegion}.amazonaws.com`;
+  const outboundSpfMechanism = outboundProvider === "direct" && mailHostname
+    ? `a:${mailHostname}`
+    : `include:${settingsData?.outbound_spf_include?.value || "amazonses.com"}`;
   const activeUserCount = users.filter(u => u.active === 1).length;
   const forwardingUserCount = users.filter(u => u.forwarding === 1).length;
   const userTerm = userSearch.trim().toLowerCase();
@@ -313,7 +320,7 @@ export function Admin() {
           {globalDomains.length > 0 && (
             <div className="domain-control-stack">
               {sortedGlobalDomains.map(d => {
-                const records = verificationRecords(d, inboundMxHost, outboundSpfInclude);
+                const records = verificationRecords(d, inboundMxHost, outboundSpfMechanism);
                 const expanded = expandedVerifyId === d.id;
                 const isMain = d.domain === currentMainGlobalDomain;
                 return (

@@ -21,6 +21,15 @@ test("private SMTP endpoints hide from forged public requests", async () => {
   expect((await app.request("/internal/smtp-recipient", { method: "POST" }, { ...env } as any)).status).toBe(404);
 });
 
+test("private domain inventory returns only active verified domains", async () => {
+  expect((await request("smtp-domains", {}, "wrong")).status).toBe(404);
+  expect(await (await request("smtp-domains", {})).json()).toEqual({ domains: [] });
+  await env.DB.prepare("UPDATE domains SET verified_at=1 WHERE domain=?").bind("test.hidemyemail.dev").run();
+  expect(await (await request("smtp-domains", {})).json()).toEqual({ domains: ["test.hidemyemail.dev"] });
+  await env.DB.prepare("UPDATE domains SET active=0").run();
+  expect(await (await request("smtp-domains", {})).json()).toEqual({ domains: [] });
+});
+
 test("rejects unknown domains and accepts an active-domain catch-all", async () => {
   expect(await (await request("smtp-recipient", { to: "shop@unknown.example" })).json()).toEqual({ accepted: false });
   expect(await (await request("smtp-recipient", { to: "shop@test.hidemyemail.dev" })).json()).toEqual({ accepted: true });

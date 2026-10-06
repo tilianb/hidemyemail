@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Added optional built-in Docker SMTP receiving on port 25 with an encrypted
+  retry queue, SPF/DKIM/DMARC checks, Rspamd and ClamAV scanning.
+- Added optional direct-to-MX Docker sending with generated encrypted DKIM
+  keys, MTA-STS enforcement, DNS target protections, and queued retries.
 - Added independent SES/custom-SMTP outbound selection and protected
   receive-only SMTP ingress for Docker deployments, configurable through both
   environment variables and encrypted admin settings.
@@ -18,6 +22,8 @@ All notable changes to this project are documented here. The format follows
 
 - Grouped admin settings with section navigation, a sticky save/discard bar,
   searchable users, and retry actions for failed admin or alias-option loads.
+- Show the Docker listener size limit in MB, with fractional values, and
+  explain the public mail gateway's role in SMTP receiving.
 - Added provider-specific MX and SPF DNS targets with SES-compatible defaults;
   domain setup now displays and checks the configured targets.
 - Consolidated dashboard fresh-auth prompts and added accessible keyboard/focus

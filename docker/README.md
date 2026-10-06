@@ -40,15 +40,46 @@ You need:
 
 1. **Docker** with the `compose` plugin (Docker Desktop, Colima, OrbStack, or
    server-side Docker Engine).
-2. **A mail transport:** AWS SES, or custom outbound SMTP plus either SES
-   inbound or a trusted public MTA such as Stalwart feeding the private Docker
-   SMTP listener.
+2. **A mail transport:** use AWS SES, or let Docker receive mail itself. For
+   forwarding, choose SES, an SMTP provider on 587/465, or direct delivery on
+   port 25.
 3. **A domain** you control, with DNS access.
 
 Custom SMTP settings are available in `.env` and the fresh-auth-protected Admin
 Settings panel. Explicit database overrides win over environment values;
 resetting an override restores `.env`. Inbound and outbound credentials are
 independent. See [Configuration](../docs/CONFIGURATION.md#custom-smtp-recipes).
+
+## Simple Docker mail receiving
+
+Docker can receive Internet mail without AWS SES or a separately configured
+mail gateway:
+
+1. Set `MAIL_INBOUND_PROVIDER=builtin` and
+   `MAIL_HOSTNAME=mail.example.com` in `.env`.
+2. Create an A/AAAA record for that hostname pointing to the Docker server.
+3. Point each alias domain's MX record to `mail.example.com`.
+4. Allow **inbound TCP port 25** in the host and provider firewalls.
+5. Start the mail-enabled stack:
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.mail.yml up -d
+   ```
+
+HideMyEmail rejects unknown recipients and stores accepted mail in an encrypted
+retry queue. It checks SPF/DKIM/DMARC, scans spam with Rspamd and viruses with
+ClamAV, then runs the normal alias forwarding rules. ClamAV needs about 3–4 GB
+of available RAM and may take several minutes to download signatures on its
+first start. Admin mail status shows scanner and queue state.
+
+Receiving and sending are separate. Many hosting suppliers allow **inbound**
+port 25 but block **outbound** port 25. In that case, keep built-in receiving
+and select custom SMTP with your provider's port 587/STARTTLS or 465/TLS.
+
+Direct outbound delivery is optional. Select it only when outbound port 25 is
+available and you can configure matching PTR/reverse DNS, SPF, and the DKIM TXT
+records shown in Admin. Remote systems may reject a new or poorly reputed
+server IP, so provider SMTP is the easier default.
 
 ---
 

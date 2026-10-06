@@ -5,7 +5,7 @@
 # Runs the Cloudflare Worker via Miniflare (workerd embedded in Node) so the
 # production code paths (D1, Assets binding, WebCrypto, fetch) work unchanged.
 # SES remains the default mail pipeline. Operators may instead configure
-# custom outbound SMTP and a private listener behind a trusted scanning MTA.
+# custom SMTP, direct delivery, and a public receive-only SMTP listener.
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Stage 1: build dashboard SPA + bundle worker
@@ -66,13 +66,17 @@ COPY --chown=nonroot:nonroot docker/client-ip.mjs ./client-ip.mjs
 COPY --chown=nonroot:nonroot docker/migrations.mjs ./migrations.mjs
 COPY --chown=nonroot:nonroot docker/smtp-transport.mjs ./smtp-transport.mjs
 COPY --chown=nonroot:nonroot docker/smtp-ingress.mjs ./smtp-ingress.mjs
+COPY --chown=nonroot:nonroot docker/builtin-ingress.mjs ./builtin-ingress.mjs
+COPY --chown=nonroot:nonroot docker/mail-scanner.mjs ./mail-scanner.mjs
+COPY --chown=nonroot:nonroot docker/mail-queue.mjs ./mail-queue.mjs
+COPY --chown=nonroot:nonroot docker/direct-mail.mjs ./direct-mail.mjs
 
 # D1 sqlite file lives here — mount a volume to persist
 COPY --from=runtime-deps --chown=nonroot:nonroot /data /data
 VOLUME ["/data"]
 
 USER nonroot:nonroot
-EXPOSE 8787
+EXPOSE 8787 2525
 
 ENV NODE_ENV=production \
     DATA_DIR=/data \

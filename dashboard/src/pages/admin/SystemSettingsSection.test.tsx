@@ -7,7 +7,7 @@ import { SystemSettingsSection, type SettingsData } from "./SystemSettingsSectio
 
 vi.mock("../../api", async importOriginal => {
   const original = await importOriginal<typeof import("../../api")>();
-  return { ...original, api: { ...original.api, adminUpdateSettings: vi.fn(), adminSettings: vi.fn(), profile: vi.fn(), mfaStatus: vi.fn(), passkeyList: vi.fn(), reauth: vi.fn() } };
+  return { ...original, api: { ...original.api, adminMailRuntime: vi.fn(), adminUpdateSettings: vi.fn(), adminSettings: vi.fn(), profile: vi.fn(), mfaStatus: vi.fn(), passkeyList: vi.fn(), reauth: vi.fn() } };
 });
 
 const mockedApi = vi.mocked(api);
@@ -17,6 +17,8 @@ const initial: SettingsData = {
   max_inbound_bytes: setting("26214400"),
   mail_outbound_provider: setting("smtp"),
   smtp_outbound_host: setting("smtp.example.com"),
+  smtp_inbound_enabled: setting("true"),
+  smtp_inbound_max_bytes: setting("28835840"),
   smtp_outbound_password: setting("••••••••"),
   ses_secret_access_key: setting("••••••••"),
 };
@@ -35,8 +37,52 @@ async function open() {
 describe("system settings editor", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedApi.adminMailRuntime.mockResolvedValue({ available: true, receiving: "gateway", outbound: "smtp", hostname: "mail.example.com", queue: { inbound: 2, outbound: 3, failed: 1, oldestPendingAt: null }, scanners: { spam: true, virus: false }, dkim: [] });
     mockedApi.adminUpdateSettings.mockResolvedValue({ ok: true, updated: 1, reset: 0, restart_required: false });
     mockedApi.adminSettings.mockResolvedValue({ settings: initial });
+  });
+
+  it("separates receiving and sending drafts from the running runtime", async () => {
+    const user = await open();
+    await user.selectOptions(screen.getByLabelText("Receiving mail"), "builtin");
+    await user.selectOptions(screen.getByLabelText("Outbound mail transport"), "direct");
+    expect(screen.getByText(/Publish inbound port 25/)).toBeInTheDocument();
+    expect(screen.getByText(/Direct delivery needs outbound port 25/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("SMTP inbound gateway ID")).not.toBeInTheDocument();
+    expect(screen.getByText(/Running: receiving gateway; sending smtp/)).toBeInTheDocument();
+  });
+
+  it("offers retry for runtime errors rather than empty queue counts", async () => {
+    mockedApi.adminMailRuntime.mockRejectedValueOnce(new Error("Unavailable"));
+    const user = await open();
+    await user.click(await screen.findByRole("button", { name: "Retry runtime status" }));
+    expect(await screen.findByText(/Inbound queued: 2/)).toBeInTheDocument();
+  });
+
+  it("displays fractional listener MB and saves edits as bytes", async () => {
+    const user = await open();
+    const input = screen.getByLabelText("SMTP inbound size limit (MB)");
+    expect(input).toHaveValue("27.5");
+    await user.clear(input); await user.type(input, "12.25");
+    mockedApi.adminSettings.mockResolvedValue({ settings: { ...initial, smtp_inbound_max_bytes: setting("12845056") } });
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await waitFor(() => expect(mockedApi.adminUpdateSettings).toHaveBeenCalledWith({ smtp_inbound_max_bytes: "12845056" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save Changes" })).toBeDisabled());
+    expect(input).toHaveValue("12.25");
+  });
+
+  it("discards listener MB edits and preserves an empty default override", async () => {
+    const user = await open();
+    const input = screen.getByLabelText("SMTP inbound size limit (MB)");
+    await user.clear(input); await user.type(input, "8");
+    await user.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(input).toHaveValue("27.5");
+    await user.clear(input);
+    mockedApi.adminSettings.mockResolvedValue({ settings: { ...initial, smtp_inbound_max_bytes: setting("") } });
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await waitFor(() => expect(mockedApi.adminUpdateSettings).toHaveBeenCalledWith({ smtp_inbound_max_bytes: "" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save Changes" })).toBeDisabled());
+    expect(input).toHaveValue("");
   });
 
   it("sends only changed values and preserves untouched secret placeholders", async () => {

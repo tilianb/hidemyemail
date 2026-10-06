@@ -12,6 +12,7 @@ async function mockApi(context: BrowserContext) {
     smtp_inbound_enabled: "true", smtp_inbound_host: "127.0.0.1", smtp_inbound_port: "2525",
     smtp_inbound_tls: "starttls", smtp_inbound_gateway_id: "gateway-1",
     smtp_inbound_username: "•••••• configured", smtp_inbound_password: "•••••• configured",
+    mail_inbound_provider: "gateway", mail_hostname: "mail.example.com",
     max_inbound_bytes: "26214400", ses_region: "us-east-1",
     inbound_mx_host: "mx.gateway.example", outbound_spf_include: "spf.relay.example",
   }).map(([key, value]) => [key, { value, updated_at: 1, source: "override" }]));
@@ -47,6 +48,7 @@ async function mockApi(context: BrowserContext) {
       ] }, "/api/admin/stats": { totals: { users: 2, aliases: 6, active: 5 } },
       "/api/admin/env": { vars: { SES_REGION: { value: "us-east-1", secret: false } }, secrets: {} },
       "/api/admin/settings": { settings },
+      "/api/admin/mail-runtime": { available: true, receiving: "gateway", outbound: "smtp", hostname: "mail.example.com", queue: { inbound: 0, outbound: 0, failed: 0, oldestPendingAt: null }, scanners: { spam: false, virus: false }, dkim: [] },
       "/api/admin/suppressions": { suppressions: [], totals: {}, health: "healthy" },
       "/api/settings/mfa": { enabled: false, backupCodesRemaining: 0 },
       "/api/settings/passkeys": [], "/api/settings/api-keys": [],
@@ -96,7 +98,24 @@ test("mail settings render expanded and elevate through the shared prompt", asyn
   await mockApi(context);
   await page.goto("/#admin");
   await page.getByText("System Settings", { exact: true }).click();
+  await page.getByText("Advanced gateway listener settings", { exact: true }).click();
   await expect(page.getByLabel("SMTP inbound gateway ID")).toHaveValue("gateway-1");
+  const size = page.getByLabel("SMTP inbound size limit (MB)");
+  await expect(size).toHaveValue("");
+  await expect(size).toHaveAttribute("placeholder", "25");
+  await size.fill("12.25");
+  await expect(size).toHaveValue("12.25");
+  await size.locator("xpath=ancestor::label").evaluate(element => element.scrollIntoView({ block: "center" }));
+  await page.screenshot({ path: info.outputPath("listener-size-mb.png"), animations: "disabled" });
+  await page.getByRole("button", { name: "Discard changes" }).click();
+  await expect(size).toHaveValue("");
+  await page.getByLabel("Receiving mail").selectOption("builtin");
+  await page.getByLabel("Outbound mail transport").selectOption("direct");
+  await expect(page.getByText("Inbound MX uses the mail server hostname above: mail.example.com.", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Direct sending authorizes the mail server hostname with SPF a:mail\.example\.com/)).toBeVisible();
+  await page.getByText("Receiving mail", { exact: true }).evaluate(element => element.scrollIntoView({ block: "center" }));
+  await page.screenshot({ path: info.outputPath("builtin-direct-settings.png"), animations: "disabled" });
+  await page.getByRole("button", { name: "Discard changes" }).click();
   await page.getByLabel("SMTP outbound host").fill("relay.example.com");
   await page.locator(".admin-settings-card").scrollIntoViewIfNeeded();
   await expect(page.getByRole("button", { name: "Save Changes", exact: true })).toBeInViewport();
@@ -165,6 +184,7 @@ for (const width of [390, 768, 1280]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/#admin");
     await page.getByText("System Settings", { exact: true }).click();
+    await page.getByText("Advanced gateway listener settings", { exact: true }).click();
     await page.getByLabel("SMTP inbound gateway ID").waitFor();
     await page.evaluate(() => document.fonts.ready);
     for (const description of await page.locator(".admin-settings-card .setting-info").all()) {
@@ -199,6 +219,13 @@ for (const width of [390, 768, 1280]) {
       expect(savebar!.y + savebar!.height).toBeLessThanOrEqual(nav!.y);
     }
     await page.screenshot({ path: info.outputPath(`receiving-${width}.png`), animations: "disabled" });
+    const listenerSize = page.getByLabel("SMTP inbound size limit (MB)").locator("xpath=ancestor::label");
+    await listenerSize.evaluate(element => element.scrollIntoView({ block: "center" }));
+    const sizeBox = await listenerSize.boundingBox();
+    expect(sizeBox!.y + sizeBox!.height).toBeLessThan((await page.locator(".admin-settings-savebar").boundingBox())!.y);
+    await page.screenshot({ path: info.outputPath(`listener-mb-${width}.png`), animations: "disabled" });
+    await page.getByText("Receiving mail", { exact: true }).evaluate(element => element.scrollIntoView({ block: "center" }));
+    await page.screenshot({ path: info.outputPath(`receiving-help-${width}.png`), animations: "disabled" });
     await page.goto("/#settings");
     await page.getByRole("button", { name: "Create API Key", exact: true }).click();
     expect((await page.getByPlaceholder("e.g. Bitwarden").boundingBox())!.width).toBeGreaterThan(240);

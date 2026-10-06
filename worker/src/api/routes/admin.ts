@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
-import { getMailDnsTargets, getMainGlobalDomain, mxRecordMatches, spfRecordIncludes } from "../../lib/settings";
+import { getMailDnsTargets, getMainGlobalDomain, mxRecordMatches, spfRecordHasMechanism } from "../../lib/settings";
 import { resolveMailProviderConfig, sendMail } from "../../lib/mail-provider";
 import { normalizeDomain, normalizeEmail } from "./admin/helpers";
 import { registerAdminSettingsRoutes } from "./admin/settings";
@@ -241,7 +241,7 @@ export function adminRoutes() {
 
     const tokenRecord = `hidemyemail-verify=${row.verification_token}`;
     const checkDomain = `_hidemyemail.${row.domain}`;
-    const { inboundMxHost: expectedMx, outboundSpfInclude: expectedSpfInclude } = await getMailDnsTargets(db, c.env);
+    const { inboundMxHost: expectedMx, outboundSpfMechanism: expectedSpfMechanism } = await getMailDnsTargets(db, c.env);
     
     try {
       const dohFetch = (url: string) =>
@@ -277,7 +277,7 @@ export function adminRoutes() {
       if (dnsSpf?.Status === 0 && dnsSpf.Answer) {
         spfOk = dnsSpf.Answer.some((a: any) => {
           if (a.type !== 16) return false;
-          return spfRecordIncludes(a.data, expectedSpfInclude);
+          return spfRecordHasMechanism(a.data, expectedSpfMechanism);
         });
       }
 

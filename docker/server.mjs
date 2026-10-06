@@ -16,6 +16,10 @@ import { trustedProxySet, workerHeaders } from "./client-ip.mjs";
 import { applyMigrations } from "./migrations.mjs";
 import { createSmtpTransportHandler } from "./smtp-transport.mjs";
 import { createSmtpIngress } from "./smtp-ingress.mjs";
+import { createBuiltinIngress } from "./builtin-ingress.mjs";
+import { createMailQueue } from "./mail-queue.mjs";
+import { createDirectMail } from "./direct-mail.mjs";
+import { scanMail, clamScan } from "./mail-scanner.mjs";
 
 const env = process.env;
 
@@ -27,8 +31,8 @@ const REQUIRED_CONFIG = [
   "DESTINATION_ENCRYPTION_KEY",
 ];
 const ENV_MAIL_OUTBOUND_PROVIDER = (env.MAIL_OUTBOUND_PROVIDER ?? "ses").toLowerCase();
-if (!['ses', 'smtp'].includes(ENV_MAIL_OUTBOUND_PROVIDER)) {
-  console.error("[hidemyemail] MAIL_OUTBOUND_PROVIDER must be ses or smtp");
+if (!["ses", "smtp", "direct"].includes(ENV_MAIL_OUTBOUND_PROVIDER)) {
+  console.error("[hidemyemail] MAIL_OUTBOUND_PROVIDER must be ses, smtp, or direct");
   process.exit(1);
 }
 const missing = REQUIRED_CONFIG.filter((k) => !env[k]);
@@ -58,6 +62,7 @@ const HOST = env.HOST ?? "0.0.0.0";
 const TRUSTED_PROXIES = trustedProxySet(env.TRUSTED_PROXY_IPS);
 const SMTP_INGRESS_SECRET = randomBytes(32).toString("hex");
 let smtpTransportHandler = async () => new Response("SMTP transport is not active", { status: 503 });
+let mailRuntimeHandler = async () => Response.json({ available: false });
 
 const D1_PERSIST_DIR = path.join(DATA_DIR, "d1");
 await mkdir(D1_PERSIST_DIR, { recursive: true });
@@ -90,7 +95,10 @@ const mf = new Miniflare({
   // D1 — file-backed SQLite under DATA_DIR/d1
   d1Databases: { DB: "hidemyemail-db" },
   d1Persist: D1_PERSIST_DIR,
-  serviceBindings: { SMTP_TRANSPORT: (request) => smtpTransportHandler(request) },
+  serviceBindings: {
+    SMTP_TRANSPORT: (request) => smtpTransportHandler(request),
+    MAIL_RUNTIME: (request) => mailRuntimeHandler(request),
+  },
 
   // Static SPA (dashboard/dist) — Workers Assets routing parity.
   // run_worker_first from wrangler.jsonc becomes:
@@ -112,6 +120,8 @@ const mf = new Miniflare({
   bindings: {
     ENVIRONMENT: env.ENVIRONMENT ?? "self-hosted",
     MAIL_OUTBOUND_PROVIDER: ENV_MAIL_OUTBOUND_PROVIDER,
+    MAIL_INBOUND_PROVIDER: env.MAIL_INBOUND_PROVIDER ?? "",
+    MAIL_HOSTNAME: env.MAIL_HOSTNAME ?? "",
     INBOUND_MX_HOST: env.INBOUND_MX_HOST ?? "",
     OUTBOUND_SPF_INCLUDE: env.OUTBOUND_SPF_INCLUDE ?? "",
     SMTP_OUTBOUND_HOST: env.SMTP_OUTBOUND_HOST ?? "",
@@ -178,18 +188,91 @@ const dispatchInternal = (operation, body) => mf.dispatchFetch(`http://internal/
 const smtpConfigResponse = await dispatchInternal("smtp-config", {});
 if (!smtpConfigResponse.ok) throw new Error("Unable to resolve SMTP configuration");
 const effectiveSmtpEnv = { ...env, ...await smtpConfigResponse.json() };
-if ((effectiveSmtpEnv.MAIL_OUTBOUND_PROVIDER || "ses") === "smtp") {
+const outboundProvider = effectiveSmtpEnv.MAIL_OUTBOUND_PROVIDER || "ses";
+const inboundProvider = effectiveSmtpEnv.MAIL_INBOUND_PROVIDER
+  || (effectiveSmtpEnv.SMTP_INBOUND_ENABLED === "true" ? "gateway" : "ses");
+let queue;
+let directMail;
+if (inboundProvider === "builtin" || outboundProvider === "direct") {
+  const domains = async () => {
+    const response = await dispatchInternal("smtp-domains", {});
+    if (!response.ok) throw new Error("Unable to resolve mail domains");
+    return (await response.json()).domains;
+  };
+  if (outboundProvider === "direct") {
+    directMail = await createDirectMail({
+      directory: path.join(DATA_DIR, "mail-keys"), encryptionKey: env.DESTINATION_ENCRYPTION_KEY,
+      hostname: effectiveSmtpEnv.MAIL_HOSTNAME, domains,
+    });
+  }
+  queue = await createMailQueue({
+    directory: path.join(DATA_DIR, "mail-queue"), encryptionKey: env.DESTINATION_ENCRYPTION_KEY,
+    maxBytes: Number(env.MAIL_QUEUE_MAX_BYTES || 1024 ** 3),
+    async process(kind, payload, id) {
+      if (kind === "outbound") return directMail.deliver(payload);
+      const raw = Buffer.from(payload.rawBase64, "base64");
+      const auth = await scanMail(raw, payload, {
+        rspamdUrl: env.RSPAMD_URL || "http://rspamd:11333/checkv2",
+        hostname: effectiveSmtpEnv.MAIL_HOSTNAME,
+        clam: message => clamScan(message, { host: env.CLAMAV_HOST || "clamav", port: Number(env.CLAMAV_PORT || 3310) }),
+      });
+      const response = await dispatchInternal("smtp-ingest", {
+        gateway: `builtin-${effectiveSmtpEnv.MAIL_HOSTNAME}`, deliveryId: id,
+        from: payload.from || `postmaster@${effectiveSmtpEnv.MAIL_HOSTNAME}`,
+        to: payload.to, rawBase64: payload.rawBase64, auth,
+      });
+      if (!response.ok) throw Object.assign(new Error("Inbound processing failed"), { permanent: response.status < 500 });
+    },
+  });
+  queue.start();
+}
+if (outboundProvider === "smtp") {
   smtpTransportHandler = createSmtpTransportHandler(effectiveSmtpEnv);
+} else if (outboundProvider === "direct") {
+  smtpTransportHandler = async request => {
+    if (request.method !== "POST") return new Response("Not found", { status: 404 });
+    try {
+      const prepared = await directMail.prepare(await request.json());
+      const providerId = await queue.enqueue("outbound", prepared);
+      return Response.json({ providerId }, { status: 202 });
+    } catch (error) {
+      if (error?.permanent) return new Response("Direct delivery rejected", { status: 400 });
+      return new Response("Direct delivery queue unavailable", { status: 421 });
+    }
+  };
 } else if (!effectiveSmtpEnv.SES_ACCESS_KEY_ID || !effectiveSmtpEnv.SES_SECRET_ACCESS_KEY) {
   throw new Error("SES outbound selected but SES credentials are not configured");
 }
-const smtpIngress = await createSmtpIngress(effectiveSmtpEnv, dispatchInternal);
+let smtpIngress;
+if (inboundProvider === "gateway") smtpIngress = await createSmtpIngress(effectiveSmtpEnv, dispatchInternal);
+if (inboundProvider === "builtin") {
+  if (!effectiveSmtpEnv.MAIL_HOSTNAME) throw new Error("Built-in receiving requires MAIL_HOSTNAME");
+  const builtinEnv = { ...effectiveSmtpEnv };
+  if (builtinEnv.SMTP_INBOUND_TLS_CERT) {
+    builtinEnv.SMTP_INBOUND_TLS_CERT_CONTENT = await readFile(builtinEnv.SMTP_INBOUND_TLS_CERT);
+    builtinEnv.SMTP_INBOUND_TLS_KEY_CONTENT = await readFile(builtinEnv.SMTP_INBOUND_TLS_KEY);
+  }
+  smtpIngress = await createBuiltinIngress(builtinEnv, dispatchInternal, queue);
+}
 if (smtpIngress) {
   await new Promise((resolve, reject) => {
     smtpIngress.server.once("error", reject);
     smtpIngress.server.listen(smtpIngress.port, smtpIngress.host, resolve);
   });
 }
+mailRuntimeHandler = async request => {
+  if (new URL(request.url).pathname !== "/status") return new Response("Not found", { status: 404 });
+  const scanners = { spam: false, virus: false };
+  if (inboundProvider === "builtin") {
+    scanners.spam = await fetch(env.RSPAMD_URL?.replace(/\/checkv2$/, "/ping") || "http://rspamd:11333/ping", { signal: AbortSignal.timeout(2000) }).then(response => response.ok).catch(() => false);
+    scanners.virus = await clamScan(Buffer.alloc(0), { host: env.CLAMAV_HOST || "clamav", port: Number(env.CLAMAV_PORT || 3310), timeout: 2000 }).then(() => true).catch(() => false);
+  }
+  return Response.json({
+    available: true, receiving: inboundProvider, outbound: outboundProvider,
+    hostname: effectiveSmtpEnv.MAIL_HOSTNAME || "", queue: queue ? await queue.status() : { inbound: 0, outbound: 0, failed: 0, oldestPendingAt: null },
+    scanners, dkim: directMail ? await directMail.records() : [],
+  });
+};
 
 // Terminate HTTP outside workerd so the socket peer is authoritative. Caller
 // forwarding headers are stripped before every request enters the Worker.
@@ -258,6 +341,7 @@ const shutdown = async (signal) => {
   try {
     await new Promise((resolve) => server.close(resolve));
     if (smtpIngress) await new Promise((resolve) => smtpIngress.server.close(resolve));
+    if (queue) await queue.stop();
     await mf.dispose();
   } finally {
     process.exit(0);

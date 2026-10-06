@@ -1,6 +1,7 @@
 import type { Env } from "../types";
 import { getEnvWithOverride } from "./settings";
 import { sendRaw, SesPermanentError, SesRetryableError, SesTransientError, SesUncertainError } from "./ses";
+import { SETTING_DEFINITIONS } from "../config";
 
 export interface MailMessage {
   from: string;
@@ -15,7 +16,7 @@ export class MailUncertainError extends MailRetryableError {}
 
 export type MailProviderConfig =
   | { provider: "ses"; accessKeyId: string; secretAccessKey: string; region: string }
-  | { provider: "smtp" };
+  | { provider: "smtp" | "direct" };
 
 export async function resolveMailProviderConfig(
   db: D1Database,
@@ -32,9 +33,14 @@ export async function resolveMailProviderConfig(
       ? { provider, accessKeyId, secretAccessKey, region }
       : null;
   }
-  if (provider !== "smtp") throw new MailPermanentError(`Unsupported MAIL_OUTBOUND_PROVIDER: ${provider}`);
+  if (provider !== "smtp" && provider !== "direct") throw new MailPermanentError(`Unsupported MAIL_OUTBOUND_PROVIDER: ${provider}`);
+  if (provider === "direct") {
+    if (!env.MAIL_RUNTIME) throw new MailRetryableError("Direct delivery requires the Docker-only MAIL_RUNTIME binding");
+    const hostname = await getEnvWithOverride(db, env, "mail_hostname");
+    if (!hostname || SETTING_DEFINITIONS.mail_hostname.validate?.(hostname)) throw new MailPermanentError("Direct delivery requires a canonical MAIL_HOSTNAME");
+  }
   if (!env.SMTP_TRANSPORT) {
-    throw new MailRetryableError("MAIL_OUTBOUND_PROVIDER=smtp requires the Docker-only SMTP_TRANSPORT binding");
+    throw new MailRetryableError(`MAIL_OUTBOUND_PROVIDER=${provider} requires the Docker-only SMTP_TRANSPORT binding`);
   }
   return { provider };
 }
@@ -70,6 +76,7 @@ export async function sendMail(
   }
 
   const transport = env.SMTP_TRANSPORT;
+  if (config.provider === "direct" && !env.MAIL_RUNTIME) throw new MailRetryableError("Direct delivery requires the Docker-only MAIL_RUNTIME binding");
   if (!transport) throw new MailRetryableError("SMTP transport binding is unavailable");
   let response: Response;
   try {

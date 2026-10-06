@@ -20,12 +20,34 @@ const settingsPatchSchema = z.record(z.string(), z.union([z.string(), z.null()])
 const mailSettings = new Set<string>(MAIL_SETTING_KEYS);
 const freshAuthSettings = new Set<string>(FRESH_AUTH_SETTING_KEYS);
 const definitionFor = (key: SettingKey): SettingDefinition => SETTING_DEFINITIONS[key];
+const runtimeStatusSchema = z.object({
+  available: z.literal(true),
+  receiving: z.enum(["ses", "builtin", "gateway"]),
+  outbound: z.enum(["ses", "smtp", "direct"]),
+  hostname: z.string(),
+  queue: z.object({ inbound: z.number().int().nonnegative(), outbound: z.number().int().nonnegative(), failed: z.number().int().nonnegative(), oldestPendingAt: z.number().nullable() }),
+  scanners: z.object({ spam: z.boolean(), virus: z.boolean() }),
+  dkim: z.array(z.object({ domain: z.string(), name: z.string(), value: z.string() })),
+});
 const envValue = (env: AppEnv["Bindings"], key: SettingKey): string => {
   const name = definitionFor(key).env;
   return name ? (env as unknown as Record<string, string | undefined>)[name] ?? "" : "";
 };
 
 export function registerAdminSettingsRoutes(r: Hono<AppEnv>) {
+  r.get("/mail-runtime", async (c) => {
+    c.header("Cache-Control", "no-store");
+    if (!c.env.MAIL_RUNTIME) return c.json({ available: false });
+    try {
+      const response = await c.env.MAIL_RUNTIME.fetch("http://mail.runtime/status");
+      if (!response.ok) throw new Error("Runtime unavailable");
+      // Explicit allowlist strips runtime-only fields at every level.
+      return c.json(runtimeStatusSchema.parse(await response.json()));
+    } catch {
+      return c.json({ error: "Mail runtime status unavailable. Retry after checking Docker.", retryable: true }, 503);
+    }
+  });
+
   // ── Environment Variables (read-only) ──────────────────────────────────────
   r.get("/env", async (c) => {
     const env = c.env;
@@ -152,7 +174,8 @@ export function registerAdminSettingsRoutes(r: Hono<AppEnv>) {
       else if (typeof supplied === "string" && !supplied.includes("••••••")) proposed[key] = supplied;
       else proposed[key] = await getEnvWithOverride(db, c.env, key);
     }
-    if ((proposed.mail_outbound_provider || "ses") === "smtp") {
+    const mailConfigurationChanged = Object.keys(body).some((key) => mailSettings.has(key));
+    if (mailConfigurationChanged && (proposed.mail_outbound_provider || "ses") === "smtp") {
       if (Object.hasOwn(body, "mail_outbound_provider") && !c.env.SMTP_TRANSPORT) {
         errors.push("Custom SMTP requires the Docker SMTP_TRANSPORT binding");
       }
@@ -160,7 +183,13 @@ export function registerAdminSettingsRoutes(r: Hono<AppEnv>) {
       if (!!proposed.smtp_outbound_username !== !!proposed.smtp_outbound_password) errors.push("SMTP outbound username and password must be configured together");
       if (proposed.smtp_outbound_tls === "trusted-cleartext" && proposed.smtp_outbound_port !== "25") errors.push("Trusted cleartext SMTP is restricted to port 25");
     }
-    if (proposed.smtp_inbound_enabled === "true") {
+    const receiving = proposed.mail_inbound_provider || (proposed.smtp_inbound_enabled === "true" ? "gateway" : "ses");
+    if (mailConfigurationChanged && (receiving === "builtin" || proposed.mail_outbound_provider === "direct")) {
+      if (!c.env.MAIL_RUNTIME) errors.push("Built-in receiving and direct sending require the Docker-only MAIL_RUNTIME binding");
+      if (!proposed.mail_hostname || SETTING_DEFINITIONS.mail_hostname.validate?.(proposed.mail_hostname)) errors.push("Built-in receiving and direct sending require a canonical mail_hostname");
+      if (proposed.mail_outbound_provider === "direct" && !c.env.SMTP_TRANSPORT) errors.push("Direct sending requires the Docker SMTP_TRANSPORT binding");
+    }
+    if (mailConfigurationChanged && receiving === "gateway") {
       for (const key of ["smtp_inbound_host", "smtp_inbound_port", "smtp_inbound_tls", "smtp_inbound_username", "smtp_inbound_password", "smtp_inbound_gateway_id"]) {
         if (!proposed[key]) errors.push(`SMTP receiving requires ${key}`);
       }

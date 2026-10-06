@@ -49,6 +49,7 @@ export function smtpInboundRoutes() {
   routes.post("/smtp-config", async (c) => {
     const keys = [
       "ses_region", "ses_access_key_id", "ses_secret_access_key",
+      "mail_inbound_provider", "mail_hostname",
       "mail_outbound_provider", "smtp_outbound_host", "smtp_outbound_port", "smtp_outbound_tls",
       "smtp_outbound_username", "smtp_outbound_password", "smtp_inbound_enabled", "smtp_inbound_host",
       "smtp_inbound_port", "smtp_inbound_tls", "smtp_inbound_username", "smtp_inbound_password",
@@ -58,6 +59,13 @@ export function smtpInboundRoutes() {
     for (const key of keys) config[key.toUpperCase()] = await getEnvWithOverride(c.env.DB, c.env, key);
     return c.json(config);
   });
+
+  const domains = async (c: import("hono").Context<AppEnv>) => {
+    const rows = await c.env.DB.prepare("SELECT domain FROM domains WHERE active=1 AND verified_at IS NOT NULL ORDER BY domain").all<{ domain: string }>();
+    return c.json({ domains: rows.results.map(row => row.domain) });
+  };
+  routes.get("/smtp-domains", domains);
+  routes.post("/smtp-domains", domains);
 
   routes.post("/smtp-ingest", async (c) => {
     type IngestBody = {

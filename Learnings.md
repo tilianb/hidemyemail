@@ -2,6 +2,11 @@
 
 ## What Has Worked
 
+**2026-10-03 — Docker mail port independence**
+- Observation: Providers often allow inbound TCP 25 while blocking outbound TCP 25, so one SMTP-port switch cannot represent the deployment capability.
+- Action: Configure receiving and sending independently; allow built-in inbound 25 with SES/provider SMTP on 587/465, and keep direct outbound 25 optional with a durable encrypted queue.
+- Confidence: high
+
 **2026-10-02 — Dashboard field readability**
 - Observation: The shared 160px settings-input rule clipped SMTP placeholders and policy dropdowns, while SMTP's inline 360px minimum overflowed mobile cards. Security naming forms also shrank inputs between action buttons.
 - Action: Give compound settings responsive full-width fields with persistent labels; wrap naming actions and measure the longest dropdown option at mobile, tablet, and desktop widths.
@@ -77,6 +82,11 @@
 **2026-10-06 — GitHub Actions runner cost**
 - Observation: Namespace runner usage costs more than the performance benefit for this public repository, including Android, CodeQL, Docker, iOS, and release jobs.
 - Action: Use GitHub-hosted Linux, ARM64, and macOS runners for every workflow; keep the Docker platform matrix native by pairing `ubuntu-latest` with `ubuntu-24.04-arm`.
+- Confidence: high
+
+**2026-10-03 — Listener size display units**
+- Observation: Docker ingress stores its size in bytes, while the admin's instance-wide size field uses 1,048,576-byte MB. An empty listener override selects the 25 MiB default rather than zero.
+- Action: Keep listener display units aligned with the instance-wide field, preserve fractional values, and test byte conversion plus empty, discard, and reload behavior.
 - Confidence: high
 
 **2026-10-03 — Alias query usage counts**

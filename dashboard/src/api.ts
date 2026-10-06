@@ -1,4 +1,5 @@
-import type { AliasDto, DestinationDto, CreateAliasInput, PatchAliasInput } from "../../worker/src/contracts/api";
+import type { AliasDto, DestinationDto, CreateAliasInput, PatchAliasInput, MailRuntimeDto } from "../../worker/src/contracts/api";
+export type { MailRuntimeDto } from "../../worker/src/contracts/api";
 
 export interface Domain {
   id: number;
@@ -292,6 +293,7 @@ export const api = {
   // Admin environment & settings
   adminEnv: () => req<{ vars: Record<string, { value: string; secret: false }>; secrets: Record<string, { configured: boolean; preview?: string }> }>("/api/admin/env"),
   adminSettings: () => req<{ settings: Record<string, { value: string; updated_at: number; source?: "override" | "environment" | "default" }> }>("/api/admin/settings"),
+  adminMailRuntime: () => req<MailRuntimeDto>("/api/admin/mail-runtime"),
   adminUpdateSettings: (data: Record<string, string | null>) => req<{ ok: true; updated: number; reset: number; restart_required: boolean }>("/api/admin/settings", { method: "PATCH", body: JSON.stringify(data) }),
   adminSendTestEmail: (data: { type: string; to: string }) => req<{ ok: true; type: string; to: string }>("/api/admin/test-email", { method: "POST", body: JSON.stringify(data) }),
   adminSuppressions: () => req<{ suppressions: SuppressionEntry[]; totals: SuppressionSummary; health: "healthy" | "attention" }>("/api/admin/suppressions"),

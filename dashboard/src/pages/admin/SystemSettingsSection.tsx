@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Send, Settings } from "lucide-react";
-import { api, type Domain } from "../../api";
+import { api, type Domain, type MailRuntimeDto } from "../../api";
 import { FreshAuthDialog, useFreshAuth } from "../../security/FreshAuth";
 import { useToast } from "../../ui";
 
@@ -30,7 +30,11 @@ export function SystemSettingsSection({ initialSettings, globalDomains, onSaved 
   const [editedSettings, setEditedSettings] = useState<Record<string, string>>(() => valuesOf(initialSettings));
   const [savingSettings, setSavingSettings] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [runtime, setRuntime] = useState<MailRuntimeDto | null>(null);
+  const [runtimeError, setRuntimeError] = useState(false);
+  const [runtimeRefresh, setRuntimeRefresh] = useState(0);
   const [inboundBytesInput, setInboundBytesInput] = useState(() => initialSettings.max_inbound_bytes?.value ? (parseInt(initialSettings.max_inbound_bytes.value, 10) / 1024 / 1024).toString() : "");
+  const [listenerMbInput, setListenerMbInput] = useState(() => initialSettings.smtp_inbound_max_bytes?.value ? (Number(initialSettings.smtp_inbound_max_bytes.value) / 1024 / 1024).toString() : "");
   const [testEmailForm, setTestEmailForm] = useState({ type: "notification", to: "" });
   const [sendingTestEmail, setSendingTestEmail] = useState(false);
   const freshAuth = useFreshAuth({ onError: message => toast(message, "error") });
@@ -38,6 +42,16 @@ export function SystemSettingsSection({ initialSettings, globalDomains, onSaved 
   const currentMainGlobalDomain = editedSettings.main_global_domain || "";
   const selectableMainGlobalDomains = globalDomains.filter(domain => domain.active === 1 && domain.verified_at !== null);
   const isSettingsDirty = Object.keys(editedSettings).some(key => settingsData[key]?.value !== editedSettings[key]);
+  const receiving = editedSettings.mail_inbound_provider || (editedSettings.smtp_inbound_enabled === "true" ? "gateway" : "ses");
+
+  useEffect(() => {
+    if (!showSettings) return;
+    let cancelled = false;
+    setRuntimeError(false);
+    setRuntime(null);
+    api.adminMailRuntime().then(value => { if (!cancelled) setRuntime(value); }).catch(() => { if (!cancelled) setRuntimeError(true); });
+    return () => { cancelled = true; };
+  }, [showSettings, runtimeRefresh]);
 
   useEffect(() => {
     if (!isSettingsDirty) return;
@@ -49,6 +63,7 @@ export function SystemSettingsSection({ initialSettings, globalDomains, onSaved 
   function discardChanges() {
     setEditedSettings(valuesOf(settingsData));
     setInboundBytesInput(settingsData.max_inbound_bytes?.value ? (parseInt(settingsData.max_inbound_bytes.value, 10) / 1024 / 1024).toString() : "");
+    setListenerMbInput(settingsData.smtp_inbound_max_bytes?.value ? (Number(settingsData.smtp_inbound_max_bytes.value) / 1024 / 1024).toString() : "");
   }
 
   async function reload() {
@@ -56,6 +71,7 @@ export function SystemSettingsSection({ initialSettings, globalDomains, onSaved 
     setSettingsData(response.settings);
     setEditedSettings(valuesOf(response.settings));
     setInboundBytesInput(response.settings.max_inbound_bytes?.value ? (parseInt(response.settings.max_inbound_bytes.value, 10) / 1024 / 1024).toString() : "");
+    setListenerMbInput(response.settings.smtp_inbound_max_bytes?.value ? (Number(response.settings.smtp_inbound_max_bytes.value) / 1024 / 1024).toString() : "");
     onSaved(response.settings);
   }
   async function saveSettings() {
@@ -122,15 +138,30 @@ export function SystemSettingsSection({ initialSettings, globalDomains, onSaved 
             <div className="settings-grid" style={{ display: "flex", flexDirection: "column", gap: 0 }}>
               <h2 className="admin-settings-heading" id="admin-setting-mail" tabIndex={-1}>Mail transport</h2>
               <div className="setting-row" style={{ alignItems: "flex-start" }}>
+                <div className="setting-info"><div className="setting-label">Running mail status</div><div className="setting-desc">Live Docker state, not the draft settings below. Restart Docker after saving transport changes.</div></div>
+                <div className="setting-control mail-settings-control">
+                  {runtimeError ? <div role="alert">Mail runtime status unavailable. Queue counts are unknown. <button type="button" className="btn btn-outline btn-sm" onClick={() => setRuntimeRefresh(value => value + 1)}>Retry runtime status</button></div> : !runtime ? <p>Loading mail runtime…</p> : !runtime.available ? <p>Docker mail runtime unavailable. Built-in receiving and direct sending are Docker-only. Existing settings are unchanged.</p> : <>
+                    <p>Running: receiving {runtime.receiving}; sending {runtime.outbound}; hostname {runtime.hostname || "not set"}.</p>
+                    <p>Inbound queued: {runtime.queue.inbound}; outbound queued: {runtime.queue.outbound}; failed: {runtime.queue.failed}.</p>
+                    <p>Oldest pending: {runtime.queue.oldestPendingAt === null ? "none" : new Date(runtime.queue.oldestPendingAt).toLocaleString()}.</p>
+                    <p>Spam scanner: {runtime.scanners.spam ? "ready" : "not ready"}; virus scanner: {runtime.scanners.virus ? "ready" : "not ready"}.</p>
+                    {runtime.outbound === "direct" && <div><div className="setting-label">DKIM DNS records (TXT)</div>{runtime.dkim.length === 0 ? <p>No DKIM records ready. Verify domains and check Docker.</p> : runtime.dkim.map(record => <div key={record.name} className="mail-field"><span>{record.domain}</span><input className="input input-mono" aria-label={`DKIM name for ${record.domain}`} readOnly value={record.name} /><textarea className="input input-mono" aria-label={`DKIM value for ${record.domain}`} readOnly value={record.value} /><button type="button" className="btn btn-outline btn-sm" onClick={() => { void navigator.clipboard.writeText(`${record.name} TXT ${record.value}`).then(() => toast("DKIM record copied", "success")).catch(() => toast("Could not copy; select the DNS fields instead", "error")); }}>Copy DKIM record</button></div>)}</div>}
+                    <button type="button" className="btn btn-outline btn-sm" onClick={() => setRuntimeRefresh(value => value + 1)}>Refresh runtime status</button>
+                  </>}
+                </div>
+              </div>
+              <div className="setting-row"><div className="setting-info"><label htmlFor="setting-mail-hostname" className="setting-label">Mail server hostname</label><div className="setting-desc">Canonical DNS hostname required for built-in receiving or direct sending. Point its A/AAAA records at your server.</div></div><div className="setting-control"><input id="setting-mail-hostname" className="input input-mono" placeholder="mail.example.com" value={editedSettings.mail_hostname || ""} onChange={e => setEditedSettings({...editedSettings, mail_hostname: e.target.value.toLowerCase()})} /></div></div>
+              <div className="setting-row" style={{ alignItems: "flex-start" }}>
                 <div className="setting-info">
                   <label htmlFor="setting-mail-provider" className="setting-label">Outbound mail transport</label>
-                  <div className="setting-desc">SES remains the default. Custom SMTP runs only in Docker through a private service binding.</div>
+                  <div className="setting-desc">SES remains the default. Provider SMTP on port 587 or 465 is recommended when your host blocks outbound port 25. Custom SMTP and direct delivery run only in Docker.</div>
                 </div>
                 <div className="setting-control mail-settings-control">
                   <select id="setting-mail-provider" className="input" value={editedSettings.mail_outbound_provider || "ses"} onChange={e => setEditedSettings({...editedSettings, mail_outbound_provider: e.target.value})}>
-                    <option value="ses">AWS SES</option><option value="smtp">Custom SMTP</option>
+                    <option value="ses">AWS SES</option><option value="smtp">Custom SMTP</option><option value="direct" disabled={!runtime?.available}>Direct SMTP (Docker)</option>
                   </select>
                   <div className="setting-desc">Source: {settingsData.mail_outbound_provider?.source ?? "default"}. Saved SMTP changes become active after Docker restarts.</div>
+                  {editedSettings.mail_outbound_provider === "direct" && <p className="setting-desc">Direct delivery needs outbound port 25, matching PTR (reverse DNS), SPF authorizing your server IP, and published DKIM records. It is optional; provider SMTP avoids outbound-25 restrictions. Opening inbound port 25 alone does not enable direct sending.</p>}
                   {editedSettings.mail_outbound_provider === "smtp" && <>
                     <label className="mail-field"><span className="setting-label">SMTP host</span><input className="input input-mono" aria-label="SMTP outbound host" placeholder="smtp.example.com" value={editedSettings.smtp_outbound_host || ""} onChange={e => setEditedSettings({...editedSettings, smtp_outbound_host: e.target.value})} /></label>
                     <div className="mail-connection-row">
@@ -149,13 +180,14 @@ export function SystemSettingsSection({ initialSettings, globalDomains, onSaved 
 
               <div className="setting-row" style={{ alignItems: "flex-start" }}>
                 <div className="setting-info">
-                  <div className="setting-label">SMTP receiving</div>
-                  <div className="setting-desc">Receive-only Docker listener for a trusted scanning MTA. This does not poll an IMAP/POP mailbox. Changes activate after restart.</div>
+                  <label htmlFor="setting-mail-receiving" className="setting-label">Receiving mail</label>
+                  <div className="setting-desc">SES remains the default. Docker can receive mail itself or accept it from a trusted scanning gateway. Receiving and sending are separate choices; neither fetches IMAP/POP mail.</div>
                 </div>
                 <div className="setting-control mail-settings-control">
-                  <label className="domain-toggle"><span>Enabled after restart</span><div className="switch"><input type="checkbox" checked={editedSettings.smtp_inbound_enabled === "true"} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_enabled: e.target.checked ? "true" : "false"})} /><span className="switch-track"></span></div></label>
-                  <div className="setting-desc">Source: {settingsData.smtp_inbound_enabled?.source ?? "default"}. Configured state may differ from the active listener until restart.</div>
-                  {editedSettings.smtp_inbound_enabled === "true" && <>
+                  <select id="setting-mail-receiving" className="input" value={receiving} onChange={e => setEditedSettings({...editedSettings, mail_inbound_provider: e.target.value})}><option value="ses">AWS SES</option><option value="builtin" disabled={!runtime?.available}>Built-in SMTP (Docker)</option><option value="gateway">External gateway</option></select>
+                  <div className="setting-desc">Source: {settingsData.mail_inbound_provider?.source ?? settingsData.smtp_inbound_enabled?.source ?? "default"}. Configured state may differ from the active listener until restart.</div>
+                  {receiving === "builtin" && <p className="setting-desc">Publish inbound port 25 in Docker and open it in your firewall. Point alias-domain MX records at your mail server hostname. No external gateway is needed: spam and virus scans use bundled Compose services. Save and restart Docker. Inbound port 25 receives mail; outbound port 25 is only needed for direct sending.</p>}
+                  {receiving === "gateway" && <details><summary>Advanced gateway listener settings</summary><p className="setting-desc">Your external gateway must queue mail, check sender authentication, and supply trusted spam and virus scan results. Save and restart Docker.</p>
                     <label className="mail-field"><span className="setting-label">Bind address</span><input className="input input-mono" aria-label="SMTP inbound bind address" placeholder="127.0.0.1" value={editedSettings.smtp_inbound_host || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_host: e.target.value})} /></label>
                     <div className="mail-connection-row">
                       <label className="mail-field"><span className="setting-label">Port</span><input className="input" aria-label="SMTP inbound port" inputMode="numeric" placeholder="2525" value={editedSettings.smtp_inbound_port || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_port: e.target.value.replace(/\D/g, "")})} /></label>
@@ -163,23 +195,28 @@ export function SystemSettingsSection({ initialSettings, globalDomains, onSaved 
                     </div>
                     <label className="mail-field"><span className="setting-label">Gateway ID</span><input className="input input-mono" aria-label="SMTP inbound gateway ID" placeholder="stalwart-1" value={editedSettings.smtp_inbound_gateway_id || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_gateway_id: e.target.value})} /></label>
                     <label className="mail-field"><span className="setting-label">Trusted peer IPs</span><input className="input input-mono" aria-label="SMTP inbound trusted peers" placeholder="127.0.0.1, ::1" value={editedSettings.smtp_inbound_trusted_peers || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_trusted_peers: e.target.value})} /><span className="setting-desc">Exact IP addresses, separated by commas. Empty allows any peer with valid listener credentials.</span></label>
-                    <label className="mail-field"><span className="setting-label">Listener size limit (bytes)</span><input className="input input-mono" aria-label="SMTP inbound size limit" inputMode="numeric" placeholder="26214400" value={editedSettings.smtp_inbound_max_bytes || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_max_bytes: e.target.value.replace(/\D/g, "")})} /><span className="setting-desc">Empty uses 25 MiB. The instance-wide inbound size limit below also applies.</span></label>
+                    <label className="mail-field"><span className="setting-label">Listener size limit (MB)</span><input className="input input-mono" aria-label="SMTP inbound size limit (MB)" inputMode="decimal" placeholder="25" value={listenerMbInput} onChange={e => {
+                      const value = e.target.value;
+                      if (!/^\d*(\.\d*)?$/.test(value)) return;
+                      setListenerMbInput(value);
+                      setEditedSettings({...editedSettings, smtp_inbound_max_bytes: value === "" ? "" : Math.round(Number(value) * 1024 * 1024).toString()});
+                    }} /><span className="setting-desc">Empty uses 25 MB. 1 MB = 1,048,576 bytes (MiB). The instance-wide inbound size limit below also applies.</span></label>
                     <label className="mail-field"><span className="setting-label">Listener username (write-only)</span><input className="input input-mono" aria-label="SMTP inbound username" autoComplete="off" value={editedSettings.smtp_inbound_username || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_username: e.target.value})} /></label>
                     <label className="mail-field"><span className="setting-label">Listener password</span><input className="input" aria-label="SMTP inbound password" type="password" autoComplete="new-password" value={editedSettings.smtp_inbound_password || ""} onChange={e => setEditedSettings({...editedSettings, smtp_inbound_password: e.target.value})} /><span className="setting-desc">Leave unchanged to preserve the saved password.</span></label>
                     <div className="mail-settings-actions"><button type="button" className="btn btn-outline btn-sm" onClick={() => setEditedSettings({...editedSettings, smtp_inbound_username: "", smtp_inbound_password: ""})}>Remove credentials</button><button type="button" className="btn btn-outline btn-sm" onClick={() => resetMailSettings(["smtp_inbound_enabled", "smtp_inbound_host", "smtp_inbound_port", "smtp_inbound_tls", "smtp_inbound_username", "smtp_inbound_password", "smtp_inbound_gateway_id", "smtp_inbound_trusted_peers", "smtp_inbound_max_bytes"])}>Use environment</button></div>
                     <div className="setting-desc">Certificate and key paths remain deployment-managed environment values. Non-loopback listeners refuse startup without them.</div>
-                  </>}
+                  </details>}
                 </div>
               </div>
 
               <div className="setting-row">
                 <div className="setting-info">
-                  <div className="setting-label">Provider DNS targets</div>
-                  <div className="setting-desc">Use your public scanning gateway for MX and the outbound supplier’s SPF include. Configure DKIM with your supplier. Empty values keep SES defaults.</div>
+                  <div className="setting-label">Mail DNS targets</div>
+                  <div className="setting-desc">The Domains panel turns these choices into copy-ready MX and SPF records.</div>
                 </div>
                 <div className="setting-control mail-settings-control">
-                  <label className="mail-field"><span className="setting-label">Inbound MX hostname</span><input className="input input-mono" aria-label="Inbound MX hostname" placeholder="mx.example.com" value={editedSettings.inbound_mx_host || ""} onChange={e => setEditedSettings({...editedSettings, inbound_mx_host: e.target.value.toLowerCase()})} /></label>
-                  <label className="mail-field"><span className="setting-label">Outbound SPF include hostname</span><input className="input input-mono" aria-label="Outbound SPF include hostname" placeholder="amazonses.com" value={editedSettings.outbound_spf_include || ""} onChange={e => setEditedSettings({...editedSettings, outbound_spf_include: e.target.value.toLowerCase()})} /></label>
+                  {receiving === "builtin" ? <p className="setting-desc">Inbound MX uses the mail server hostname above: <strong>{editedSettings.mail_hostname || "enter a hostname first"}</strong>.</p> : <label className="mail-field"><span className="setting-label">Inbound MX hostname</span><input className="input input-mono" aria-label="Inbound MX hostname" placeholder="mx.example.com" value={editedSettings.inbound_mx_host || ""} onChange={e => setEditedSettings({...editedSettings, inbound_mx_host: e.target.value.toLowerCase()})} /><span className="setting-desc">Empty uses the regional SES inbound hostname. Gateway mode should use the public gateway hostname.</span></label>}
+                  {editedSettings.mail_outbound_provider === "direct" ? <p className="setting-desc">Direct sending authorizes the mail server hostname with SPF <code>a:{editedSettings.mail_hostname || "mail.example.com"}</code>. DKIM records appear in running mail status after restart.</p> : <label className="mail-field"><span className="setting-label">Outbound SPF include hostname</span><input className="input input-mono" aria-label="Outbound SPF include hostname" placeholder="amazonses.com" value={editedSettings.outbound_spf_include || ""} onChange={e => setEditedSettings({...editedSettings, outbound_spf_include: e.target.value.toLowerCase()})} /><span className="setting-desc">Empty uses <code>amazonses.com</code>. For provider SMTP, enter the supplier's SPF include hostname.</span></label>}
                   <button type="button" className="btn btn-outline btn-sm" disabled={isSettingsDirty || savingSettings} onClick={() => resetMailSettings(["inbound_mx_host", "outbound_spf_include"])}>Use environment</button>
                 </div>
               </div>

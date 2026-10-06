@@ -76,11 +76,22 @@ export async function getMainGlobalDomain(db: D1Database, env: any): Promise<str
 }
 
 /** Resolve the exact DNS targets shown and checked during domain setup. */
-export async function getMailDnsTargets(db: D1Database, env: any): Promise<{ inboundMxHost: string; outboundSpfInclude: string }> {
-  const sesRegion = await getEnvWithOverride(db, env, "ses_region") || "us-east-1";
+export async function getMailDnsTargets(db: D1Database, env: any): Promise<{ inboundMxHost: string; outboundSpfMechanism: string }> {
+  const [sesRegion, inboundProvider, outboundProvider, hostname, configuredMx, configuredSpf] = await Promise.all([
+    getEnvWithOverride(db, env, "ses_region"),
+    getEnvWithOverride(db, env, "mail_inbound_provider"),
+    getEnvWithOverride(db, env, "mail_outbound_provider"),
+    getEnvWithOverride(db, env, "mail_hostname"),
+    getEnvWithOverride(db, env, "inbound_mx_host"),
+    getEnvWithOverride(db, env, "outbound_spf_include"),
+  ]);
   return {
-    inboundMxHost: await getEnvWithOverride(db, env, "inbound_mx_host") || `inbound-smtp.${sesRegion}.amazonaws.com`,
-    outboundSpfInclude: await getEnvWithOverride(db, env, "outbound_spf_include") || "amazonses.com",
+    inboundMxHost: inboundProvider === "builtin" && hostname
+      ? hostname
+      : configuredMx || `inbound-smtp.${sesRegion || "us-east-1"}.amazonaws.com`,
+    outboundSpfMechanism: outboundProvider === "direct" && hostname
+      ? `a:${hostname}`
+      : `include:${configuredSpf || "amazonses.com"}`,
   };
 }
 
@@ -91,6 +102,10 @@ export function mxRecordMatches(data: string, expectedHost: string): boolean {
 }
 
 export function spfRecordIncludes(data: string, expectedHost: string): boolean {
+  return spfRecordHasMechanism(data, `include:${expectedHost}`);
+}
+
+export function spfRecordHasMechanism(data: string, expectedMechanism: string): boolean {
   const terms = data.replace(/"/g, "").trim().toLowerCase().split(/\s+/);
-  return terms[0] === "v=spf1" && terms.includes(`include:${expectedHost}`);
+  return terms[0] === "v=spf1" && terms.includes(expectedMechanism);
 }

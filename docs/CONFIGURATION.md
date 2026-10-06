@@ -45,18 +45,22 @@ These are deployment-specific, not secrets. Store them in the Cloudflare dashboa
 | `ENVIRONMENT` | yes | `production`, `preview`, `local`, or `self-hosted`. The Docker host sets `self-hosted` and supplies the Worker's private client-IP header after validating the socket peer. Do not expose a self-hosted Worker without that host boundary. |
 | `BLOCKED_SUBDOMAINS` | no | Comma-separated exact DNS labels that cannot be claimed as new personal subdomains. An absent or whitespace-only value uses `admin,api,www,dev,mail,smtp,imap,pop,pop3,webmail,autoconfig,autodiscover`; a nonblank value replaces that default list. Entries are trimmed and lowercased; requests are likewise trimmed and lowercased before exact matching, so `api` does not block `myapi` or `api2`. Each nonempty component must be a single 1–63 character ASCII DNS label containing only letters, digits, and interior hyphens, and starting and ending alphanumeric. Empty components, dots, wildcards, regex/glob syntax, underscores, embedded spaces, edge hyphens, and overlong labels make the configuration malformed. Malformed nonempty configuration fails closed: new claims return a server configuration error until the value is corrected, while the raw value is never logged. Valid blocked labels return “Subdomain is not available.” This affects only new claims: existing subdomains remain visible, editable, and deletable. Set this plain variable in the Cloudflare dashboard / Wrangler config or as `BLOCKED_SUBDOMAINS` in Docker. |
 | `SES_REGION` | yes for mail | AWS SES/S3/SNS region, for example `ap-southeast-2`. |
-| `INBOUND_MX_HOST` | no | Exact public MX host operators should publish for inbound mail. Empty preserves the SES target derived from `SES_REGION`. For custom ingress, set this to the public queueing/scanning gateway's canonical lowercase DNS name, not HideMyEmail's private listener. A D1 admin override wins over this environment default. |
-| `OUTBOUND_SPF_INCLUDE` | no | Exact provider domain used in the sending domain's SPF `include:` mechanism. Empty preserves `amazonses.com`. Enter only the canonical lowercase DNS name, without `include:`. A D1 admin override wins over this environment default. The outbound provider still supplies and documents its required DKIM records. |
-| `MAIL_OUTBOUND_PROVIDER` | no | `ses` (default) or `smtp`. Custom SMTP is Docker-only. A D1 admin override wins over this environment default. |
+| `INBOUND_MX_HOST` | no | Exact public MX host for SES or external-gateway reception. Empty preserves the SES target derived from `SES_REGION`. Built-in reception automatically uses `MAIL_HOSTNAME`. |
+| `OUTBOUND_SPF_INCLUDE` | no | Exact supplier domain used in the SPF `include:` mechanism for SES or provider SMTP. Empty preserves `amazonses.com`. Direct sending automatically uses `a:MAIL_HOSTNAME` instead. |
+| `MAIL_INBOUND_PROVIDER` | no | `ses` (default), Docker `builtin`, or advanced `gateway`. A D1 admin override wins over this environment default. |
+| `MAIL_OUTBOUND_PROVIDER` | no | `ses` (default), Docker `smtp`, or Docker `direct`. Provider SMTP works on 587/465 when outbound port 25 is blocked. |
+| `MAIL_HOSTNAME` | for built-in/direct | Canonical lowercase mail hostname with A/AAAA records pointing to the Docker server. Direct sending also needs matching PTR/reverse DNS. |
 | `SMTP_OUTBOUND_HOST`, `SMTP_OUTBOUND_PORT` | for custom SMTP | Supplier or private relay endpoint. |
 | `SMTP_OUTBOUND_TLS` | for custom SMTP | `starttls` (required upgrade, normally 587), `implicit` (normally 465), or `trusted-cleartext` for an explicitly trusted port-25 connector only. Certificate verification never downgrades. |
 | `SMTP_OUTBOUND_USERNAME`, `SMTP_OUTBOUND_PASSWORD` | if relay requires auth | SMTP credentials, independent from inbound listener credentials. |
-| `SMTP_INBOUND_ENABLED` | no | Enables the Docker receive-only SMTP listener after restart. It does not poll a mailbox. |
-| `SMTP_INBOUND_HOST`, `SMTP_INBOUND_PORT`, `SMTP_INBOUND_TLS` | for SMTP ingress | Listener bind, port, and `starttls`/`implicit` TLS mode. Defaults stay private (`127.0.0.1:2525`). Docker Compose does not publish this port. |
+| `SMTP_INBOUND_ENABLED` | legacy | Legacy gateway-listener switch. Prefer `MAIL_INBOUND_PROVIDER`. |
+| `SMTP_INBOUND_HOST`, `SMTP_INBOUND_PORT`, `SMTP_INBOUND_TLS` | for SMTP ingress | Internal listener bind and port. Built-in reception uses `0.0.0.0:2525`, published as host port 25 by `docker-compose.mail.yml`; gateway mode defaults private. |
 | `SMTP_INBOUND_USERNAME`, `SMTP_INBOUND_PASSWORD`, `SMTP_INBOUND_GATEWAY_ID` | for SMTP ingress | Dedicated upstream-gateway authentication and stable dedup namespace. Never reuse outbound credentials. |
 | `SMTP_INBOUND_TRUSTED_PEERS` | recommended | Comma-separated exact socket peer IPs. Authentication remains mandatory. |
 | `SMTP_INBOUND_TLS_CERT`, `SMTP_INBOUND_TLS_KEY` | non-loopback ingress | Deployment-managed PEM paths. The UI cannot choose arbitrary filesystem paths. |
-| `SMTP_INBOUND_MAX_BYTES` | no | Maximum raw SMTP message size in bytes. Empty or invalid values use 25 MiB. The ingress currently rejects null-envelope-sender (`MAIL FROM:<>`) delivery-status notifications because forwarding them safely would require a separate bounce-processing path; do not route DSNs to this listener. |
+| `SMTP_INBOUND_MAX_BYTES` | no | Maximum raw SMTP message size in bytes. Empty or invalid values use 25 MiB. |
+| `MAIL_QUEUE_MAX_BYTES` | no | Maximum encrypted built-in/direct queue size. Defaults to 1 GiB. |
+| `RSPAMD_URL`, `CLAMAV_HOST`, `CLAMAV_PORT` | no | Private bundled-scanner endpoints. Defaults match the mail Compose overlay. Do not publish them. |
 | `S3_INBOUND_BUCKET` | yes for inbound | Bucket where SES stores raw MIME. |
 | `SNS_INBOUND_TOPIC_ARN` | yes for inbound SNS | Exact SNS topic for SES receipt notifications. |
 | `SNS_ALLOWED_TOPIC_ARN` | yes for outbound SNS | Exact SNS topic for SES bounce and complaint notifications. Topic ARNs identify webhook authority but are not secrets. |
@@ -223,7 +227,56 @@ Provider acceptable-use rules and dynamic alias From-address policies vary;
 the project validates protocol integration but has not live-tested account
 acceptance. SMTP suppliers do not provide SES feedback webhook parity.
 
-## Trusted SMTP reception
+## Docker SMTP reception
+
+### Built-in Docker receiving
+
+The simplest Docker setup accepts Internet mail in HideMyEmail itself. Set
+`MAIL_INBOUND_PROVIDER=builtin` and a canonical `MAIL_HOSTNAME`, publish the
+mail Compose overlay's port 25, and point the alias domains' MX records at that
+hostname. The listener rejects unknown recipients before DATA. After DATA, it
+atomically stores the full message and SMTP envelope in an AES-256-GCM encrypted
+queue before replying `250`. Rspamd, ClamAV, and SPF/DKIM/DMARC checks run from
+that queue. Scanner or forwarding outages retry without asking the sender to
+resubmit. Standard null-return-path delivery-status messages are accepted. Queue
+files and generated direct-delivery DKIM private keys use the
+instance destination-encryption key and do not expose addresses in file names.
+
+Inbound and outbound port 25 are different network directions. A provider can
+allow incoming mail while blocking direct sending. Use custom outbound SMTP on
+587/STARTTLS or 465/TLS in that case. `MAIL_OUTBOUND_PROVIDER=direct` is optional
+and requires outbound port 25, matching A/AAAA and PTR records, SPF for the
+server IP, and every DKIM TXT record shown in Admin. The direct sender follows
+MX priority, rejects private/reserved DNS targets, enforces MTA-STS policies,
+uses verified opportunistic TLS, and keeps temporary or uncertain deliveries
+in the encrypted queue.
+
+Start the receiver and bundled scanners with:
+
+```bash
+cd docker
+docker compose -f docker-compose.yml -f docker-compose.mail.yml up -d
+```
+
+ClamAV requires about 3–4 GB RAM. Its first signature download can delay virus
+scanner readiness. Without the mail overlay, the base Compose file does not
+claim host port 25 or start either scanner.
+
+### Advanced external gateway
+
+The Docker listener is a private handoff point for incoming alias mail. A
+separate public mail gateway (MTA, or mail transfer agent) receives mail for
+your domain, checks and scans it, then sends it to the listener. HideMyEmail
+looks up the alias and forwards the message to its destination through your
+configured outbound SES or SMTP provider. You do not enter an inbox password
+or fetch messages from IMAP/POP. Enabling this listener alone does not set up
+the public gateway or its scan-result integration.
+
+In admin settings, **Listener size limit (MB)** accepts fractional values and
+uses 1,048,576 bytes per MB (MiB), matching the instance-wide inbound size
+field. The API and `SMTP_INBOUND_MAX_BYTES` environment variable still use
+bytes; leaving the admin field empty uses 25 MiB. Both inbound size limits
+apply. Save listener changes, then restart the Docker service to activate them.
 
 Run a public MTA such as [Stalwart](https://stalw.art/docs/mta/overview/) on MX
 port 25. It must queue retries durably, validate SPF and DMARC, scan spam and

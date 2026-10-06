@@ -15,10 +15,17 @@ import { signFreshAuth, signSession } from "../src/lib/auth";
 const message = { from: "Alias <alias@example.com>", to: "person@example.net", rawBase64: "VGVzdA==" };
 
 beforeEach(async () => {
-  await env.DB.prepare("DELETE FROM settings WHERE key LIKE 'smtp_%' OR key='mail_outbound_provider'").run();
+  await env.DB.prepare("DELETE FROM settings WHERE key LIKE 'smtp_%' OR key IN ('mail_outbound_provider','mail_inbound_provider','mail_hostname')").run();
 });
 
 describe("mail provider selection", () => {
+  test("direct requires runtime and reuses transport status fencing", async () => {
+    const direct = { MAIL_OUTBOUND_PROVIDER: "direct", MAIL_HOSTNAME: "mail.example.com", SMTP_TRANSPORT: { fetch: async () => Response.json({ providerId: "direct-id" }) } };
+    await expect(sendMail(env.DB as D1Database, direct as any, message)).rejects.toBeInstanceOf(MailRetryableError);
+    expect(await sendMail(env.DB as D1Database, { ...direct, MAIL_RUNTIME: {} } as any, message)).toEqual({ providerId: "direct-id" });
+    await expect(sendMail(env.DB as D1Database, { ...direct, MAIL_RUNTIME: {}, SMTP_TRANSPORT: { fetch: async () => new Response("uncertain", { status: 504 }) } } as any, message)).rejects.toBeInstanceOf(MailUncertainError);
+  });
+
   test("keeps SES as the default and preserves its envelope and MIME", async () => {
     const ses = vi.fn(async (_creds, sent) => {
       expect(sent).toEqual(message);

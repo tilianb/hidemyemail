@@ -191,6 +191,10 @@ CI: `.github/workflows/docs.yml` builds and deploys to GitHub Pages on push to
 - SNS/SES processing uses durable delivery claims and quota reservations to
   fence retries and concurrent sends; do not replace them with read-then-write
   checks or acknowledge retryable failures as completed.
+- Built-in Docker SMTP acknowledges DATA only after its AES-256-GCM queue file
+  is fsynced and atomically renamed. Direct-to-MX delivery signs finalized MIME,
+  rejects private/reserved DNS targets, and keeps temporary or uncertain sends
+  queued; never expose queued MIME, envelopes, or DKIM private keys in status.
 - Docker trusts `X-HideMyEmail-Client-IP` only from an exact socket peer listed
   in `TRUSTED_PROXY_IPS`; the proxy must overwrite, never append, that header.
 - State-changing public endpoints must be POST (e.g. unsubscribe: GET only

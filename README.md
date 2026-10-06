@@ -86,9 +86,11 @@ docker compose up -d
 
 Open <http://localhost:8787>. Compose publishes to loopback only; put a TLS
 reverse proxy in front for public access and preserve its trusted client-IP
-header contract. Docker can use SES or a manually configured SMTP relay for
-sending, and can accept receive-only SMTP from a trusted queueing/scanning MTA.
-Sending and receiving are independent; no inbox is stored. See
+header contract. Docker can receive Internet SMTP itself on port 25 with
+bundled scanning, or use SES or an advanced external gateway. It can send
+through SES, a provider SMTP relay on 587/465, or directly to recipient MX
+servers on port 25. This lets hosts that block outbound port 25 receive locally
+while forwarding through a relay. Sending and receiving are independent. See
 [Docker self-hosting](docker/README.md) and [mail provider configuration](docs/CONFIGURATION.md#custom-smtp-recipes).
 
 ### Cloudflare Worker

@@ -1,0 +1,35 @@
+# Add this file when HideMyEmail should receive Internet mail itself:
+# docker compose -f docker-compose.yml -f docker-compose.mail.yml up -d
+services:
+  app:
+    ports:
+      - "${SMTP_LISTEN_IP:-0.0.0.0}:${SMTP_INBOUND_PUBLIC_PORT:-25}:2525"
+    depends_on:
+      rspamd:
+        condition: service_started
+      clamav:
+        condition: service_started
+
+  rspamd:
+    image: rspamd/rspamd:4.2.1
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+      - /run/rspamd:size=16m
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - rspamd-data:/var/lib/rspamd
+
+  clamav:
+    image: clamav/clamav:1.5-debian13-slim
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - clamav-data:/var/lib/clamav
+
+volumes:
+  rspamd-data:
+  clamav-data:
