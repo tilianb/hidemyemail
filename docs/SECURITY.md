@@ -19,9 +19,11 @@ HideMyEmail handles email relay. The main security goals are:
 Reply-from-alias is gated by multiple checks:
 
 1. The reverse alias must decode to a known alias/external sender pair.
-2. The envelope sender must match a verified destination for the alias owner.
-3. SES SPF or DMARC verdict must pass.
-4. Failures are rejected instead of relayed.
+2. The authenticated sender must match a verified destination for the alias owner.
+3. The inbound provider's SPF verdict must pass for the verified envelope owner,
+   or its DMARC verdict must pass for the verified header-From owner.
+4. The external recipient must have sent prior inbound mail through that alias.
+5. Failures are rejected instead of relayed.
 
 ## SNS webhook validation
 
@@ -34,6 +36,28 @@ Use separate topics for inbound receipts and outbound SES events.
 Both ARNs must be configured for their endpoint to operate. The Worker verifies
 the AWS signature and certificate before checking the exact `TopicArn`.
 `SNS_SECRET` is obsolete; do not add a shared secret to webhook URLs.
+
+## SMTP trust boundaries
+
+Docker's built-in receiver treats public SMTP input as untrusted. It checks
+recipients before DATA, queues accepted MIME in encrypted storage, then derives
+SPF, DKIM, DMARC, spam, and virus results with the bundled scanners.
+
+External-gateway mode accepts verdicts only through a private SMTP listener
+protected by verified TLS, dedicated authentication, and an optional exact-peer
+allowlist. The gateway must strip sender-supplied control headers before adding
+one trusted `X-HideMyEmail-Gateway-Result`. SMTP AUTH never implies an SPF,
+DMARC, spam, or virus pass. Keep the listener off the public MX interface.
+
+The reference gateway uses a separate encrypted queue and `GATEWAY_QUEUE_KEY`,
+not the app's destination key. It admits only exact configured domains, removes
+forged control headers, and withholds handoff when spam or virus scans fail to
+complete. Only the app mounts the private TLS key; the gateway mounts the public
+trust certificate. Keep both queue volumes and their respective keys in backups.
+
+Provider SMTP and direct delivery remain private Miniflare service bindings;
+the HTTP server does not expose an arbitrary-send endpoint. Direct delivery
+rejects private and reserved DNS targets before connecting.
 
 ## Authentication boundaries
 
@@ -94,6 +118,9 @@ Keep these private:
 - `DESTINATION_ENCRYPTION_KEY`
 - `SES_ACCESS_KEY_ID`
 - `SES_SECRET_ACCESS_KEY`
+- `SMTP_OUTBOUND_PASSWORD`
+- `SMTP_INBOUND_USERNAME` and `SMTP_INBOUND_PASSWORD`
+- `GATEWAY_QUEUE_KEY` and handoff TLS private keys
 - password hash and salt values
 
 `SES_REGION`, `S3_INBOUND_BUCKET`, and SNS topic ARNs are not secret, but they are deployment-specific. Store them in Cloudflare environment variables. Do not hard-code public repo defaults.
@@ -150,11 +177,12 @@ backup codes contain 128 bits of randomness and should be regenerated after the
 upgrade.
 
 Administrative recovery validates the encrypted destination, application origin,
-and SES configuration before replacing recovery state. If SES fails after
+and configured outbound-provider prerequisites before replacing recovery state.
+If email delivery fails after
 issuance, the authenticated admin receives the newly issued link for manual
 delivery with `Cache-Control: no-store`. The old state is not restored, since
 rolling it back could resurrect consumed credentials or overwrite a concurrent
-recovery. SES acceptance does not guarantee inbox delivery.
+recovery. Mail-provider acceptance does not guarantee inbox delivery.
 
 Logout revokes every session token presented by the request server-side,
 including copied browser cookies and native bearer tokens. Reversible account

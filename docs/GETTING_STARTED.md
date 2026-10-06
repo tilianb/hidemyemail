@@ -20,17 +20,22 @@ Use this to run the Worker locally in a container with Miniflare:
 
 - Docker hosts the API and dashboard.
 - Local SQLite stores D1 data.
-- AWS SES/S3/SNS still handles mail.
+- Mail can use AWS SES, built-in SMTP, an external gateway, a provider SMTP
+  relay, or direct-to-MX delivery.
 
-See [Docker self-hosting](../docker/README.md).
+See [Docker self-hosting](../docker/README.md) and [Mail providers](MAIL_PROVIDERS.md).
 
-## Prerequisites
+## Cloudflare deployment prerequisites
 
 - Cloudflare account with Workers and D1.
 - AWS account with SES receiving in your chosen region.
 - Domain DNS access.
 - Node.js 24+.
 - AWS SES production access if sending to unverified external recipients.
+
+Docker users need Docker Compose, domain DNS access, and the prerequisites for
+their selected providers. Continue in [Docker self-hosting](../docker/README.md)
+instead of the Cloudflare steps below.
 
 ## 1. Fork or clone
 
@@ -144,14 +149,18 @@ npm run deploy:preview
 
 ### Automatic deploys (Cloudflare Workers Builds)
 
-This repo deploys via **two separate Workers Builds projects** so prod and preview stay fully isolated:
+Configure separate Workers Builds projects to isolate production and preview:
 
 | Worker | Branch | Root dir | Build command | Deploy command |
 |--------|--------|----------|---------------|----------------|
 | `hidemyemail` | `main` | `worker` | `bash scripts/cf-build.sh` | `npx wrangler deploy` |
-| `hidemyemail-preview` | `dev` | repo root | `bash worker/scripts/cf-build.sh` | `cd worker && npx wrangler deploy --env preview` |
+| `hidemyemail-preview` | selected short-lived branch | repo root | `cd dashboard && npm ci && npm run build && cd ../worker && npm ci` | `cd worker && npm run deploy:preview` |
 
-`worker/scripts/cf-build.sh` is cwd-agnostic. It builds the dashboard and runs `wrangler d1 migrations apply --remote` against the correct D1 (`hidemyemail` for main, `hidemyemail-env` for dev) before Cloudflare runs the deploy command. The schema stays in sync with the code being deployed. CF Builds provides wrangler auth implicitly. You do not need GitHub secrets.
+`worker/scripts/cf-build.sh` builds the dashboard and migrates production on
+`main`. It retains legacy `dev` handling but skips migrations for other branch
+names. The preview command above uses the npm predeploy hook to migrate the
+preview database before publishing. CF Builds supplies Wrangler authentication;
+configure the preview project's secrets separately. See [automatic deployment](DEPLOY.md#8-cloudflare-automatic-deploys).
 
 ## 8. First dashboard setup
 
@@ -167,6 +176,7 @@ This repo deploys via **two separate Workers Builds projects** so prod and previ
 ## Next docs
 
 - [AWS SES setup](AWS_SES_SETUP.md)
+- [Mail providers](MAIL_PROVIDERS.md)
 - [Configuration](CONFIGURATION.md)
 - [Troubleshooting](TROUBLESHOOTING.md)
 - [Security](SECURITY.md)

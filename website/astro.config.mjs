@@ -12,7 +12,7 @@ export default defineConfig({
     starlight({
       title: "HideMyEmail",
       description:
-        "Self-hosted, serverless email aliases for your domains — Cloudflare Workers + AWS SES, with native iOS and Android apps.",
+        "Self-hosted email aliases with Cloudflare + AWS or Docker SMTP, plus native iOS and Android apps.",
       favicon: "/favicon.svg",
       social: [
         {
@@ -32,8 +32,9 @@ export default defineConfig({
           label: "Self-hosting",
           items: [
             { label: "Getting started", slug: "getting-started" },
-            { label: "Deployment guide", slug: "deploy" },
+            { label: "Cloudflare deployment", slug: "deploy" },
             { label: "AWS SES setup", slug: "aws-ses-setup" },
+            { label: "Mail providers", slug: "mail-providers" },
             { label: "Configuration", slug: "configuration" },
             { label: "API", slug: "api" },
             { label: "Troubleshooting", slug: "troubleshooting" },

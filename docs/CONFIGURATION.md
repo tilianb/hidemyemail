@@ -44,7 +44,7 @@ These are deployment-specific, not secrets. Store them in the Cloudflare dashboa
 |------|----------|---------|
 | `ENVIRONMENT` | yes | `production`, `preview`, `local`, or `self-hosted`. The Docker host sets `self-hosted` and supplies the Worker's private client-IP header after validating the socket peer. Do not expose a self-hosted Worker without that host boundary. |
 | `BLOCKED_SUBDOMAINS` | no | Comma-separated exact DNS labels that cannot be claimed as new personal subdomains. An absent or whitespace-only value uses `admin,api,www,dev,mail,smtp,imap,pop,pop3,webmail,autoconfig,autodiscover`; a nonblank value replaces that default list. Entries are trimmed and lowercased; requests are likewise trimmed and lowercased before exact matching, so `api` does not block `myapi` or `api2`. Each nonempty component must be a single 1–63 character ASCII DNS label containing only letters, digits, and interior hyphens, and starting and ending alphanumeric. Empty components, dots, wildcards, regex/glob syntax, underscores, embedded spaces, edge hyphens, and overlong labels make the configuration malformed. Malformed nonempty configuration fails closed: new claims return a server configuration error until the value is corrected, while the raw value is never logged. Valid blocked labels return “Subdomain is not available.” This affects only new claims: existing subdomains remain visible, editable, and deletable. Set this plain variable in the Cloudflare dashboard / Wrangler config or as `BLOCKED_SUBDOMAINS` in Docker. |
-| `SES_REGION` | yes for mail | AWS SES/S3/SNS region, for example `ap-southeast-2`. |
+| `SES_REGION` | for SES | AWS SES/S3/SNS region, for example `ap-southeast-2`. |
 | `INBOUND_MX_HOST` | no | Exact public MX host for SES or external-gateway reception. Empty preserves the SES target derived from `SES_REGION`. Built-in reception automatically uses `MAIL_HOSTNAME`. |
 | `OUTBOUND_SPF_INCLUDE` | no | Exact supplier domain used in the SPF `include:` mechanism for SES or provider SMTP. Empty preserves `amazonses.com`. Direct sending automatically uses `a:MAIL_HOSTNAME` instead. |
 | `MAIL_INBOUND_PROVIDER` | no | `ses` (default), Docker `builtin`, or advanced `gateway`. A D1 admin override wins over this environment default. |
@@ -52,18 +52,20 @@ These are deployment-specific, not secrets. Store them in the Cloudflare dashboa
 | `MAIL_HOSTNAME` | for built-in/direct | Canonical lowercase mail hostname with A/AAAA records pointing to the Docker server. Direct sending also needs matching PTR/reverse DNS. |
 | `SMTP_OUTBOUND_HOST`, `SMTP_OUTBOUND_PORT` | for custom SMTP | Supplier or private relay endpoint. |
 | `SMTP_OUTBOUND_TLS` | for custom SMTP | `starttls` (required upgrade, normally 587), `implicit` (normally 465), or `trusted-cleartext` for an explicitly trusted port-25 connector only. Certificate verification never downgrades. |
+| `SMTP_OUTBOUND_TLS_SERVERNAME` | when outbound host is an IP | DNS name used for SMTP certificate verification. Environment-only. |
 | `SMTP_OUTBOUND_USERNAME`, `SMTP_OUTBOUND_PASSWORD` | if relay requires auth | SMTP credentials, independent from inbound listener credentials. |
-| `SMTP_INBOUND_ENABLED` | legacy | Legacy gateway-listener switch. Prefer `MAIL_INBOUND_PROVIDER`. |
+| `SMTP_INBOUND_ENABLED` | for external gateway | Must be `true` with `MAIL_INBOUND_PROVIDER=gateway`; lets operators stage gateway settings without opening the listener. Built-in reception does not use it. |
 | `SMTP_INBOUND_HOST`, `SMTP_INBOUND_PORT`, `SMTP_INBOUND_TLS` | for SMTP ingress | Internal listener bind and port. Built-in reception uses `0.0.0.0:2525`, published as host port 25 by `docker-compose.mail.yml`; gateway mode defaults private. |
 | `SMTP_INBOUND_USERNAME`, `SMTP_INBOUND_PASSWORD`, `SMTP_INBOUND_GATEWAY_ID` | for SMTP ingress | Dedicated upstream-gateway authentication and stable dedup namespace. Never reuse outbound credentials. |
 | `SMTP_INBOUND_TRUSTED_PEERS` | recommended | Comma-separated exact socket peer IPs. Authentication remains mandatory. |
 | `SMTP_INBOUND_TLS_CERT`, `SMTP_INBOUND_TLS_KEY` | non-loopback ingress | Deployment-managed PEM paths. The UI cannot choose arbitrary filesystem paths. |
 | `SMTP_INBOUND_MAX_BYTES` | no | Maximum raw SMTP message size in bytes. Empty or invalid values use 25 MiB. |
+| `SMTP_LISTEN_IP`, `SMTP_INBOUND_PUBLIC_PORT` | no | Host bind address and public port used only by `docker-compose.mail.yml`. Defaults to `0.0.0.0:25`. These do not change the listener inside the container. |
 | `MAIL_QUEUE_MAX_BYTES` | no | Maximum encrypted built-in/direct queue size. Defaults to 1 GiB. |
 | `RSPAMD_URL`, `CLAMAV_HOST`, `CLAMAV_PORT` | no | Private bundled-scanner endpoints. Defaults match the mail Compose overlay. Do not publish them. |
-| `S3_INBOUND_BUCKET` | yes for inbound | Bucket where SES stores raw MIME. |
-| `SNS_INBOUND_TOPIC_ARN` | yes for inbound SNS | Exact SNS topic for SES receipt notifications. |
-| `SNS_ALLOWED_TOPIC_ARN` | yes for outbound SNS | Exact SNS topic for SES bounce and complaint notifications. Topic ARNs identify webhook authority but are not secrets. |
+| `S3_INBOUND_BUCKET` | for SES inbound | Bucket where SES stores raw MIME. |
+| `SNS_INBOUND_TOPIC_ARN` | for SES inbound | Exact SNS topic for SES receipt notifications. |
+| `SNS_ALLOWED_TOPIC_ARN` | for SES outbound feedback | Exact SNS topic for SES bounce and complaint notifications. Topic ARNs identify webhook authority but are not secrets. |
 | `APP_ORIGIN` | required for passkeys | Exact browser-visible dashboard origin, e.g. `https://app.hidemyemail.dev`. WebAuthn always derives its RP ID and expected origin from this value, never request headers. Production origins must use HTTPS and contain no path, query, fragment, credentials, or trailing slash; HTTP is accepted only for `localhost`, `127.0.0.1`, or `::1` development. Docker deployments must set the externally visible origin explicitly in `docker/.env` to enable passkeys; ordinary authentication and mail continue to work when it is unset. |
 | `APPLE_APP_ID` | for iOS passkeys | Apple App ID `<TeamID>.<bundleId>` (e.g. `ABCDE12345.dev.hidemyemail.app`) published in `/.well-known/apple-app-site-association`. The AASA route 404s until this is set. |
 | `ANDROID_APP_ORIGINS` | for native Android passkeys | Comma-separated WebAuthn APK origins in the form `android:apk-key-hash:<base64url SHA-256 signing-certificate digest>`. Values authorize native registration and token-mode authentication assertions, and publish matching colon-delimited fingerprints at `/.well-known/assetlinks.json`; malformed nonempty configuration fails closed. Browser assertions accept only canonical `APP_ORIGIN`. Include both old and new certificate origins during a signing-key rotation. This is not needed for the authenticated browser handoff used by self-hosted mobile clients. |
@@ -96,8 +98,8 @@ Set with `wrangler secret put`.
 
 | Name | Required | Purpose |
 |------|----------|---------|
-| `SES_ACCESS_KEY_ID` | yes for mail | AWS access key for SES send and S3 read. |
-| `SES_SECRET_ACCESS_KEY` | yes for mail | AWS secret access key. |
+| `SES_ACCESS_KEY_ID` | for SES | AWS access key for SES send and S3 read. |
+| `SES_SECRET_ACCESS_KEY` | for SES | AWS secret access key. |
 | `SESSION_SECRET` | yes | Signs dashboard session cookies. |
 | `ACTION_SECRET` | yes | Signs one-click unsubscribe/action links. |
 | `AUTH_PASSWORD_SALT` | first user bootstrap | PBKDF2 salt from `hash-password.mjs`. |
@@ -186,13 +188,13 @@ The app stores feature settings in D1. Important defaults:
 | `inbound_mx_host` | empty | Exact inbound MX target checked for global domains, wildcard MX, and personal subdomains. Empty derives the SES regional inbound host. Environment source: `INBOUND_MX_HOST`. |
 | `outbound_spf_include` | empty | Exact outbound SPF include target checked during global-domain verification. Empty uses `amazonses.com`. Environment source: `OUTBOUND_SPF_INCLUDE`. |
 | `catch_all_auto_create` | enabled | Allows first inbound mail to create aliases. |
-| `max_inbound_bytes` | `26214400` (25 MiB) | Hard cap applied while streaming raw MIME from S3 and before parsing replies. Oversize inbound mail is acknowledged without forwarding. |
+| `max_inbound_bytes` | `26214400` (25 MiB) | Hard cap applied to inbound MIME before routing and reply parsing. SES streams to this limit from S3; SMTP listeners also enforce `SMTP_INBOUND_MAX_BYTES`. |
 | `rate_limit_per_alias` | `20` | Maximum inbound forwards per alias in the rolling one-hour window. |
 | `rate_limit_reply_per_alias` | `10` | Maximum replies per alias in the rolling one-hour window. |
 | `rate_limit_global` | `1000` | Maximum combined forwards and replies in the rolling one-hour window. |
 | `reply_distinct_recipient_cap` | `15` | Maximum distinct external recipients per alias in 24 hours. Existing contacts remain allowed. |
-| `spam_verdict_action` | `flag` | Action when SES marks inbound mail as spam: `forward`, `flag` (adds `X-Spam-Flag: YES`), or `drop`. Your domain DKIM-signs forwarded spam. Forwarding it untouched damages your sender reputation. |
-| `virus_verdict_action` | `drop` | Same options for SES malware detection. |
+| `spam_verdict_action` | `flag` | Action when the inbound provider marks mail as spam: `forward`, `flag` (adds `X-Spam-Flag: YES`), or `drop`. Your domain DKIM-signs forwarded spam. Forwarding it untouched damages your sender reputation. |
+| `virus_verdict_action` | `drop` | Same options for inbound malware verdicts. |
 | `unsubscribe_header_mode` | `bulk_only` | When to add the one-click List-Unsubscribe to forwards: `always`, `bulk_only` (when the original carried List-Unsubscribe or `Precedence: bulk`), or `never`. Adding it to personal mail makes forwards look like bulk mail to spam filters. |
 | `soft_bounce_threshold` | `3` | Soft bounces within 24h before a destination is paused (0 disables). |
 
@@ -228,6 +230,9 @@ the project validates protocol integration but has not live-tested account
 acceptance. SMTP suppliers do not provide SES feedback webhook parity.
 
 ## Docker SMTP reception
+
+See [Mail providers](MAIL_PROVIDERS.md) for complete built-in receiver,
+external-gateway, provider SMTP, direct-delivery, DNS, and cutover instructions.
 
 ### Built-in Docker receiving
 
@@ -281,11 +286,13 @@ apply. Save listener changes, then restart the Docker service to activate them.
 Run a public MTA such as [Stalwart](https://stalw.art/docs/mta/overview/) on MX
 port 25. It must queue retries durably, validate SPF and DMARC, scan spam and
 malware, strip sender-supplied `X-HideMyEmail-Gateway-Result`, add the exact
-contract documented in [the implementation plan](MAIL-PROVIDERS-PLAN.md), and
+contract documented in the [mail provider guide](MAIL_PROVIDERS.md#2-add-the-gateway-verdict-header), and
 relay one envelope recipient per transaction to HideMyEmail with dedicated
 AUTH and TLS. HideMyEmail waits for processing before `250`; a 4xx leaves the
-message in the upstream queue. Public-MX delivery direct to HideMyEmail without
-that trusted gateway is unsupported. Ports 465/587 are secure relay/submission
+message in the upstream queue. Do not expose the gateway-mode handoff listener
+as a public MX. For public reception, use built-in mode or the supplied
+[reference gateway Compose stack](MAIL_PROVIDERS.md#reference-gateway-compose-stack).
+Ports 465/587 are secure relay/submission
 options, not alternate public MX ports. Configure `INBOUND_MX_HOST` with this
 gateway's actual public MX name; the private HideMyEmail listener is not an MX
 target. The outbound provider supplies the DKIM records for its sending domain.
@@ -293,38 +300,14 @@ The listener still rejects null-envelope-sender DSNs; do not route DSNs to it.
 
 ### Stalwart gateway recipe
 
-Use current Stalwart WebUI objects rather than copying an old flat config:
+Follow the [Stalwart setup map](MAIL_PROVIDERS.md#4-stalwart-setup-map) for the
+public listener, trusted verdict hook, relay route, and retry checks. Use your
+installed Stalwart release's current configuration reference; these objects and
+verdict APIs vary by version. The repository does not bundle a Stalwart hook.
+Keep gateway ingress disabled until your integration emits the tested contract.
+For a supplied Compose example instead, use the
+[reference gateway](MAIL_PROVIDERS.md#reference-gateway-compose-stack).
 
-1. Create a public SMTP [`NetworkListener`](https://stalw.art/docs/mta) on port
-   25 for the HideMyEmail domains. Enable the DATA-stage
-   [spam filter](https://stalw.art/docs/mta/inbound/data/) and keep SPF/DMARC
-   authentication enabled.
-2. Attach a trusted DATA-stage
-   [Sieve system script](https://stalw.art/docs/mta/rewrite/headers/) that starts
-   with `require ["editheader"]; deleteheader
-   "X-HideMyEmail-Gateway-Result";`. This removes every sender-supplied
-   lookalike before trusted metadata is created.
-3. Add the contract header from a trusted DATA-stage MTA Hook or filter. It must
-   generate a cryptographically unique ID once, before Stalwart queues the
-   modified message, and map Stalwart's documented `env.spf.result`,
-   `env.dmarc.result`, and spam/virus scanner results to the contract values.
-   Do not derive the ID from `Message-ID`. Stalwart does not document a queue-ID
-   Sieve variable, so a Sieve-only setup cannot satisfy this contract; leave
-   HideMyEmail ingress disabled until the hook is installed and tested.
-4. Define a [`Relay` MTA route](https://stalw.art/docs/mta/outbound/routing/)
-   targeting the private HideMyEmail listener, with `protocol: "smtp"`, the
-   configured listener port, `allowInvalidCerts: false`, `authUsername`, and an
-   `authSecret` loaded from an environment variable or file. Select this route
-   only for HideMyEmail domains.
-5. Keep Stalwart's durable [virtual queue](https://stalw.art/docs/mta/outbound/queue/)
-   and [retry schedule](https://stalw.art/docs/mta/outbound/schedule/) enabled.
-   Configure one envelope recipient per relay transaction. Confirm a simulated
-   HideMyEmail `451` remains queued and a `250` removes the queue item before
-   changing MX records.
-
-This recipe identifies the required Stalwart objects and trust points, but it
-is not a bundled Stalwart adapter. Header-hook deployment and public-MTA policy
-remain operator-managed because scanner products and verdict APIs differ.
 Mail limits reserve capacity before SES, so concurrent deliveries cannot share
 the last quota slot. SES-accepted reservations continue to count until their
 hourly or daily window closes if bookkeeping must retry.

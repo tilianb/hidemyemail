@@ -14,9 +14,11 @@ keep in sync by hand:
 |---|---|
 | `README.md` | Overview (home) |
 | `docs/GETTING_STARTED.md` | Getting started |
-| `docs/DEPLOY.md` | Deployment guide |
+| `docs/DEPLOY.md` | Cloudflare deployment |
 | `docs/AWS_SES_SETUP.md` | AWS SES setup |
+| `docs/MAIL_PROVIDERS.md` | Mail providers |
 | `docs/CONFIGURATION.md` | Configuration |
+| `docs/API.md` | API |
 | `docs/TROUBLESHOOTING.md` | Troubleshooting |
 | `docs/SECURITY.md` | Security notes |
 | `docs/ROADMAP.md` | Roadmap |
@@ -43,9 +45,8 @@ npm run dev      # runs sync-docs, then astro dev
 ## Deploy
 
 `.github/workflows/docs.yml` builds and publishes on every push to **`main`**
-that touches `website/`, `docs/`, `README.md`, or `CHANGELOG.md` (and on manual
-dispatch). Publishing from `main` keeps the public site aligned with released
-software; "Edit page" links still target `dev`, since changes flow through
-`dev` first. Enable it once in **repo Settings → Pages → Source: "GitHub
+that touches `website/`, `docs/`, `README.md`, `CHANGELOG.md`, or the workflow
+itself. Publishing from `main` keeps the public site aligned with that branch;
+"Edit page" links also target `main`. Enable it once in **repo Settings → Pages → Source: "GitHub
 Actions"**. The `site`/`base` in `astro.config.mjs` are set for the project
 Pages URL above — update them if the repo or Pages host changes.

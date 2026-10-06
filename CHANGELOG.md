@@ -17,6 +17,13 @@ All notable changes to this project are documented here. The format follows
   environment variables and encrypted admin settings.
 - Added documented SMTP recipes for Resend, Mailchimp Transactional, SendGrid,
   Mailgun, and arbitrary standards-compliant relays.
+- Added a mail-provider setup guide covering built-in reception, external
+  gateway TLS/authentication and verdict metadata, direct delivery, and cutover
+  checks; updated setup, security, and troubleshooting documentation.
+- Added a named-image reference gateway Compose overlay with a standalone
+  receive-only gateway, separate encrypted retry queue, Rspamd/ClamAV scanning,
+  and authenticated, certificate-verified private SMTP handoff. Documented
+  certificate setup, image availability, domain allowlists, and gateway limits.
 
 ### Changed
 
@@ -59,7 +66,9 @@ All notable changes to this project are documented here. The format follows
 ### Upgrade Notes
 
 - Existing SES deployments need no configuration changes. Docker operators may
-  opt into custom SMTP; inbound listener changes require a restart.
+  opt into built-in receiving, provider SMTP, an external gateway, or direct
+  delivery. Restart after Admin mail changes; recreate the container after
+  `.env` changes. Keep `/data` and `DESTINATION_ENCRYPTION_KEY` backed up.
 
 ## [1.4.2] — 2026-09-28
 

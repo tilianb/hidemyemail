@@ -12,11 +12,10 @@
 
 # HideMyEmail
 
-Self-hosted, **serverless** email aliases for your domains. No VPS, no
-Postfix, no mail stack. It runs as a Cloudflare Worker with a React
-dashboard, Cloudflare D1 for state, and AWS SES/S3/SNS for receiving and
-sending mail. The running cost is **~$0/month** on the Cloudflare free tier
-plus AWS SES usage. Native **iOS** and **Android** apps are included.
+Self-hosted email aliases for your domains. The serverless deployment uses a
+Cloudflare Worker, Cloudflare D1, and AWS SES/S3/SNS. Docker can use that same
+mail pipeline or receive and send SMTP without AWS. Native **iOS** and
+**Android** apps are included.
 
 <p align="center">
   <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/tilianb/hidemyemail">
@@ -26,10 +25,11 @@ plus AWS SES usage. Native **iOS** and **Android** apps are included.
 
 ## Why
 
-Use your domain without running Postfix, a VPS, or a full mail stack. SES
-receives mail, S3 stores the raw MIME, SNS calls the Worker, and the Worker
-rewrites and forwards mail through SES. Replies work from your normal inbox.
-Recipients see the alias.
+The default serverless path needs no VPS or mail stack. SES receives mail, S3
+stores the raw MIME, SNS calls the Worker, and the Worker forwards through SES.
+Docker operators can instead use built-in SMTP, an external gateway, a provider
+relay, or direct delivery. Replies work from your normal inbox, and recipients
+see the alias.
 
 ## How it compares
 
@@ -91,7 +91,7 @@ bundled scanning, or use SES or an advanced external gateway. It can send
 through SES, a provider SMTP relay on 587/465, or directly to recipient MX
 servers on port 25. This lets hosts that block outbound port 25 receive locally
 while forwarding through a relay. Sending and receiving are independent. See
-[Docker self-hosting](docker/README.md) and [mail provider configuration](docs/CONFIGURATION.md#custom-smtp-recipes).
+[Docker self-hosting](docker/README.md) and the [mail provider guide](docs/MAIL_PROVIDERS.md).
 
 ### Cloudflare Worker
 
@@ -110,6 +110,7 @@ You also need D1 databases, Worker secrets, SES/S3/SNS, and DNS. Follow [Getting
 - [Getting started](docs/GETTING_STARTED.md)
 - [Deployment guide](docs/DEPLOY.md)
 - [AWS SES setup](docs/AWS_SES_SETUP.md)
+- [Mail providers and external gateways](docs/MAIL_PROVIDERS.md)
 - [Configuration](docs/CONFIGURATION.md)
 - [API (addy.io-compatible)](docs/API.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)

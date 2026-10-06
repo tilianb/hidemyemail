@@ -17,7 +17,7 @@ git clone https://github.com/tilianb/hidemyemail.git
 cd hidemyemail/docker
 cp .env.example .env
 ./gen-secrets.sh >> .env       # see below — or generate by hand
-$EDITOR .env                   # set APP_ORIGIN and paste your AWS SES creds
+$EDITOR .env                   # set APP_ORIGIN, secrets, and mail providers
 docker compose up -d
 open http://localhost:8787
 ```
@@ -48,7 +48,8 @@ You need:
 Custom SMTP settings are available in `.env` and the fresh-auth-protected Admin
 Settings panel. Explicit database overrides win over environment values;
 resetting an override restores `.env`. Inbound and outbound credentials are
-independent. See [Configuration](../docs/CONFIGURATION.md#custom-smtp-recipes).
+independent. See the [mail provider guide](../docs/MAIL_PROVIDERS.md) for
+provider SMTP, direct delivery, and external-gateway setup.
 
 ## Simple Docker mail receiving
 
@@ -81,6 +82,29 @@ available and you can configure matching PTR/reverse DNS, SPF, and the DKIM TXT
 records shown in Admin. Remote systems may reject a new or poorly reputed
 server IP, so provider SMTP is the easier default.
 
+For an existing Stalwart, Maddy, or other public MTA, use the private external
+gateway listener instead of this public mail overlay. The gateway must add
+trusted SPF, DMARC, spam, and virus results before authenticated TLS relay. See
+[External SMTP gateway](../docs/MAIL_PROVIDERS.md#external-smtp-gateway) for the
+network layout, exact header contract, certificate mounts, and cutover checks.
+
+### Standalone reference gateway
+
+The supplied [`docker-compose.gateway.yml`](docker-compose.gateway.yml) overlay
+uses `docker.io/tilianb/hidemyemail:${IMAGE_TAG:-latest}` for both app and
+gateway, plus pinned Rspamd and ClamAV images. It publishes only the gateway's
+SMTP port 25, keeps the app handoff private, and uses authenticated,
+certificate-verified STARTTLS between them. The gateway owns a separate
+encrypted queue and rejects mail for domains outside `GATEWAY_DOMAINS`.
+
+**Build from source until a published release includes the gateway entrypoint.**
+Follow the [reference gateway setup](../docs/MAIL_PROVIDERS.md#reference-gateway-compose-stack)
+for environment values, dedicated credentials, certificate creation and
+permissions, source-build commands, DNS, and queue monitoring. Do not combine
+the gateway and built-in mail overlays. This reference has no public STARTTLS,
+DSN/bounce generation, or public per-alias RCPT lookup; the guide explains those
+limits and operator-managed MTA integration.
+
 ---
 
 ## AWS setup (one time)
@@ -112,26 +136,27 @@ docker compose pull
 docker compose up -d
 ```
 
-Docker Hub is the default registry. To use GHCR instead:
+Docker Hub is the default registry. To use GHCR, set
+`IMAGE=ghcr.io/tilianb/hidemyemail` in `.env`, then run:
 
 ```bash
-IMAGE=ghcr.io/tilianb/hidemyemail docker compose pull
-IMAGE=ghcr.io/tilianb/hidemyemail docker compose up -d
+docker compose pull
+docker compose up -d
 ```
 
 ### Pin a release
 
-```bash
-IMAGE_TAG=v1.2.3 docker compose up -d
-```
+Set `IMAGE_TAG=v1.2.3` in `.env` (replace with a validated release), then run
+`docker compose pull && docker compose up -d`. Persist the registry and tag in
+`.env` so later restarts/upgrades do not switch back to Docker Hub `latest`.
 
 ### Build from source
 
-For development or if you don't want to trust GHCR:
+For development, set `PULL_POLICY=never` in `.env` and run:
 
 ```bash
-PULL_POLICY=never docker compose build
-PULL_POLICY=never docker compose up -d
+docker compose build
+docker compose up -d
 ```
 
 ### Tail logs
@@ -192,7 +217,7 @@ single peer address seen by the app instead. Requests from a trusted peer that
 omit the header, contain an invalid address, or append multiple addresses are
 rejected.
 
-**Cloudflare Tunnel** (no inbound port needed):
+**Cloudflare Tunnel** (dashboard/API only, no inbound HTTP port needed):
 
 ```bash
 cloudflared tunnel --url http://localhost:8787
@@ -202,7 +227,9 @@ Configure the tunnel to overwrite `X-HideMyEmail-Client-IP` with the original
 client address and trust only cloudflared's socket peer. Do not forward an
 incoming value of this private header.
 
-Then point your SNS HTTPS subscription at `https://hidemyemail.example.com/api/ses/inbound`.
+For SES reception, point your SNS HTTPS subscription at
+`https://hidemyemail.example.com/api/ses/inbound`. A dashboard tunnel does not
+publish SMTP: built-in mail reception still needs public inbound TCP port 25.
 
 ---
 
@@ -210,20 +237,42 @@ Then point your SNS HTTPS subscription at `https://hidemyemail.example.com/api/s
 
 | Volume | Mount | Contents |
 |--------|-------|----------|
-| `hidemyemail-data` | `/data` | SQLite D1 file (`/data/d1/…`) |
+| `hidemyemail-data` | `/data` | SQLite D1 files, encrypted mail queue (`mail-queue/`), and direct-delivery keys/policies (`mail-keys/`) |
+| `gateway-data` (gateway overlay) | Gateway `/data` | Separate encrypted inbound retry queue; preserve `GATEWAY_QUEUE_KEY` |
+
+Preserve `DESTINATION_ENCRYPTION_KEY` with the backup. The key decrypts saved
+destinations, SMTP credentials, queued MIME, and direct-delivery keys. Do not
+generate a new key when restoring an existing volume.
+
+Compose prefixes volume names with the project name. Discover actual names
+with `docker volume ls` before backing up. Stop mail writers during a consistent
+backup and include both data volumes and their respective keys when using the
+reference gateway. Never run `down -v` as part of an upgrade or backup.
 
 **Backup:**
 
+Use the actual volume name, not the unprefixed Compose key. Include the same
+Compose overlays for stop/start as for initial startup:
+
 ```bash
-docker run --rm -v hidemyemail-data:/data -v "$PWD":/out \
+APP_VOLUME=docker_hidemyemail-data   # replace with your actual volume name
+docker volume inspect "$APP_VOLUME" >/dev/null || exit 1
+docker compose stop
+docker run --rm -v "$APP_VOLUME":/data:ro -v "$PWD":/out \
   alpine tar czf /out/hidemyemail-$(date +%F).tar.gz -C /data .
+docker compose up -d
 ```
 
 **Restore:**
 
+This replaces the selected volume's contents. Confirm the volume name and
+archive, preserve the encryption key, and keep a backup of current data first.
+
 ```bash
+APP_VOLUME=docker_hidemyemail-data   # replace with your actual volume name
+docker volume inspect "$APP_VOLUME" >/dev/null || exit 1
 docker compose down
-docker run --rm -v hidemyemail-data:/data -v "$PWD":/in \
+docker run --rm -v "$APP_VOLUME":/data -v "$PWD":/in:ro \
   alpine sh -c "rm -rf /data/* && tar xzf /in/hidemyemail-YYYY-MM-DD.tar.gz -C /data"
 docker compose up -d
 ```
@@ -283,6 +332,8 @@ the bundle, and the runtime stay in sync.
 | `Failed to fetch S3 object` | IAM key lacks `s3:GetObject` on `S3_INBOUND_BUCKET`. |
 | `SignatureDoesNotMatch` from SES | Container clock drift, or wrong `SES_REGION`. Restart Docker engine. |
 | 502 on `/api/ses/inbound` | SNS subscription not confirmed. Check `docker compose logs app` — worker auto-confirms but prints the URL if it fails. |
+| SMTP listener does not start | Restart after saving mail settings, then check required gateway credentials, TLS PEM mounts, or `MAIL_HOSTNAME`. See [mail troubleshooting](../docs/TROUBLESHOOTING.md#docker-smtp-or-mail-queue-fails). |
+| Built-in mail stays queued | Check Rspamd and ClamAV health and free space in `/data`; ClamAV can take several minutes to download its first signatures. |
 | SPA loads but API returns 404 | Asset router stole the request. Confirm `routerConfig.static_routing.user_worker` in `server.mjs` lists `/api/*`. |
 | `port is already allocated` | Something else on `:8787`. Set `HOST_PORT=18787` in `.env`. |
 | Image pull fails (`denied`) | GHCR package is private. Make it public in your fork's Packages settings, or `docker login ghcr.io` first. |
@@ -291,9 +342,6 @@ the bundle, and the runtime stay in sync.
 
 ## What's not (yet) supported here
 
-- **Cron triggers** — The production worker does not use them. If you add
-  `[triggers].crons` to `wrangler.jsonc`, wire an external cron service
-  to hit `/__scheduled`, or extend `server.mjs` with `mf.dispatchScheduled()`.
 - **Multi-region** — single container, single SQLite file. Run one region or
   replicate at the storage layer (Litestream, etc.).
 - **Cloudflare-style analytics** — Miniflare writes to stdout. Pipe to your

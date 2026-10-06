@@ -70,6 +70,8 @@ COPY --chown=nonroot:nonroot docker/builtin-ingress.mjs ./builtin-ingress.mjs
 COPY --chown=nonroot:nonroot docker/mail-scanner.mjs ./mail-scanner.mjs
 COPY --chown=nonroot:nonroot docker/mail-queue.mjs ./mail-queue.mjs
 COPY --chown=nonroot:nonroot docker/direct-mail.mjs ./direct-mail.mjs
+COPY --chown=nonroot:nonroot docker/gateway.mjs ./gateway.mjs
+COPY --chown=nonroot:nonroot docker/gateway-server.mjs ./gateway-server.mjs
 
 # D1 sqlite file lives here — mount a volume to persist
 COPY --from=runtime-deps --chown=nonroot:nonroot /data /data

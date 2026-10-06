@@ -1,0 +1,84 @@
+# Standalone public SMTP gateway. Combine with docker-compose.yml, NOT the
+# built-in docker-compose.mail.yml. The app's handoff port stays unpublished.
+services:
+  app:
+    environment:
+      MAIL_INBOUND_PROVIDER: gateway
+      SMTP_INBOUND_ENABLED: "true"
+      SMTP_INBOUND_HOST: 0.0.0.0
+      SMTP_INBOUND_PORT: "2525"
+      SMTP_INBOUND_TLS: starttls
+      SMTP_INBOUND_USERNAME: ${SMTP_INBOUND_USERNAME:?Set dedicated gateway credentials}
+      SMTP_INBOUND_PASSWORD: ${SMTP_INBOUND_PASSWORD:?Set dedicated gateway credentials}
+      SMTP_INBOUND_GATEWAY_ID: ${SMTP_INBOUND_GATEWAY_ID:-reference-1}
+      SMTP_INBOUND_TRUSTED_PEERS: ""
+      SMTP_INBOUND_TLS_CERT: /run/secrets/handoff-cert.pem
+      SMTP_INBOUND_TLS_KEY: /run/secrets/handoff-key.pem
+      INBOUND_MX_HOST: ${GATEWAY_HOSTNAME:?Set the public gateway MX hostname}
+    volumes:
+      - ./secrets/handoff-cert.pem:/run/secrets/handoff-cert.pem:ro
+      - ./secrets/handoff-key.pem:/run/secrets/handoff-key.pem:ro
+
+  gateway:
+    # Same versioned image as the app, with a separate gateway entrypoint.
+    image: ${IMAGE:-docker.io/tilianb/hidemyemail}:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    pull_policy: ${PULL_POLICY:-missing}
+    command: ["gateway-server.mjs"]
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    ports:
+      - "${SMTP_LISTEN_IP:-0.0.0.0}:${SMTP_INBOUND_PUBLIC_PORT:-25}:2525"
+    # Do not pass app secrets or outbound-provider credentials to the gateway.
+    environment:
+      GATEWAY_HOSTNAME: ${GATEWAY_HOSTNAME:?Set the public gateway MX hostname}
+      GATEWAY_DOMAINS: ${GATEWAY_DOMAINS:?List exact alias domains}
+      GATEWAY_QUEUE_KEY: ${GATEWAY_QUEUE_KEY:?Set a separate Base64 32-byte queue key}
+      GATEWAY_RELAY_HOST: app
+      GATEWAY_RELAY_PORT: "2525"
+      GATEWAY_RELAY_USERNAME: ${SMTP_INBOUND_USERNAME:?Set dedicated gateway credentials}
+      GATEWAY_RELAY_PASSWORD: ${SMTP_INBOUND_PASSWORD:?Set dedicated gateway credentials}
+      GATEWAY_RELAY_CA: /run/secrets/handoff-cert.pem
+      GATEWAY_MAX_BYTES: ${SMTP_INBOUND_MAX_BYTES:-26214400}
+      MAIL_QUEUE_MAX_BYTES: ${MAIL_QUEUE_MAX_BYTES:-1073741824}
+    volumes:
+      - gateway-data:/data
+      - ./secrets/handoff-cert.pem:/run/secrets/handoff-cert.pem:ro
+    depends_on:
+      - app
+      - rspamd
+      - clamav
+    healthcheck:
+      test: ["CMD", "/nodejs/bin/node", "-e", "const s=require('node:net').connect(2525,'127.0.0.1',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),2000)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  rspamd:
+    image: rspamd/rspamd:4.2.1
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+      - /run/rspamd:size=16m
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - rspamd-data:/var/lib/rspamd
+
+  clamav:
+    image: clamav/clamav:1.5-debian13-slim
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - clamav-data:/var/lib/clamav
+
+volumes:
+  gateway-data:
+  rspamd-data:
+  clamav-data:

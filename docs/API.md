@@ -113,7 +113,8 @@ an account-consistency check: it never replaces session authentication and does
 not affect `/api/v1` API-key authentication. Clients without it remain supported.
 
 `POST /api/admin/users/:id/recovery` requires an admin session and fresh
-authentication. With `sendEmail: true`, successful SES delivery returns
+authentication. With `sendEmail: true`, acceptance by the configured outbound
+provider returns
 `{ "ok": true, "delivery": "email" }`. Missing delivery configuration returns
 an error without replacing existing recovery state. A send failure after
 issuance returns HTTP 200 with `{ "ok": false, "delivery": "manual", "token":

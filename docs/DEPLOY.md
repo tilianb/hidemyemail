@@ -1,6 +1,8 @@
-# Deployment Guide
+# Cloudflare deployment guide
 
-This guide sets up a new HideMyEmail instance with your own domain.
+This guide sets up the Cloudflare Worker with AWS SES. For a Docker deployment
+or non-SES mail transport, use [Docker self-hosting](../docker/README.md) and
+[Mail providers](MAIL_PROVIDERS.md).
 
 ## 1. Create Cloudflare D1 databases
 
@@ -193,19 +195,25 @@ Migrations are branch-aware:
 - `dev` → applies migrations to `hidemyemail-env` (preview env)
 - other branches → migrations skipped
 
-This repo uses **two separate Workers Builds projects**:
-
 ### `hidemyemail` (production, branch `main`)
 
 - Root directory: `worker`
 - Build command: `bash scripts/cf-build.sh`
 - Deploy command: `npx wrangler deploy`
 
-### `hidemyemail-preview` (preview, branch `dev`)
+### Preview builds from short-lived branches
+
+The repository no longer requires a long-lived `dev` branch. The build script
+retains a legacy `dev` migration case; it skips migrations for other branch
+names. Do not use that automatic script alone for a short-lived branch preview.
+Configure a separate preview Workers Builds project with:
 
 - Root directory: repo root
-- Build command: `bash worker/scripts/cf-build.sh`
-- Deploy command: `cd worker && npx wrangler deploy --env preview`
+- Build command: `cd dashboard && npm ci && npm run build && cd ../worker && npm ci`
+- Deploy command: `cd worker && npm run deploy:preview`
+
+The npm preview deploy hook applies preview D1 migrations before deployment.
+Keep the preview project's secrets and database separate from production.
 
 CF Builds injects an internal `CLOUDFLARE_API_TOKEN` for wrangler. Migrations and deploys need no extra secrets.
 

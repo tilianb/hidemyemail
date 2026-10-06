@@ -93,9 +93,13 @@ cd dashboard && npx playwright install chromium && npm run test:browser
 
 # Chromium extension — tests + reproducible dist/ and ZIP
 cd extension && npm ci && npm test && npm run build && npm run zip
+
+# Docker runtime / reference gateway — OpenSSL needed for ephemeral test TLS certs
+cd docker && npm ci && npm test
 ```
 
-Always run all three before committing; CI (`.github/workflows`) runs them too.
+Always run the Worker, dashboard, extension, and Docker checks before committing;
+CI (`.github/workflows`) runs them too.
 There is no lint step beyond tsc. Local dev: `npx wrangler dev` in `worker/`
 plus `npm run dev` in `dashboard/` (Vite proxies to the Worker).
 
@@ -195,6 +199,10 @@ CI: `.github/workflows/docs.yml` builds and deploys to GitHub Pages on push to
   is fsynced and atomically renamed. Direct-to-MX delivery signs finalized MIME,
   rejects private/reserved DNS targets, and keeps temporary or uncertain sends
   queued; never expose queued MIME, envelopes, or DKIM private keys in status.
+- The standalone reference gateway shares the built-in queue/scanner modules,
+  uses a separate `GATEWAY_QUEUE_KEY`, strips sender control headers, and relays
+  only completed spam/virus scans with a stable durable queue ID. Its app
+  handoff requires authenticated, verified STARTTLS and stays unpublished.
 - Docker trusts `X-HideMyEmail-Client-IP` only from an exact socket peer listed
   in `TRUSTED_PROXY_IPS`; the proxy must overwrite, never append, that header.
 - State-changing public endpoints must be POST (e.g. unsubscribe: GET only

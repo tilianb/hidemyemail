@@ -6,6 +6,7 @@ dist/
 .env.*
 !.env.template
 !.env.example
+/docker/secrets/
 *.log
 .DS_Store
 TODO.md

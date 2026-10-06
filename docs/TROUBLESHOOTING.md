@@ -78,6 +78,56 @@ Worker memory and attachment risk.
 - Confirm AWS credentials allow `ses:SendEmail` and `ses:SendRawEmail`.
 - Confirm `SES_REGION` is the same region as the identity.
 
+## Provider SMTP outbound fails
+
+- Confirm `MAIL_OUTBOUND_PROVIDER=smtp`. Restart after an Admin change; use
+  `docker compose up -d --force-recreate app` after editing `.env`.
+- Use `starttls` on port 587 or `implicit` on port 465. HideMyEmail rejects a
+  missing STARTTLS upgrade and invalid certificates.
+- Set both SMTP username and password, or leave both empty. Verify that the
+  supplier accepts the alias domain and From address.
+- If the host setting is an IP address, set `SMTP_OUTBOUND_TLS_SERVERNAME` to
+  the certificate's DNS name.
+- Confirm the supplier's SPF include and DKIM records. SMTP acceptance does not
+  guarantee inbox delivery, and non-SES providers do not feed bounce or
+  complaint events back to HideMyEmail.
+
+## Docker SMTP or mail queue fails
+
+- Run `docker compose logs -f app`. A configured listener logs `SMTP ingress
+  listening`; startup errors usually identify a missing hostname, credential,
+  TLS file, or provider binding.
+- Restart the app after mail settings change. The dashboard shows configured
+  state, while the process keeps its startup configuration until restart.
+- Built-in reception requires the mail Compose overlay, inbound TCP port 25,
+  valid MX/A/AAAA records, and healthy Rspamd and ClamAV containers. Check
+  `docker compose -f docker-compose.yml -f docker-compose.mail.yml ps`.
+- Gateway reception requires `MAIL_INBOUND_PROVIDER=gateway` and
+  `SMTP_INBOUND_ENABLED=true`. A non-loopback bind also requires readable PEM
+  paths mounted in the app container.
+- A gateway `530` means STARTTLS is required, `535` means authentication failed,
+  `550` means the recipient or trusted verdict metadata was rejected, and `451`
+  means the gateway should retain the message and retry.
+- The gateway must add exactly one valid `X-HideMyEmail-Gateway-Result` header.
+  See [Mail providers](MAIL_PROVIDERS.md#2-add-the-gateway-verdict-header).
+- For the reference stack, include `-f docker-compose.yml -f docker-compose.gateway.yml`
+  in Compose commands. Check `logs gateway rspamd clamav`; the gateway reports
+  its own queue counts, which do not appear in the app dashboard. A healthy
+  listener does not prove scanner readiness.
+- `Cannot find module ...gateway-server.mjs` means the image predates the
+  reference gateway. Build this branch until a release includes the entrypoint.
+- Reference handoff TLS errors: verify certificate SAN `DNS:app`, expiration,
+  certificate mounts on both services, and private-key readability by UID
+  65532. Recreate both services after replacing mounted certificate files.
+- Unknown aliases within an allowed domain become retained failed items after
+  private handoff rejection. The reference gateway sends no bounce. Do not
+  expect retries of permanent failures; monitor failed counts and queue capacity.
+- Check free space in the `/data` volume when the built-in/direct queue stops
+  accepting mail. `MAIL_QUEUE_MAX_BYTES` defaults to 1 GiB.
+- Direct delivery requires outbound TCP port 25, matching forward and reverse
+  DNS, SPF, and every DKIM record shown in Admin. Provider SMTP is the fallback
+  when the host blocks port 25 or the IP lacks mail reputation.
+
 ## Replies are rejected
 
 Replies are intentionally strict to prevent open relay abuse.
@@ -85,7 +135,9 @@ Replies are intentionally strict to prevent open relay abuse.
 Check:
 
 - The replying mailbox is a verified destination for that user.
-- SES verdicts include SPF or DMARC `PASS`.
+- The inbound provider reports SPF `PASS` for the verified envelope owner or
+  DMARC `PASS` for the verified header-From owner.
+- The external recipient has sent prior inbound mail through that alias.
 - The reverse alias address was not altered by the mail client.
 - The alias still exists and is active.
 
@@ -96,7 +148,8 @@ Check:
 - The domain exists in the dashboard.
 - The domain is active and verified.
 - `catch_all_auto_create` is enabled.
-- SES receipt rule and DNS MX route mail to the right Worker.
+- The configured inbound provider and DNS MX route mail to the right SES rule,
+  built-in listener, or external gateway.
 
 ## Domain cannot become main global domain
 

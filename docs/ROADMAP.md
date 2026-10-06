@@ -45,17 +45,25 @@ removed when shipped; see CHANGELOG.md for what already landed.
 
 ## Mail backends & provider flexibility
 
-Today inbound is hard-wired to **AWS SES → S3 → SNS → Worker**
-(`worker/src/lib/{ses,s3,sns}.ts`, `worker/src/email/inbound.ts`) and outbound
-to SES **`SendRawEmail`**. Introduce a small provider abstraction so operators
-can pick a backend that fits their stack and budget, then ship alternatives.
-SES stays the default throughout — nothing existing breaks. Listed in priority
-order (the abstraction is the enabler; later items get cheaper once it lands):
+AWS SES remains the default. Docker also supports built-in or external-gateway
+reception and provider SMTP or direct-to-MX sending. Cloudflare-hosted
+alternatives still need Worker-native adapters. Remaining work is listed in
+priority order:
 
 - [x] **(P1) Independent mail transport boundaries.** SES remains the default;
   Docker ships generic custom SMTP outbound plus protected receive-only SMTP
   ingress for a trusted queueing/scanning MTA. Outbound and inbound selections
   are independent and support env defaults plus encrypted admin overrides.
+- [ ] **(P2) Dedicated gateway Docker image.** Publish
+  `tilianb/hidemyemail-gateway` to Docker Hub and GHCR with matching app release
+  tags and native amd64/arm64 builds. Include only the SMTP receiver, encrypted
+  retry queue, authentication checks, and private relay dependencies; exclude
+  the dashboard, Worker, and Miniflare. Give it a gateway default entrypoint
+  and update the reference Compose stack and setup docs. Keep pinned Rspamd and
+  ClamAV as separate services rather than adding multi-process supervision to
+  the gateway image. Verify queue recovery, scanner failures, and authenticated,
+  certificate-verified handoff before publication. The current reference stack
+  still runs its gateway entrypoint from the app image.
 - [ ] **(P1–P2) Inbound via Cloudflare Email Routing (Email Workers)** — the
   **recommended first alternative to document**. Receive mail directly in the
   Worker — no SES receipt rules, no S3, no SNS. The biggest setup reduction for
@@ -69,15 +77,11 @@ order (the abstraction is the enabler; later items get cheaper once it lands):
   not claim supplier webhook parity.
 - [ ] **(P3) Inbound via other providers' webhooks** (Resend inbound, Mailgun
   routes, Postmark inbound) for operators already standardised on them.
-- [ ] **(P3, advanced) Full self-hosted mail server.** A "no third party at all"
-  path using a modern single-binary stack — **Stalwart** or **Maddy** (preferred
-  over Postfix + Dovecot) — driven through the same provider abstraction.
-  Heaviest to operate and counter to the serverless thesis, so it stays an
-  advanced opt-in rather than a recommended default.
-
-> Open questions (happy to adjust): keep **SES as the shipped default**? Make
-> **Resend** the first documented alternative? And is the **full mail-server**
-> path worth tracking at all, or explicitly out of scope for this project?
+- [x] **(P3, advanced) Full self-hosted mail path.** Docker can receive with its
+  built-in scanner stack or consume trusted verdicts from **Stalwart**, **Maddy**,
+  or another external gateway, then deliver directly to recipient MX servers.
+  This remains an advanced opt-in because operators own port 25, DNS, scanning,
+  queue health, IP reputation, and gateway verdict integration.
 
 ## P2 — Next
 

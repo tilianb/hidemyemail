@@ -21,8 +21,9 @@ const RAW = "https://raw.githubusercontent.com/tilianb/hidemyemail/main";
 const PAGES = [
   { src: "README.md", slug: "index", title: "HideMyEmail" },
   { src: "docs/GETTING_STARTED.md", slug: "getting-started", title: "Getting started" },
-  { src: "docs/DEPLOY.md", slug: "deploy", title: "Deployment guide" },
+  { src: "docs/DEPLOY.md", slug: "deploy", title: "Cloudflare deployment" },
   { src: "docs/AWS_SES_SETUP.md", slug: "aws-ses-setup", title: "AWS SES setup" },
+  { src: "docs/MAIL_PROVIDERS.md", slug: "mail-providers", title: "Mail providers" },
   { src: "docs/CONFIGURATION.md", slug: "configuration", title: "Configuration" },
   { src: "docs/API.md", slug: "api", title: "API" },
   { src: "docs/TROUBLESHOOTING.md", slug: "troubleshooting", title: "Troubleshooting" },

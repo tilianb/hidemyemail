@@ -2,6 +2,16 @@
 
 ## What Has Worked
 
+**2026-10-06 — Reference gateway handoff**
+- Observation: smtp-server copies callbacks onto the server instance during construction; replacing `server.options.onMailFrom` later leaves the socket handler unchanged. Gateway and app queues also need independent keys and backup ownership.
+- Action: Verify admission through real SMTP sockets, change the live handler when adapting the shared ingress, and document the separate gateway volume/key plus verified private TLS handoff.
+- Confidence: high
+
+**2026-10-06 — Mail provider documentation**
+- Observation: External-gateway reception requires both provider selection and the separate listener-enable switch, while its TLS files and trusted handoff network live outside the base Compose stack.
+- Action: Document provider choice, listener activation, private network/TLS mounts, verdict metadata, and queue retry checks together; keep the sample environment executable rather than listing isolated variables.
+- Confidence: high
+
 **2026-10-03 — Docker mail port independence**
 - Observation: Providers often allow inbound TCP 25 while blocking outbound TCP 25, so one SMTP-port switch cannot represent the deployment capability.
 - Action: Configure receiving and sending independently; allow built-in inbound 25 with SES/provider SMTP on 587/465, and keep direct outbound 25 optional with a durable encrypted queue.
@@ -73,6 +83,11 @@
 - Confidence: high
 
 ## Patterns and Preferences
+
+**2026-10-06 — Gateway image packaging**
+- Observation: The owner chose to track a dedicated gateway image as roadmap work, with Rspamd and ClamAV kept as separate Compose services rather than bundled processes.
+- Action: Keep the current app-image gateway entrypoint until that work ships; the future image should exclude dashboard/Worker/Miniflare dependencies and follow app release tags and multi-architecture publication.
+- Confidence: high
 
 **2026-10-06 — External review integrations**
 - Observation: The external PR review app was removed, leaving its repository configuration and review guidance unused.

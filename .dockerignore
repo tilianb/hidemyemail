@@ -10,6 +10,8 @@ worker/.dev.vars
 **/.env
 **/.env.*
 !**/.env.example
+docker/secrets
+.amp/in
 .antigravitycli
 .github
 docs

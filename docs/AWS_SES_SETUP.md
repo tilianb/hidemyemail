@@ -1,7 +1,11 @@
 # AWS SES Setup
 
-HideMyEmail uses AWS SES for both inbound receiving and outbound sending.
+HideMyEmail uses AWS SES by default for inbound receiving and outbound sending.
 Inbound mail is stored in S3, announced through SNS, then processed by the Worker.
+
+For Docker SMTP alternatives, follow [Mail providers](MAIL_PROVIDERS.md).
+If you use SES only for sending, skip the inbound S3, receipt-rule, and inbound
+SNS setup; retain SES identity verification, outbound feedback, and sender DNS.
 
 ## Variables you need
 
